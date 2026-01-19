@@ -150,7 +150,7 @@
       "Estimate word count and reading time for metadata",
       "Write tests with prose vs code samples"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

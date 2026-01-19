@@ -36,3 +36,6 @@ Date: 2026-01-19
 - Marked PRD item "Build file path detector" as complete
 - Added CodeDetector (language identification heuristics + fenced-code-block support) in PastaDetectors with tests
 - Marked PRD item "Build code snippet detector with language identification" as complete
+
+- Added ProseDetector (prose vs code/structured heuristics, word count + reading time) in PastaDetectors with tests
+- Marked PRD item "Build prose/natural text detector" as complete
