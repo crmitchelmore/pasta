@@ -5,3 +5,8 @@ Date: 2026-01-19
 
 ---
 
+## 2026-01-19
+- Implemented core `ClipboardEntry` model (with `ContentType` + `CodeLanguage`) in PastaCore
+- Added Codable round-trip unit test for `ClipboardEntry`
+- Marked PRD item "Create core data model for clipboard entries" as complete
+

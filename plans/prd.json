@@ -21,7 +21,7 @@
 			"Make ClipboardEntry Codable and conform to GRDB protocols",
 			"Add tests for model serialization"
 		],
-		"passes": false
+		"passes": true
 	},
 	{
 		"category": "setup",
