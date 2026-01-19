@@ -73,3 +73,8 @@ Date: 2026-01-19
 - Added unit test verifying hotkey registration (key/modifiers) and trigger callback
 - Marked PRD item "Implement global hotkey (Control+Command+C)" as complete
 
+- Implemented SwiftUI menu bar app entry point using MenuBarExtra (window-style popover)
+- Configured app as menu-bar-only (no Dock icon) and hooked hotkey to activate the app
+- Reused existing menu bar icon asset (MenuBarIcon)
+- Marked PRD item "Create main app window with menu bar presence" as complete
+

@@ -252,7 +252,7 @@
       "Click outside dismisses popover",
       "Verify app launches and shows menu bar icon"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "ui",
