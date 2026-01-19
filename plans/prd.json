@@ -324,7 +324,7 @@
       "Highlight active filter",
       "Verify filtering works correctly"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "ui",

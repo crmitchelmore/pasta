@@ -90,3 +90,8 @@ Date: 2026-01-19
 - Implemented keyboard navigation in the menu bar popover (↑/↓ selection, Enter paste, 1-9 quick paste, Esc close, Tab focus, Cmd+Backspace delete)
 - Marked PRD item "Implement keyboard navigation" as complete
 
+
+- Added PastaUI `FilterSidebarView` showing content-type counts with an All option
+- Wired sidebar into menu bar popover; selecting URL type enables domain sub-filtering
+- Verified filtering works with and without search
+- Marked PRD item "Create content type filter sidebar" as complete

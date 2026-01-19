@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 import PastaCore
+import PastaDetectors
 import PastaUI
 
 @main
@@ -41,6 +42,7 @@ private struct PopoverRootView: View {
     @State private var searchQuery: String = ""
     @State private var isFuzzySearch: Bool = false
     @State private var contentTypeFilter: ContentType? = nil
+    @State private var urlDomainFilter: String? = nil
 
     @State private var selectedEntryID: UUID? = nil
 
@@ -55,11 +57,22 @@ private struct PopoverRootView: View {
     private var displayedEntries: [ClipboardEntry] {
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if trimmed.isEmpty {
+        func applyFilters(_ input: [ClipboardEntry]) -> [ClipboardEntry] {
+            var out = input
             if let contentTypeFilter {
-                return entries.filter { $0.contentType == contentTypeFilter }
+                out = out.filter { $0.contentType == contentTypeFilter }
             }
-            return entries
+            if contentTypeFilter == .url, let urlDomainFilter {
+                let detector = URLDetector()
+                out = out.filter { entry in
+                    Set(detector.detect(in: entry.content).map(\.domain)).contains(urlDomainFilter)
+                }
+            }
+            return out
+        }
+
+        if trimmed.isEmpty {
+            return applyFilters(entries)
         }
 
         let searchService = SearchService(database: database)
@@ -70,7 +83,7 @@ private struct PopoverRootView: View {
                 contentType: contentTypeFilter,
                 limit: 200
             )
-            return matches.map { $0.entry }
+            return applyFilters(matches.map { $0.entry })
         } catch {
             return []
         }
@@ -96,6 +109,13 @@ private struct PopoverRootView: View {
             )
 
             HStack(alignment: .top, spacing: 12) {
+                FilterSidebarView(
+                    entries: entries,
+                    selectedContentType: $contentTypeFilter,
+                    selectedURLDomain: $urlDomainFilter
+                )
+                .frame(width: 180)
+
                 ClipboardListView(entries: displayedEntries, selectedEntryID: $selectedEntryID)
                     .frame(width: 320)
                     .focusable()
@@ -134,6 +154,11 @@ private struct PopoverRootView: View {
             }
             DispatchQueue.main.async {
                 searchFocused = true
+            }
+        }
+        .onChange(of: contentTypeFilter) { _, newValue in
+            if newValue != .url {
+                urlDomainFilter = nil
             }
         }
         .onChange(of: displayedEntries.map(\.id)) { _, ids in
