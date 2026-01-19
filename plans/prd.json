@@ -163,7 +163,7 @@
       "Handle nested encodings",
       "Write tests with encoded/decoded pairs"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
