@@ -31,3 +31,6 @@ Date: 2026-01-19
 - Added URLDetector (http/https/ftp) with domain categorization and URL-encoded input handling
 - Added unit tests for URLDetector including dedupe and percent-encoded URL parsing
 - Marked PRD item "Build URL detector with site categorization" as complete
+- Added FilePathDetector (Unix + Windows path detection, tilde expansion, existence checks)
+- Added unit tests for FilePathDetector (including real temp file existence)
+- Marked PRD item "Build file path detector" as complete

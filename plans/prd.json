@@ -126,7 +126,7 @@
       "Extract filename and extension for metadata",
       "Write tests with various path formats"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
