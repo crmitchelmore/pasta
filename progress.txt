@@ -28,3 +28,6 @@ Date: 2026-01-19
 - Marked PRD item "Build JWT token detector" as complete
 - Added EnvVarDetector (.env/export parsing, block vs single) in PastaDetectors with tests
 - Marked PRD item "Build environment variable detector" as complete
+- Added URLDetector (http/https/ftp) with domain categorization and URL-encoded input handling
+- Added unit tests for URLDetector including dedupe and percent-encoded URL parsing
+- Marked PRD item "Build URL detector with site categorization" as complete
