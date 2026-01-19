@@ -368,7 +368,7 @@
       "Only show on first launch or if permissions revoked",
       "Verify onboarding flow completes successfully"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "ui",

@@ -1,0 +1,153 @@
+import AppKit
+import PastaCore
+import SwiftUI
+
+public struct OnboardingView: View {
+    public enum Completion {
+        case dismissed
+        case completed
+    }
+
+    private enum Step: Int {
+        case welcome
+        case accessibility
+        case done
+    }
+
+    @State private var step: Step = .welcome
+    @State private var isTrusted: Bool = AccessibilityPermission.isTrusted()
+
+    private let onComplete: (Completion) -> Void
+
+    public init(onComplete: @escaping (Completion) -> Void) {
+        self.onComplete = onComplete
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            header
+
+            Group {
+                switch step {
+                case .welcome:
+                    welcome
+                case .accessibility:
+                    accessibility
+                case .done:
+                    done
+                }
+            }
+
+            Spacer()
+
+            footer
+        }
+        .padding(20)
+        .frame(width: 520, height: 340)
+        .onAppear {
+            refreshTrust()
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            Text("Welcome to Pasta")
+                .font(.title2.bold())
+            Spacer()
+            Button("Skip") {
+                onComplete(.dismissed)
+            }
+            .keyboardShortcut(.cancelAction)
+        }
+    }
+
+    private var welcome: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Pasta keeps a searchable history of what you copy.")
+            Text("To enable quick paste, Pasta needs Accessibility permission to simulate ⌘V.")
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button("Continue") {
+                    step = .accessibility
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    private var accessibility: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Grant Accessibility permission")
+                .font(.headline)
+
+            Text("Open System Settings → Privacy & Security → Accessibility, then enable Pasta.")
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                Button("Open Accessibility Settings") {
+                    openAccessibilitySettings()
+                }
+
+                Button("Request Prompt") {
+                    AccessibilityPermission.requestPrompt()
+                }
+                .help("Shows the system prompt (if available).")
+
+                Button("Check Again") {
+                    refreshTrust()
+                    if isTrusted {
+                        step = .done
+                    }
+                }
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: isTrusted ? "checkmark.circle.fill" : "xmark.circle")
+                    .foregroundStyle(isTrusted ? .green : .secondary)
+
+                Text(isTrusted ? "Accessibility permission granted." : "Not granted yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var done: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("You're all set")
+                .font(.headline)
+
+            Text("Use ⌃⌘C to open Pasta, search your clipboard history, and press Enter to paste.")
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Spacer()
+                Button("Finish") {
+                    onComplete(.completed)
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack {
+            Text("Step \(step.rawValue + 1) of 3")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+    }
+
+    private func refreshTrust() {
+        isTrusted = AccessibilityPermission.isTrusted()
+    }
+
+    private func openAccessibilitySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}

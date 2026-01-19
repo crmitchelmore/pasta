@@ -35,7 +35,13 @@ struct PastaApp: App {
 }
 
 private struct PopoverRootView: View {
+    private enum Defaults {
+        static let didCompleteOnboarding = "pasta.onboarding.completed"
+    }
+
     @Environment(\.dismiss) private var dismiss
+
+    @AppStorage(Defaults.didCompleteOnboarding) private var didCompleteOnboarding: Bool = false
 
     @State private var entries: [ClipboardEntry] = []
 
@@ -49,6 +55,8 @@ private struct PopoverRootView: View {
     @State private var isShowingDeleteConfirmation: Bool = false
     @State private var isShowingBulkDelete: Bool = false
     @State private var lastBulkDeleteSummary: String? = nil
+
+    @State private var isShowingOnboarding: Bool = false
 
     @FocusState private var searchFocused: Bool
     @FocusState private var listFocused: Bool
@@ -175,6 +183,8 @@ private struct PopoverRootView: View {
             DispatchQueue.main.async {
                 searchFocused = true
             }
+
+            isShowingOnboarding = !didCompleteOnboarding || !AccessibilityPermission.isTrusted()
         }
         .onChange(of: contentTypeFilter) { _, newValue in
             if newValue != .url {
@@ -207,6 +217,17 @@ private struct PopoverRootView: View {
                     refreshEntries()
                 } catch {
                     lastBulkDeleteSummary = "Delete failed"
+                }
+            }
+        }
+        .sheet(isPresented: $isShowingOnboarding) {
+            OnboardingView { completion in
+                switch completion {
+                case .dismissed:
+                    isShowingOnboarding = false
+                case .completed:
+                    didCompleteOnboarding = true
+                    isShowingOnboarding = false
                 }
             }
         }

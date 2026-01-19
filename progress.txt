@@ -110,3 +110,9 @@ Date: 2026-01-19
 - Wired PastaApp paste action to use PasteService
 - Added unit tests for PasteService (text, file URLs, image TIFF, missing image data)
 - Marked PRD item "Implement paste action (copy to clipboard and trigger paste)" as complete
+
+- Added PastaUI `OnboardingView` (welcome → accessibility instructions → completion)
+- Added PastaCore `AccessibilityPermission` helper to check/prompt Accessibility trust
+- Wired onboarding to present on first launch and if permissions are revoked
+- Ran `swift build` + `swift test`
+- Marked PRD item "Create onboarding flow for permissions" as complete
