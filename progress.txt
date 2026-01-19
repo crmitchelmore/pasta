@@ -13,4 +13,8 @@ Date: 2026-01-19
 - Added in-memory database factory for tests
 - Added unit tests for DatabaseManager CRUD and ordering
 - Marked PRD item "Set up SQLite database with GRDB for local storage" as complete
+- Added `ImageStorageManager` for disk-backed clipboard image storage
+- Implemented save/load/delete + total storage bytes API
+- Added unit tests for image storage manager
+- Marked PRD item "Create image storage manager for clipboard images" as complete
 

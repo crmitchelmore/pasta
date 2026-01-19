@@ -50,7 +50,7 @@
 			"Track total storage size and expose via API",
 			"Write tests for image storage"
 		],
-		"passes": false
+		"passes": true
 	},
 	{
 		"category": "functional",
