@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 import PastaCore
+import PastaUI
 
 @main
 struct PastaApp: App {
@@ -35,27 +36,46 @@ struct PastaApp: App {
 private struct PopoverRootView: View {
     @Environment(\.dismiss) private var dismiss
 
+    @State private var entries: [ClipboardEntry] = []
+
+    private let database: DatabaseManager = {
+        // UI fallback if the on-disk DB can't be created for any reason.
+        (try? DatabaseManager()) ?? (try! DatabaseManager.inMemory())
+    }()
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Pasta")
-                .font(.headline)
+            HStack {
+                Text("Pasta")
+                    .font(.headline)
 
-            Text("Clipboard history app (UI in progress).")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                Spacer()
+
+                Button("Close") { dismiss() }
+            }
+
+            ClipboardListView(entries: entries)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
 
-            Button("Close") {
-                dismiss()
-            }
+            HStack {
+                Button("Refresh") {
+                    entries = (try? database.fetchRecent(limit: 1_000)) ?? []
+                }
 
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
+                Spacer()
+
+                Button("Quit") {
+                    NSApplication.shared.terminate(nil)
+                }
+                .keyboardShortcut("q")
             }
-            .keyboardShortcut("q")
         }
         .padding(16)
-        .frame(width: 360)
+        .frame(width: 520, height: 640)
+        .onAppear {
+            entries = (try? database.fetchRecent(limit: 1_000)) ?? []
+        }
     }
 }

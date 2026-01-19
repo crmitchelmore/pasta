@@ -78,3 +78,7 @@ Date: 2026-01-19
 - Reused existing menu bar icon asset (MenuBarIcon)
 - Marked PRD item "Create main app window with menu bar presence" as complete
 
+- Implemented PastaUI `ClipboardListView` (LazyVStack-based) showing reverse-chronological entries with type icon/badge, relative timestamp, copy count, and large-entry indicator
+- Wired the list into the menu bar popover as a basic history view (with a manual Refresh)
+- Marked PRD item "Create clipboard history list view" as complete
+

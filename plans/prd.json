@@ -266,7 +266,7 @@
       "Highlight large entries (>10KB) with indicator",
       "Verify scrolling is smooth with 1000+ entries"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "ui",
