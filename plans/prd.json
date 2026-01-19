@@ -239,7 +239,7 @@
       "Handle permission denied gracefully",
       "Write tests for hotkey registration"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "ui",

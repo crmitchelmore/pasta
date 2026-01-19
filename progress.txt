@@ -67,3 +67,9 @@ Date: 2026-01-19
 - Extended DeleteService with deleteRecent(minutes:now:) to clean up associated image files
 - Added unit tests for time-based deletion and image cleanup
 - Marked PRD item "Implement delete entries for last X minutes" as complete
+
+- Added PastaCore HotkeyManager (HotKey-based) registering Control+Command+C and executing an onTrigger closure
+- Wired PastaAppMain to initialize HotkeyManager and keep it alive for app lifetime
+- Added unit test verifying hotkey registration (key/modifiers) and trigger callback
+- Marked PRD item "Implement global hotkey (Control+Command+C)" as complete
+

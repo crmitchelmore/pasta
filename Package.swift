@@ -40,7 +40,8 @@ let package = Package(
             name: "PastaCore",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
-                .product(name: "Fuse", package: "fuse-swift")
+                .product(name: "Fuse", package: "fuse-swift"),
+                .product(name: "HotKey", package: "HotKey")
             ]
         ),
         
@@ -65,7 +66,10 @@ let package = Package(
         // Tests
         .testTarget(
             name: "PastaCoreTests",
-            dependencies: ["PastaCore"]
+            dependencies: [
+                "PastaCore",
+                .product(name: "HotKey", package: "HotKey")
+            ]
         ),
         .testTarget(
             name: "PastaDetectorsTests",
