@@ -406,7 +406,7 @@
       "Persist preference in UserDefaults",
       "Verify app launches at system startup when enabled"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

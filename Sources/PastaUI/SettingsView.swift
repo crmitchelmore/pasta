@@ -49,7 +49,16 @@ public struct SettingsView: View {
 
             Section("Startup") {
                 Toggle("Launch at login", isOn: $launchAtLogin)
-                    .help("Implemented in a later PRD item")
+                    .onChange(of: launchAtLogin) { _, newValue in
+                        do {
+                            let manager = LaunchAtLoginManager()
+                            launchAtLogin = try manager.setEnabled(newValue)
+                        } catch {
+                            // Keep UI responsive; reflect actual state if the operation failed.
+                            launchAtLogin = LaunchAtLoginManager().isEnabled
+                        }
+                    }
+                    .help("Appears in System Settings → General → Login Items")
             }
 
             Section("Storage") {
@@ -115,6 +124,7 @@ public struct SettingsView: View {
         .frame(width: 560)
         .onAppear {
             refreshStorageSummary()
+            launchAtLogin = LaunchAtLoginManager().isEnabled
         }
         .confirmationDialog(
             "Clear all clipboard history?",

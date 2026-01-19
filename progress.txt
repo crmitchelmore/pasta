@@ -122,3 +122,9 @@ Date: 2026-01-19
 - Verified AppIcon + MenuBarIcon assets in Assets.xcassets
 - Ran `swift build` + `swift test`
 - Marked PRD item "Design and implement app icon and visual theme" as complete
+
+- Implemented launch-at-login using ServiceManagement `SMAppService.mainApp` (register/unregister)
+- Wired Settings toggle to apply immediately and reflect actual Login Item status on open
+- Added PastaCore `LaunchAtLoginManager` wrapper + unit tests
+- Ran `swift build` + `swift test`
+- Marked PRD item "Implement launch at login" as complete
