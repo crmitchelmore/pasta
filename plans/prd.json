@@ -213,7 +213,7 @@
       "Create DeleteService in PastaCore",
       "Write tests for deletion including image cleanup"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

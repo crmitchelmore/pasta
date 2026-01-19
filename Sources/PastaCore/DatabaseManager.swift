@@ -169,6 +169,14 @@ public final class DatabaseManager {
         }
     }
 
+    public func fetch(id: UUID) throws -> ClipboardEntry? {
+        try dbQueue.read { db in
+            try ClipboardEntry
+                .filter(Column("id") == id.uuidString)
+                .fetchOne(db)
+        }
+    }
+
     @discardableResult
     public func delete(id: UUID) throws -> Bool {
         try dbQueue.write { db in
