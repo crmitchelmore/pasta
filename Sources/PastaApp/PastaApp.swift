@@ -300,49 +300,10 @@ private struct PopoverRootView: View {
         guard let selectedEntryID,
               let entry = displayedEntries.first(where: { $0.id == selectedEntryID }) else { return }
 
-        copyToPasteboard(entry)
-        simulateCommandV()
+        _ = PasteService().paste(entry)
 
         dismiss()
         NSApplication.shared.hide(nil)
-    }
-
-    private func copyToPasteboard(_ entry: ClipboardEntry) {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-
-        switch entry.contentType {
-        case .image:
-            if let data = entry.rawData {
-                pb.setData(data, forType: .tiff)
-            }
-
-        case .filePath:
-            let paths = entry.content
-                .split(separator: "\n")
-                .map(String.init)
-                .filter { !$0.isEmpty }
-            let urls = paths.map { URL(fileURLWithPath: $0) }
-            pb.writeObjects(urls as [NSURL])
-
-        default:
-            pb.setString(entry.content, forType: .string)
-        }
-    }
-
-    private func simulateCommandV() {
-        // Best-effort. Requires Accessibility permissions.
-        let source = CGEventSource(stateID: .combinedSessionState)
-        let keyCodeV: CGKeyCode = 9
-
-        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCodeV, keyDown: true)
-        keyDown?.flags = .maskCommand
-
-        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCodeV, keyDown: false)
-        keyUp?.flags = .maskCommand
-
-        keyDown?.post(tap: .cghidEventTap)
-        keyUp?.post(tap: .cghidEventTap)
     }
 
     private func deleteSelectedEntry() {

@@ -105,3 +105,8 @@ Date: 2026-01-19
 - Hotkey now reloads automatically when preferences change
 - Added DatabaseManager/DeleteService "delete all" APIs and tests to support "Clear all history"
 - Marked PRD item "Create settings/preferences view" as complete
+
+- Added PastaCore PasteService (pasteboard write + Cmd+V simulation) with test doubles
+- Wired PastaApp paste action to use PasteService
+- Added unit tests for PasteService (text, file URLs, image TIFF, missing image data)
+- Marked PRD item "Implement paste action (copy to clipboard and trigger paste)" as complete
