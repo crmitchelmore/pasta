@@ -99,3 +99,9 @@ Date: 2026-01-19
 - Added UI delete confirmation dialogs: `DeleteConfirmationView` (single entry) and `BulkDeleteView` (delete last X minutes)
 - Wired delete flows into the menu bar popover (toolbar buttons + Cmd+Backspace now prompts)
 - Marked PRD item "Create delete confirmation dialogs" as complete
+
+- Added PastaUI `SettingsView` and wired it into the app Settings scene
+- Added UserDefaults-backed preferences: hotkey key/modifiers, launch-at-login toggle (UI-only), max entries (UI-only), excluded apps list
+- Hotkey now reloads automatically when preferences change
+- Added DatabaseManager/DeleteService "delete all" APIs and tests to support "Clear all history"
+- Marked PRD item "Create settings/preferences view" as complete

@@ -353,7 +353,7 @@
       "Excluded apps list",
       "Verify all settings persist and apply"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "ui",

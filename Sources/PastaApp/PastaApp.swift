@@ -8,16 +8,16 @@ import PastaUI
 @main
 struct PastaApp: App {
     // Keep this alive for the lifetime of the app.
-    private let hotkeyManager: HotkeyManager
+    @StateObject private var hotkeyManager: HotkeyManager
 
     init() {
         // Menu-bar-only experience (no Dock icon).
         NSApplication.shared.setActivationPolicy(.accessory)
 
-        hotkeyManager = HotkeyManager {
+        _hotkeyManager = StateObject(wrappedValue: HotkeyManager {
             // Best-effort: make the app active so the user can interact with the menu bar popover.
             NSApplication.shared.activate(ignoringOtherApps: true)
-        }
+        })
     }
 
     var body: some Scene {
@@ -29,7 +29,7 @@ struct PastaApp: App {
         .menuBarExtraStyle(.window)
 
         Settings {
-            EmptyView()
+            SettingsView()
         }
     }
 }

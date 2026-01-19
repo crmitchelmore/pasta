@@ -33,4 +33,16 @@ public final class DeleteService {
 
         return result.count
     }
+
+    /// Deletes all entries and cleans up any associated image files.
+    @discardableResult
+    public func deleteAll() throws -> Int {
+        let result = try database.deleteAll()
+
+        for imagePath in result.imagePaths {
+            try imageStorage.deleteImage(path: imagePath)
+        }
+
+        return result.count
+    }
 }

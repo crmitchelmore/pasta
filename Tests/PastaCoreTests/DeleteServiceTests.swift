@@ -72,4 +72,27 @@ final class DeleteServiceTests: XCTestCase {
         XCTAssertEqual(try db.fetchAll().count, 1)
         XCTAssertEqual(try db.fetchAll().first?.content, "old")
     }
+
+    func testDeleteAllRemovesEntriesAndCleansUpImages() throws {
+        let db = try DatabaseManager.inMemory()
+
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot)
+
+        let imageData = Data([0x01, 0x02, 0x03])
+        let imagePath = try imageStorage.saveImage(imageData)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: imagePath))
+
+        try db.insert(ClipboardEntry(content: "hello", contentType: .text))
+        try db.insert(ClipboardEntry(content: "", contentType: .image, rawData: imageData, imagePath: imagePath))
+
+        let service = DeleteService(database: db, imageStorage: imageStorage)
+        let deletedCount = try service.deleteAll()
+        XCTAssertEqual(deletedCount, 2)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: imagePath))
+        XCTAssertEqual(try db.fetchAll().count, 0)
+    }
 }

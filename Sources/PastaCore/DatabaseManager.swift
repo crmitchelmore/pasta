@@ -208,6 +208,20 @@ public final class DatabaseManager {
         }
     }
 
+    /// Deletes all entries and returns the count deleted and associated image paths.
+    public func deleteAll() throws -> (count: Int, imagePaths: [String]) {
+        try dbQueue.write { db in
+            let imagePaths = try String.fetchAll(
+                db,
+                sql: "SELECT imagePath FROM \(ClipboardEntry.databaseTableName) WHERE imagePath IS NOT NULL"
+            )
+
+            try db.execute(sql: "DELETE FROM \(ClipboardEntry.databaseTableName)")
+
+            return (db.changesCount, imagePaths)
+        }
+    }
+
     public func search(query: String, limit: Int = 50) throws -> [ClipboardEntry] {
         let pattern = "%\(query)%"
         return try dbQueue.read { db in

@@ -108,4 +108,18 @@ final class DatabaseManagerTests: XCTestCase {
         XCTAssertEqual(remaining.count, 1)
         XCTAssertEqual(remaining.first?.content, "old")
     }
+
+    func testDeleteAllDeletesEverythingAndReturnsImagePaths() throws {
+        let db = try DatabaseManager.inMemory()
+
+        try db.insert(ClipboardEntry(content: "a", contentType: .text))
+        try db.insert(ClipboardEntry(content: "b", contentType: .image, imagePath: "/tmp/b.png"))
+        try db.insert(ClipboardEntry(content: "c", contentType: .image, imagePath: "/tmp/c.png"))
+
+        let result = try db.deleteAll()
+
+        XCTAssertEqual(result.count, 3)
+        XCTAssertEqual(Set(result.imagePaths), Set(["/tmp/b.png", "/tmp/c.png"]))
+        XCTAssertEqual(try db.fetchAll().count, 0)
+    }
 }
