@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import GRDB
 
@@ -65,9 +64,25 @@ public final class DatabaseManager {
     }
 
     public func insert(_ entry: ClipboardEntry) throws {
-        let contentHash = DatabaseManager.sha256Hex(entry.content)
+        let contentHash = entry.contentHash
 
         try dbQueue.write { db in
+            if let existingID: String = try String.fetchOne(
+                db,
+                sql: "SELECT id FROM \(ClipboardEntry.databaseTableName) WHERE contentHash = ? LIMIT 1",
+                arguments: [contentHash]
+            ) {
+                try db.execute(
+                    sql: """
+                    UPDATE \(ClipboardEntry.databaseTableName)
+                    SET copyCount = copyCount + 1, timestamp = ?
+                    WHERE id = ?
+                    """,
+                    arguments: [entry.timestamp, existingID]
+                )
+                return
+            }
+
             try db.execute(
                 sql: """
                 INSERT INTO \(ClipboardEntry.databaseTableName)
@@ -129,8 +144,4 @@ public final class DatabaseManager {
         }
     }
 
-    private static func sha256Hex(_ string: String) -> String {
-        let digest = SHA256.hash(data: Data(string.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
-    }
 }

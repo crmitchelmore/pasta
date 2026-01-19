@@ -47,3 +47,8 @@ Date: 2026-01-19
 - Implemented env-var block splitting into per-var split entries
 - Added integration-style unit tests for ContentTypeDetector
 - Marked PRD item "Create unified content type detection pipeline" as complete
+
+- Implemented deduplication on DatabaseManager.insert via contentHash; duplicates now increment copyCount and refresh timestamp
+- Added ClipboardEntry.contentHash (SHA256) helper
+- Added unit test covering dedupe behavior
+- Marked PRD item "Implement deduplication with copy count tracking" as complete

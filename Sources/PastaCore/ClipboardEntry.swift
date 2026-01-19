@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import GRDB
 
@@ -48,6 +49,10 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord {
     /// JSON-encoded metadata (arbitrary shape) stored as a string.
     public var metadata: String?
 
+    public var contentHash: String {
+        ClipboardEntry.sha256Hex(content)
+    }
+
     public init(
         id: UUID = UUID(),
         content: String,
@@ -80,5 +85,10 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord {
         container["copyCount"] = copyCount
         container["sourceApp"] = sourceApp
         container["metadata"] = metadata
+    }
+
+    static func sha256Hex(_ string: String) -> String {
+        let digest = SHA256.hash(data: Data(string.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

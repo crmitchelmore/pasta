@@ -188,7 +188,7 @@
       "Update DatabaseManager with deduplication logic",
       "Write tests for deduplication scenarios"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
