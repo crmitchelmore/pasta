@@ -25,6 +25,7 @@ final class ClipboardMonitorTests: XCTestCase {
         let monitor = ClipboardMonitor(
             pasteboard: pasteboard,
             workspace: MockWorkspace(identifier: "com.example.App"),
+            exclusionManager: ExclusionManager(userDefaults: UserDefaults(suiteName: "ClipboardMonitorTests")!),
             tickPublisher: ticks.eraseToAnyPublisher(),
             now: { Date(timeIntervalSince1970: 123) }
         )
@@ -61,6 +62,7 @@ final class ClipboardMonitorTests: XCTestCase {
         let ticks = PassthroughSubject<Void, Never>()
         let monitor = ClipboardMonitor(
             pasteboard: pasteboard,
+            exclusionManager: ExclusionManager(userDefaults: UserDefaults(suiteName: "ClipboardMonitorTests.stop")!),
             tickPublisher: ticks.eraseToAnyPublisher()
         )
 

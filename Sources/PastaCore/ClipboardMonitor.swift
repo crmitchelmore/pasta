@@ -73,6 +73,7 @@ public final class ClipboardMonitor {
 
     private let pasteboard: PasteboardProviding
     private let workspace: WorkspaceProviding?
+    private let exclusionManager: ExclusionManager
     private let tickPublisher: AnyPublisher<Void, Never>
     private let now: () -> Date
 
@@ -85,12 +86,14 @@ public final class ClipboardMonitor {
     public init(
         pasteboard: PasteboardProviding,
         workspace: WorkspaceProviding? = nil,
+        exclusionManager: ExclusionManager = ExclusionManager(),
         pollInterval: TimeInterval = 0.5,
         tickPublisher: AnyPublisher<Void, Never>? = nil,
         now: @escaping () -> Date = Date.init
     ) {
         self.pasteboard = pasteboard
         self.workspace = workspace
+        self.exclusionManager = exclusionManager
         self.now = now
 
         if let tickPublisher {
@@ -106,7 +109,7 @@ public final class ClipboardMonitor {
 
     #if canImport(AppKit)
     public convenience init(pollInterval: TimeInterval = 0.5) {
-        self.init(pasteboard: SystemPasteboard(), workspace: SystemWorkspace(), pollInterval: pollInterval)
+        self.init(pasteboard: SystemPasteboard(), workspace: SystemWorkspace(), exclusionManager: ExclusionManager(), pollInterval: pollInterval)
     }
     #endif
 
@@ -134,12 +137,17 @@ public final class ClipboardMonitor {
         if contents == lastEmittedContents { return }
         lastEmittedContents = contents
 
+        let sourceApp = workspace?.frontmostApplicationIdentifier()
+        if exclusionManager.isExcluded(bundleIdentifier: sourceApp) {
+            return
+        }
+
         let entry = ClipboardEntry(
             content: contentString(for: contents),
             contentType: contentType(for: contents),
             rawData: rawData(for: contents),
             timestamp: now(),
-            sourceApp: workspace?.frontmostApplicationIdentifier()
+            sourceApp: sourceApp
         )
 
         subject.send(entry)

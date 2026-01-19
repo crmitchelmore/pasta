@@ -419,7 +419,7 @@
       "UI to add/remove apps from exclusion list",
       "Write tests for exclusion logic"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "integration",

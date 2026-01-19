@@ -128,3 +128,9 @@ Date: 2026-01-19
 - Added PastaCore `LaunchAtLoginManager` wrapper + unit tests
 - Ran `swift build` + `swift test`
 - Marked PRD item "Implement launch at login" as complete
+
+- Added PastaCore `ExclusionManager` (UserDefaults-backed) for excluded bundle IDs
+- Wired ClipboardMonitor to skip emitting entries when source app is excluded
+- Added unit tests for ExclusionManager parsing and clipboard exclusion behavior
+- Ran `swift test`
+- Marked PRD item "Implement app exclusion list" as complete
