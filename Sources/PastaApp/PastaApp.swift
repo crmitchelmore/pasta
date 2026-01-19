@@ -42,6 +42,8 @@ private struct PopoverRootView: View {
     @State private var isFuzzySearch: Bool = false
     @State private var contentTypeFilter: ContentType? = nil
 
+    @State private var selectedEntryID: UUID? = nil
+
     private let database: DatabaseManager = {
         // UI fallback if the on-disk DB can't be created for any reason.
         (try? DatabaseManager()) ?? (try! DatabaseManager.inMemory())
@@ -89,8 +91,14 @@ private struct PopoverRootView: View {
                 resultCount: displayedEntries.count
             )
 
-            ClipboardListView(entries: displayedEntries)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            HStack(alignment: .top, spacing: 12) {
+                ClipboardListView(entries: displayedEntries, selectedEntryID: $selectedEntryID)
+                    .frame(width: 320)
+
+                PreviewPanelView(entry: displayedEntries.first(where: { $0.id == selectedEntryID }))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
 
@@ -108,9 +116,14 @@ private struct PopoverRootView: View {
             }
         }
         .padding(16)
-        .frame(width: 520, height: 640)
+        .frame(width: 900, height: 640)
         .onAppear {
             entries = (try? database.fetchRecent(limit: 1_000)) ?? []
+        }
+        .onChange(of: displayedEntries.map(\.id)) { _, ids in
+            if let selectedEntryID, !ids.contains(selectedEntryID) {
+                self.selectedEntryID = nil
+            }
         }
     }
 }

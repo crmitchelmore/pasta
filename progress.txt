@@ -81,4 +81,9 @@ Date: 2026-01-19
 - Implemented PastaUI `ClipboardListView` (LazyVStack-based) showing reverse-chronological entries with type icon/badge, relative timestamp, copy count, and large-entry indicator
 - Wired the list into the menu bar popover as a basic history view (with a manual Refresh)
 - Marked PRD item "Create clipboard history list view" as complete
+- Added PastaUI `PreviewPanelView` showing full content, decoded preview (encoding detector), pretty-printed metadata JSON, and JWT header/payload/claims panels
+- Rendered images inline from `imagePath`
+- Added lightweight regex-based syntax highlighting for code entries
+- Wired list selection -> preview panel in the menu bar popover
+- Marked PRD item "Create entry preview panel" as complete
 

@@ -3,9 +3,11 @@ import SwiftUI
 
 public struct ClipboardListView: View {
     public let entries: [ClipboardEntry]
+    @Binding private var selectedEntryID: UUID?
 
-    public init(entries: [ClipboardEntry]) {
+    public init(entries: [ClipboardEntry], selectedEntryID: Binding<UUID?> = .constant(nil)) {
         self.entries = entries
+        _selectedEntryID = selectedEntryID
     }
 
     public var body: some View {
@@ -20,7 +22,8 @@ public struct ClipboardListView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     ForEach(entries, id: \.id) { entry in
-                        ClipboardRowView(entry: entry)
+                        ClipboardRowView(entry: entry, isSelected: selectedEntryID == entry.id)
+                            .onTapGesture { selectedEntryID = entry.id }
                             .padding(.horizontal, 8)
                     }
                 }
@@ -32,6 +35,7 @@ public struct ClipboardListView: View {
 
 private struct ClipboardRowView: View {
     let entry: ClipboardEntry
+    let isSelected: Bool
 
     private var isLarge: Bool {
         entry.content.utf8.count > 10 * 1024
@@ -76,6 +80,10 @@ private struct ClipboardRowView: View {
         }
         .padding(10)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(isSelected ? Color.accentColor.opacity(0.7) : .clear, lineWidth: 2)
+        }
     }
 }
 
@@ -108,36 +116,6 @@ private extension ContentType {
         case .envVar: return "ENV"
         case .envVarBlock: return "ENV BLOCK"
         default: return rawValue.uppercased()
-        }
-    }
-
-    var systemImageName: String {
-        switch self {
-        case .text: return "text.alignleft"
-        case .email: return "envelope"
-        case .jwt: return "key"
-        case .envVar, .envVarBlock: return "terminal"
-        case .prose: return "text.book.closed"
-        case .image: return "photo"
-        case .filePath: return "doc"
-        case .url: return "link"
-        case .code: return "chevron.left.forwardslash.chevron.right"
-        case .unknown: return "questionmark"
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .text: return .secondary
-        case .email: return .blue
-        case .jwt: return .purple
-        case .envVar, .envVarBlock: return .green
-        case .prose: return .teal
-        case .image: return .pink
-        case .filePath: return .brown
-        case .url: return .indigo
-        case .code: return .orange
-        case .unknown: return .gray
         }
     }
 }

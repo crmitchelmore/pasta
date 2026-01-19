@@ -296,7 +296,7 @@
       "For JWT: show decoded header/payload",
       "Verify preview renders correctly for all content types"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "ui",
