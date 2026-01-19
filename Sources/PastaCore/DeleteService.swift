@@ -21,4 +21,16 @@ public final class DeleteService {
 
         return deleted
     }
+
+    /// Deletes entries from the last X minutes and cleans up any associated image files.
+    @discardableResult
+    public func deleteRecent(minutes: Int, now: Date = Date()) throws -> Int {
+        let result = try database.deleteRecent(minutes: minutes, now: now)
+
+        for imagePath in result.imagePaths {
+            try imageStorage.deleteImage(path: imagePath)
+        }
+
+        return result.count
+    }
 }

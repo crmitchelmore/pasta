@@ -34,4 +34,42 @@ final class DeleteServiceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: imagePath))
         XCTAssertNil(try db.fetch(id: entryID))
     }
+
+    func testDeleteRecentRemovesEntriesAndCleansUpImages() throws {
+        let db = try DatabaseManager.inMemory()
+
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot)
+        let now = Date(timeIntervalSince1970: 1_000)
+
+        let imageData = Data([0x01, 0x02, 0x03])
+        let imagePath = try imageStorage.saveImage(imageData)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: imagePath))
+
+        let oldEntry = ClipboardEntry(
+            content: "old",
+            contentType: .text,
+            timestamp: now.addingTimeInterval(-600)
+        )
+        let recentEntry = ClipboardEntry(
+            content: "recentImage",
+            contentType: .image,
+            rawData: imageData,
+            imagePath: imagePath,
+            timestamp: now.addingTimeInterval(-60)
+        )
+
+        try db.insert(oldEntry)
+        try db.insert(recentEntry)
+
+        let service = DeleteService(database: db, imageStorage: imageStorage)
+        let deletedCount = try service.deleteRecent(minutes: 5, now: now)
+        XCTAssertEqual(deletedCount, 1)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: imagePath))
+        XCTAssertEqual(try db.fetchAll().count, 1)
+        XCTAssertEqual(try db.fetchAll().first?.content, "old")
+    }
 }

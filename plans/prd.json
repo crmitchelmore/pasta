@@ -226,7 +226,7 @@
       "Return count of deleted entries",
       "Write tests for time-based deletion"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

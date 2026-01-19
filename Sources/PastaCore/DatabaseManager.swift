@@ -188,6 +188,26 @@ public final class DatabaseManager {
         }
     }
 
+    /// Deletes entries newer than (now - minutes) and returns the count deleted and associated image paths.
+    public func deleteRecent(minutes: Int, now: Date = Date()) throws -> (count: Int, imagePaths: [String]) {
+        let cutoff = now.addingTimeInterval(-Double(minutes) * 60)
+
+        return try dbQueue.write { db in
+            let imagePaths = try String.fetchAll(
+                db,
+                sql: "SELECT imagePath FROM \(ClipboardEntry.databaseTableName) WHERE timestamp > ? AND imagePath IS NOT NULL",
+                arguments: [cutoff]
+            )
+
+            try db.execute(
+                sql: "DELETE FROM \(ClipboardEntry.databaseTableName) WHERE timestamp > ?",
+                arguments: [cutoff]
+            )
+
+            return (db.changesCount, imagePaths)
+        }
+    }
+
     public func search(query: String, limit: Int = 50) throws -> [ClipboardEntry] {
         let pattern = "%\(query)%"
         return try dbQueue.read { db in

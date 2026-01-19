@@ -74,4 +74,38 @@ final class DatabaseManagerTests: XCTestCase {
         XCTAssertEqual(all.first?.copyCount, 2)
         XCTAssertEqual(all.first?.timestamp, second.timestamp)
     }
+
+    func testDeleteRecentDeletesNewerThanCutoffAndReturnsImagePaths() throws {
+        let db = try DatabaseManager.inMemory()
+        let now = Date(timeIntervalSince1970: 1_000)
+
+        let old = ClipboardEntry(
+            content: "old",
+            contentType: .text,
+            timestamp: now.addingTimeInterval(-600)
+        )
+        let recentNoImage = ClipboardEntry(
+            content: "recent",
+            contentType: .text,
+            timestamp: now.addingTimeInterval(-60)
+        )
+        let recentWithImage = ClipboardEntry(
+            content: "recentImage",
+            contentType: .image,
+            imagePath: "/tmp/fake.png",
+            timestamp: now.addingTimeInterval(-30)
+        )
+
+        try db.insert(old)
+        try db.insert(recentNoImage)
+        try db.insert(recentWithImage)
+
+        let result = try db.deleteRecent(minutes: 5, now: now)
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(Set(result.imagePaths), Set(["/tmp/fake.png"]))
+
+        let remaining = try db.fetchAll()
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertEqual(remaining.first?.content, "old")
+    }
 }

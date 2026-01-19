@@ -62,3 +62,8 @@ Date: 2026-01-19
 - Added DatabaseManager.fetch(id:) helper for DeleteService
 - Added unit test covering delete + image cleanup
 - Marked PRD item "Implement delete single entry" as complete
+
+- Added DatabaseManager.deleteRecent(minutes:now:) for time-based deletion (returns deleted count + image paths)
+- Extended DeleteService with deleteRecent(minutes:now:) to clean up associated image files
+- Added unit tests for time-based deletion and image cleanup
+- Marked PRD item "Implement delete entries for last X minutes" as complete
