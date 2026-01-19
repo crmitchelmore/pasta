@@ -46,6 +46,10 @@ private struct PopoverRootView: View {
 
     @State private var selectedEntryID: UUID? = nil
 
+    @State private var isShowingDeleteConfirmation: Bool = false
+    @State private var isShowingBulkDelete: Bool = false
+    @State private var lastBulkDeleteSummary: String? = nil
+
     @FocusState private var searchFocused: Bool
     @FocusState private var listFocused: Bool
 
@@ -137,6 +141,22 @@ private struct PopoverRootView: View {
                     refreshEntries()
                 }
 
+                Button("Delete…") {
+                    isShowingDeleteConfirmation = true
+                }
+                .disabled(selectedEntryID == nil)
+
+                Button("Delete Recent…") {
+                    isShowingBulkDelete = true
+                }
+                .disabled(entries.isEmpty)
+
+                if let lastBulkDeleteSummary {
+                    Text(lastBulkDeleteSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Spacer()
 
                 Button("Quit") {
@@ -171,6 +191,24 @@ private struct PopoverRootView: View {
         }
         .onKeyPress { keyPress in
             handleKeyPress(keyPress)
+        }
+        .sheet(isPresented: $isShowingDeleteConfirmation) {
+            DeleteConfirmationView(entry: displayedEntries.first(where: { $0.id == selectedEntryID })) {
+                deleteSelectedEntry()
+            }
+        }
+        .sheet(isPresented: $isShowingBulkDelete) {
+            BulkDeleteView(entries: entries) { minutes in
+                do {
+                    let imageStorage = try ImageStorageManager()
+                    let deleteService = DeleteService(database: database, imageStorage: imageStorage)
+                    let count = try deleteService.deleteRecent(minutes: minutes)
+                    lastBulkDeleteSummary = "Deleted \(count)"
+                    refreshEntries()
+                } catch {
+                    lastBulkDeleteSummary = "Delete failed"
+                }
+            }
         }
     }
 
@@ -219,7 +257,7 @@ private struct PopoverRootView: View {
 
         case .delete:
             if keyPress.modifiers.contains(.command) {
-                deleteSelectedEntry()
+                isShowingDeleteConfirmation = true
                 return .handled
             }
             return .ignored

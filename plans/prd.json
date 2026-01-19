@@ -337,7 +337,7 @@
       "Require confirmation before deletion",
       "Verify dialogs appear and function correctly"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "ui",
