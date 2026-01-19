@@ -1,480 +1,479 @@
 [
-	{
-		"category": "setup",
-		"description": "Initialize Swift Package with modular structure and dependencies",
-		"steps": [
-			"Create Package.swift with macOS 14+ target",
-			"Add modules: PastaApp (main), PastaCore (models/services), PastaUI (SwiftUI views), PastaDetectors (content type detection)",
-			"Add dependencies: GRDB.swift (SQLite), HotKey (global shortcuts), Fuse (fuzzy search)",
-			"Create folder structure matching modules",
-			"Verify swift build succeeds"
-		],
-		"passes": true
-	},
-	{
-		"category": "setup",
-		"description": "Create core data model for clipboard entries",
-		"steps": [
-			"Define ClipboardEntry struct in PastaCore with: id (UUID), content (String), contentType (enum), rawData (Data?), imagePath (String?), timestamp (Date), copyCount (Int), sourceApp (String?), metadata (JSON)",
-			"Define ContentType enum: text, email, jwt, envVar, envVarBlock, prose, image, filePath, url, code, unknown",
-			"Define CodeLanguage enum for detected programming languages",
-			"Make ClipboardEntry Codable and conform to GRDB protocols",
-			"Add tests for model serialization"
-		],
-		"passes": true
-	},
-	{
-		"category": "setup",
-		"description": "Set up SQLite database with GRDB for local storage",
-		"steps": [
-			"Create DatabaseManager in PastaCore that initializes GRDB database",
-			"Store database in ~/Library/Application Support/Pasta/",
-			"Create clipboard_entries table with proper indexes (timestamp, contentType, content hash)",
-			"Implement migrations system for future schema changes",
-			"Add methods: insert, fetchRecent, fetchAll, delete, search",
-			"Write tests for CRUD operations"
-		],
-		"passes": true
-	},
-
-	{
-		"category": "setup",
-		"description": "Create image storage manager for clipboard images",
-		"steps": [
-			"Create ImageStorageManager in PastaCore",
-			"Store images in ~/Library/Application Support/Pasta/Images/",
-			"Generate unique filenames based on content hash",
-			"Implement saveImage(Data) -> String (returns path)",
-			"Implement loadImage(path) -> NSImage?",
-			"Implement deleteImage(path)",
-			"Track total storage size and expose via API",
-			"Write tests for image storage"
-		],
-		"passes": true
-	},
-	{
-		"category": "functional",
-		"description": "Implement clipboard monitoring service",
-		"steps": [
-			"Create ClipboardMonitor in PastaCore using NSPasteboard polling",
-			"Poll pasteboard every 0.5 seconds for changes",
-			"Detect content type (string, image, file URL, RTF)",
-			"Extract source application using NSWorkspace",
-			"Emit new entries via Combine publisher",
-			"Handle app lifecycle (start/stop monitoring)",
-			"Write tests with mock pasteboard"
-		],
-		"passes": true
-	},
-	{
-		"category": "functional",
-		"description": "Build email address detector",
-		"steps": [
-			"Create EmailDetector in PastaDetectors module",
-			"Use RFC 5322 compliant regex pattern",
-			"Return detected email(s) and confidence score",
-			"Handle multiple emails in single paste",
-			"Write tests with valid/invalid email formats"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Build JWT token detector",
-		"steps": [
-			"Create JWTDetector in PastaDetectors module",
-			"Detect JWT format: header.payload.signature (base64url encoded)",
-			"Decode and extract claims for metadata (exp, iat, sub, iss)",
-			"Show expiration status in metadata",
-			"Write tests with valid/expired/malformed JWTs"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Build environment variable detector",
-		"steps": [
-			"Create EnvVarDetector in PastaDetectors module",
-			"Detect patterns: KEY=value, export KEY=value, KEY=\"value\"",
-			"Distinguish single env var vs block of env vars",
-			"For blocks: parse individual vars and return as separate entries",
-			"Handle .env file format",
-			"Write tests with various env var formats"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Build URL detector with site categorization",
-		"steps": [
-			"Create URLDetector in PastaDetectors module",
-			"Detect http/https/ftp URLs",
-			"Extract domain and categorize (github.com, stackoverflow.com, etc.)",
-			"Track hot references (frequently copied URLs) in metadata",
-			"Handle URL-encoded content",
-			"Write tests with various URL formats"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Build file path detector",
-		"steps": [
-			"Create FilePathDetector in PastaDetectors module",
-			"Detect Unix paths (/path/to/file) and ~ expansion",
-			"Detect Windows paths (C:\\path\\to\\file)",
-			"Validate if path exists on filesystem",
-			"Extract filename and extension for metadata",
-			"Write tests with various path formats"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Build code snippet detector with language identification",
-		"steps": [
-			"Create CodeDetector in PastaDetectors module",
-			"Detect common languages: Swift, Python, JavaScript, TypeScript, Go, Rust, Java, C/C++, Ruby, SQL, JSON, YAML, HTML, CSS, Shell",
-			"Use heuristics: keywords, syntax patterns, file extension hints",
-			"Return detected language and confidence",
-			"Write tests with code samples from each language"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Build prose/natural text detector",
-		"steps": [
-			"Create ProseDetector in PastaDetectors module",
-			"Distinguish prose from code/structured data",
-			"Check for sentence structure, punctuation patterns",
-			"Estimate word count and reading time for metadata",
-			"Write tests with prose vs code samples"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Build base64 and URL encoding decoder",
-		"steps": [
-			"Create EncodingDetector in PastaDetectors module",
-			"Detect base64 encoded content",
-			"Detect URL encoded content",
-			"Decode and store decoded version in metadata for preview",
-			"Handle nested encodings",
-			"Write tests with encoded/decoded pairs"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Create unified content type detection pipeline",
-		"steps": [
-			"Create ContentTypeDetector in PastaDetectors that orchestrates all detectors",
-			"Run detectors in priority order and select highest confidence match",
-			"Aggregate metadata from all relevant detectors",
-			"Handle the large paste splitting: detect multi-env-var blocks and create sub-entries",
-			"Return primary type + all detected metadata",
-			"Write integration tests"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Implement deduplication with copy count tracking",
-		"steps": [
-			"Add content hash (SHA256) to ClipboardEntry",
-			"Before inserting, check for existing entry with same hash",
-			"If duplicate: increment copyCount, update timestamp, don't create new entry",
-			"Update DatabaseManager with deduplication logic",
-			"Write tests for deduplication scenarios"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Implement full-text search with fuzzy matching toggle",
-		"steps": [
-			"Add FTS5 virtual table to GRDB schema for content",
-			"Implement exact search using FTS5",
-			"Implement fuzzy search using Fuse library",
-			"Create SearchService with toggle between modes",
-			"Support filtering by content type",
-			"Return ranked results with match highlighting info",
-			"Write tests for search accuracy"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Implement delete single entry",
-		"steps": [
-			"Add delete(id: UUID) to DatabaseManager",
-			"Delete associated image file if entry has imagePath",
-			"Create DeleteService in PastaCore",
-			"Write tests for deletion including image cleanup"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Implement delete entries for last X minutes",
-		"steps": [
-			"Add deleteRecent(minutes: Int) to DatabaseManager",
-			"Gather all image paths before deletion for cleanup",
-			"Delete entries where timestamp > now - X minutes",
-			"Clean up associated images",
-			"Return count of deleted entries",
-			"Write tests for time-based deletion"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Implement global hotkey (Control+Command+C)",
-		"steps": [
-			"Add HotKey package integration",
-			"Register global shortcut Control+Command+C",
-			"Create HotkeyManager in PastaCore",
-			"On trigger: show/hide main window, focus search",
-			"Handle permission denied gracefully",
-			"Write tests for hotkey registration"
-		],
-		"passes": false
-	},
-	{
-		"category": "ui",
-		"description": "Create main app window with menu bar presence",
-		"steps": [
-			"Create PastaApp entry point in SwiftUI",
-			"Configure as menu bar app with popover",
-			"Add menu bar icon (pasta/noodle themed)",
-			"Window appears below menu bar icon or centered",
-			"Click outside dismisses popover",
-			"Verify app launches and shows menu bar icon"
-		],
-		"passes": false
-	},
-	{
-		"category": "ui",
-		"description": "Create clipboard history list view",
-		"steps": [
-			"Create ClipboardListView in PastaUI",
-			"Show entries in reverse chronological order",
-			"Display: content preview (truncated), content type badge, timestamp, copy count",
-			"Use LazyVStack for performance with large lists",
-			"Show content type icon/color coding",
-			"Highlight large entries (>10KB) with indicator",
-			"Verify scrolling is smooth with 1000+ entries"
-		],
-		"passes": false
-	},
-	{
-		"category": "ui",
-		"description": "Create search bar with fuzzy toggle",
-		"steps": [
-			"Create SearchBarView in PastaUI",
-			"Text field with search icon",
-			"Toggle button for fuzzy/exact matching",
-			"Filter content type dropdown",
-			"Auto-focus on app show",
-			"Clear button",
-			"Show result count",
-			"Verify search updates list in real-time"
-		],
-		"passes": false
-	},
-	{
-		"category": "ui",
-		"description": "Create entry preview panel",
-		"steps": [
-			"Create PreviewPanelView in PastaUI",
-			"Show full content for selected entry",
-			"Render images inline",
-			"Syntax highlight code snippets",
-			"Show decoded content for base64/URL encoded",
-			"Display all metadata (detected type, copy count, source app, timestamp)",
-			"For JWT: show decoded header/payload",
-			"Verify preview renders correctly for all content types"
-		],
-		"passes": false
-	},
-	{
-		"category": "ui",
-		"description": "Implement keyboard navigation",
-		"steps": [
-			"Arrow up/down to navigate list",
-			"Enter to paste selected entry (copy to clipboard and simulate Cmd+V)",
-			"Number keys 1-9 to quick-paste corresponding entry",
-			"Escape to close window",
-			"Cmd+Backspace to delete selected entry",
-			"Tab to move between search and list",
-			"Verify all keyboard shortcuts work"
-		],
-		"passes": false
-	},
-	{
-		"category": "ui",
-		"description": "Create content type filter sidebar",
-		"steps": [
-			"Create FilterSidebarView in PastaUI",
-			"Show all content types with counts",
-			"Click to filter list by type",
-			"Show 'All' option at top",
-			"For URLs: show sub-categories by domain",
-			"Highlight active filter",
-			"Verify filtering works correctly"
-		],
-		"passes": false
-	},
-	{
-		"category": "ui",
-		"description": "Create delete confirmation dialogs",
-		"steps": [
-			"Create DeleteConfirmationView for single entry deletion",
-			"Create BulkDeleteView for 'delete last X minutes'",
-			"Time picker: 5min, 15min, 30min, 1hr, custom",
-			"Show count of entries to be deleted",
-			"Require confirmation before deletion",
-			"Verify dialogs appear and function correctly"
-		],
-		"passes": false
-	},
-	{
-		"category": "ui",
-		"description": "Create settings/preferences view",
-		"steps": [
-			"Create SettingsView in PastaUI",
-			"Global hotkey customization",
-			"Launch at login toggle",
-			"Storage location display",
-			"Clear all history button",
-			"Storage usage display (total size, image size)",
-			"Max entries limit (optional)",
-			"Excluded apps list",
-			"Verify all settings persist and apply"
-		],
-		"passes": false
-	},
-	{
-		"category": "ui",
-		"description": "Create onboarding flow for permissions",
-		"steps": [
-			"Create OnboardingView in PastaUI",
-			"Welcome screen with app description",
-			"Accessibility permission request with instructions",
-			"Guide user to System Settings > Privacy > Accessibility",
-			"Detect when permission granted and proceed",
-			"Show completion screen",
-			"Only show on first launch or if permissions revoked",
-			"Verify onboarding flow completes successfully"
-		],
-		"passes": false
-	},
-	{
-		"category": "ui",
-		"description": "Design and implement app icon and visual theme",
-		"steps": [
-			"Create app icon: pasta/noodle themed (fork with spaghetti, or clipboard with pasta)",
-			"Generate all required icon sizes for macOS",
-			"Define color palette: warm pasta colors (golden yellow, tomato red accents)",
-			"Create content type icons for each category",
-			"Apply consistent styling across all views",
-			"Add app icon to Assets.xcassets",
-			"Verify icon appears in menu bar and dock"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Implement paste action (copy to clipboard and trigger paste)",
-		"steps": [
-			"Create PasteService in PastaCore",
-			"Copy selected entry content to system clipboard",
-			"Use CGEvent to simulate Cmd+V keypress",
-			"Hide app window after paste",
-			"Handle different content types (text, image, file)",
-			"Write tests for paste functionality"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Implement launch at login",
-		"steps": [
-			"Use SMAppService for login item registration (macOS 13+)",
-			"Add toggle in settings",
-			"Persist preference in UserDefaults",
-			"Verify app launches at system startup when enabled"
-		],
-		"passes": false
-	},
-	{
-		"category": "functional",
-		"description": "Implement app exclusion list",
-		"steps": [
-			"Create ExclusionManager in PastaCore",
-			"Store excluded app bundle IDs in UserDefaults",
-			"Check source app against exclusion list in ClipboardMonitor",
-			"Skip recording entries from excluded apps",
-			"UI to add/remove apps from exclusion list",
-			"Write tests for exclusion logic"
-		],
-		"passes": false
-	},
-	{
-		"category": "integration",
-		"description": "Wire up all components in main app",
-		"steps": [
-			"Connect ClipboardMonitor to DatabaseManager",
-			"Connect SearchService to UI",
-			"Connect HotkeyManager to window visibility",
-			"Connect PasteService to list selection",
-			"Connect DeleteService to UI actions",
-			"Verify full clipboard -> store -> search -> paste flow works",
-			"Test with real clipboard operations"
-		],
-		"passes": false
-	},
-	{
-		"category": "integration",
-		"description": "Performance optimization and testing",
-		"steps": [
-			"Profile with Instruments for memory leaks",
-			"Ensure list scrolling stays at 60fps with 10000+ entries",
-			"Optimize search to return results in <100ms",
-			"Lazy load images in list view",
-			"Add database indexes for common queries",
-			"Verify app uses <100MB RAM under normal use"
-		],
-		"passes": false
-	},
-	{
-		"category": "integration",
-		"description": "Error handling and edge cases",
-		"steps": [
-			"Handle database corruption gracefully",
-			"Handle disk full when saving images",
-			"Handle clipboard access denied",
-			"Handle hotkey conflict with other apps",
-			"Add logging for debugging (os_log)",
-			"Show user-friendly error messages",
-			"Write tests for error scenarios"
-		],
-		"passes": false
-	},
-	{
-		"category": "documentation",
-		"description": "Create README and user documentation",
-		"steps": [
-			"Write README.md with project overview",
-			"Document build instructions",
-			"Document keyboard shortcuts",
-			"Add screenshots/GIFs of app in action",
-			"Document content type detection capabilities",
-			"Add troubleshooting section",
-			"Verify documentation is accurate"
-		],
-		"passes": false
-	}
+  {
+    "category": "setup",
+    "description": "Initialize Swift Package with modular structure and dependencies",
+    "steps": [
+      "Create Package.swift with macOS 14+ target",
+      "Add modules: PastaApp (main), PastaCore (models/services), PastaUI (SwiftUI views), PastaDetectors (content type detection)",
+      "Add dependencies: GRDB.swift (SQLite), HotKey (global shortcuts), Fuse (fuzzy search)",
+      "Create folder structure matching modules",
+      "Verify swift build succeeds"
+    ],
+    "passes": true
+  },
+  {
+    "category": "setup",
+    "description": "Create core data model for clipboard entries",
+    "steps": [
+      "Define ClipboardEntry struct in PastaCore with: id (UUID), content (String), contentType (enum), rawData (Data?), imagePath (String?), timestamp (Date), copyCount (Int), sourceApp (String?), metadata (JSON)",
+      "Define ContentType enum: text, email, jwt, envVar, envVarBlock, prose, image, filePath, url, code, unknown",
+      "Define CodeLanguage enum for detected programming languages",
+      "Make ClipboardEntry Codable and conform to GRDB protocols",
+      "Add tests for model serialization"
+    ],
+    "passes": true
+  },
+  {
+    "category": "setup",
+    "description": "Set up SQLite database with GRDB for local storage",
+    "steps": [
+      "Create DatabaseManager in PastaCore that initializes GRDB database",
+      "Store database in ~/Library/Application Support/Pasta/",
+      "Create clipboard_entries table with proper indexes (timestamp, contentType, content hash)",
+      "Implement migrations system for future schema changes",
+      "Add methods: insert, fetchRecent, fetchAll, delete, search",
+      "Write tests for CRUD operations"
+    ],
+    "passes": true
+  },
+  {
+    "category": "setup",
+    "description": "Create image storage manager for clipboard images",
+    "steps": [
+      "Create ImageStorageManager in PastaCore",
+      "Store images in ~/Library/Application Support/Pasta/Images/",
+      "Generate unique filenames based on content hash",
+      "Implement saveImage(Data) -> String (returns path)",
+      "Implement loadImage(path) -> NSImage?",
+      "Implement deleteImage(path)",
+      "Track total storage size and expose via API",
+      "Write tests for image storage"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Implement clipboard monitoring service",
+    "steps": [
+      "Create ClipboardMonitor in PastaCore using NSPasteboard polling",
+      "Poll pasteboard every 0.5 seconds for changes",
+      "Detect content type (string, image, file URL, RTF)",
+      "Extract source application using NSWorkspace",
+      "Emit new entries via Combine publisher",
+      "Handle app lifecycle (start/stop monitoring)",
+      "Write tests with mock pasteboard"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Build email address detector",
+    "steps": [
+      "Create EmailDetector in PastaDetectors module",
+      "Use RFC 5322 compliant regex pattern",
+      "Return detected email(s) and confidence score",
+      "Handle multiple emails in single paste",
+      "Write tests with valid/invalid email formats"
+    ],
+    "passes": true
+  },
+  {
+    "category": "functional",
+    "description": "Build JWT token detector",
+    "steps": [
+      "Create JWTDetector in PastaDetectors module",
+      "Detect JWT format: header.payload.signature (base64url encoded)",
+      "Decode and extract claims for metadata (exp, iat, sub, iss)",
+      "Show expiration status in metadata",
+      "Write tests with valid/expired/malformed JWTs"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Build environment variable detector",
+    "steps": [
+      "Create EnvVarDetector in PastaDetectors module",
+      "Detect patterns: KEY=value, export KEY=value, KEY=\"value\"",
+      "Distinguish single env var vs block of env vars",
+      "For blocks: parse individual vars and return as separate entries",
+      "Handle .env file format",
+      "Write tests with various env var formats"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Build URL detector with site categorization",
+    "steps": [
+      "Create URLDetector in PastaDetectors module",
+      "Detect http/https/ftp URLs",
+      "Extract domain and categorize (github.com, stackoverflow.com, etc.)",
+      "Track hot references (frequently copied URLs) in metadata",
+      "Handle URL-encoded content",
+      "Write tests with various URL formats"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Build file path detector",
+    "steps": [
+      "Create FilePathDetector in PastaDetectors module",
+      "Detect Unix paths (/path/to/file) and ~ expansion",
+      "Detect Windows paths (C:\\path\\to\\file)",
+      "Validate if path exists on filesystem",
+      "Extract filename and extension for metadata",
+      "Write tests with various path formats"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Build code snippet detector with language identification",
+    "steps": [
+      "Create CodeDetector in PastaDetectors module",
+      "Detect common languages: Swift, Python, JavaScript, TypeScript, Go, Rust, Java, C/C++, Ruby, SQL, JSON, YAML, HTML, CSS, Shell",
+      "Use heuristics: keywords, syntax patterns, file extension hints",
+      "Return detected language and confidence",
+      "Write tests with code samples from each language"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Build prose/natural text detector",
+    "steps": [
+      "Create ProseDetector in PastaDetectors module",
+      "Distinguish prose from code/structured data",
+      "Check for sentence structure, punctuation patterns",
+      "Estimate word count and reading time for metadata",
+      "Write tests with prose vs code samples"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Build base64 and URL encoding decoder",
+    "steps": [
+      "Create EncodingDetector in PastaDetectors module",
+      "Detect base64 encoded content",
+      "Detect URL encoded content",
+      "Decode and store decoded version in metadata for preview",
+      "Handle nested encodings",
+      "Write tests with encoded/decoded pairs"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Create unified content type detection pipeline",
+    "steps": [
+      "Create ContentTypeDetector in PastaDetectors that orchestrates all detectors",
+      "Run detectors in priority order and select highest confidence match",
+      "Aggregate metadata from all relevant detectors",
+      "Handle the large paste splitting: detect multi-env-var blocks and create sub-entries",
+      "Return primary type + all detected metadata",
+      "Write integration tests"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Implement deduplication with copy count tracking",
+    "steps": [
+      "Add content hash (SHA256) to ClipboardEntry",
+      "Before inserting, check for existing entry with same hash",
+      "If duplicate: increment copyCount, update timestamp, don't create new entry",
+      "Update DatabaseManager with deduplication logic",
+      "Write tests for deduplication scenarios"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Implement full-text search with fuzzy matching toggle",
+    "steps": [
+      "Add FTS5 virtual table to GRDB schema for content",
+      "Implement exact search using FTS5",
+      "Implement fuzzy search using Fuse library",
+      "Create SearchService with toggle between modes",
+      "Support filtering by content type",
+      "Return ranked results with match highlighting info",
+      "Write tests for search accuracy"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Implement delete single entry",
+    "steps": [
+      "Add delete(id: UUID) to DatabaseManager",
+      "Delete associated image file if entry has imagePath",
+      "Create DeleteService in PastaCore",
+      "Write tests for deletion including image cleanup"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Implement delete entries for last X minutes",
+    "steps": [
+      "Add deleteRecent(minutes: Int) to DatabaseManager",
+      "Gather all image paths before deletion for cleanup",
+      "Delete entries where timestamp > now - X minutes",
+      "Clean up associated images",
+      "Return count of deleted entries",
+      "Write tests for time-based deletion"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Implement global hotkey (Control+Command+C)",
+    "steps": [
+      "Add HotKey package integration",
+      "Register global shortcut Control+Command+C",
+      "Create HotkeyManager in PastaCore",
+      "On trigger: show/hide main window, focus search",
+      "Handle permission denied gracefully",
+      "Write tests for hotkey registration"
+    ],
+    "passes": false
+  },
+  {
+    "category": "ui",
+    "description": "Create main app window with menu bar presence",
+    "steps": [
+      "Create PastaApp entry point in SwiftUI",
+      "Configure as menu bar app with popover",
+      "Add menu bar icon (pasta/noodle themed)",
+      "Window appears below menu bar icon or centered",
+      "Click outside dismisses popover",
+      "Verify app launches and shows menu bar icon"
+    ],
+    "passes": false
+  },
+  {
+    "category": "ui",
+    "description": "Create clipboard history list view",
+    "steps": [
+      "Create ClipboardListView in PastaUI",
+      "Show entries in reverse chronological order",
+      "Display: content preview (truncated), content type badge, timestamp, copy count",
+      "Use LazyVStack for performance with large lists",
+      "Show content type icon/color coding",
+      "Highlight large entries (>10KB) with indicator",
+      "Verify scrolling is smooth with 1000+ entries"
+    ],
+    "passes": false
+  },
+  {
+    "category": "ui",
+    "description": "Create search bar with fuzzy toggle",
+    "steps": [
+      "Create SearchBarView in PastaUI",
+      "Text field with search icon",
+      "Toggle button for fuzzy/exact matching",
+      "Filter content type dropdown",
+      "Auto-focus on app show",
+      "Clear button",
+      "Show result count",
+      "Verify search updates list in real-time"
+    ],
+    "passes": false
+  },
+  {
+    "category": "ui",
+    "description": "Create entry preview panel",
+    "steps": [
+      "Create PreviewPanelView in PastaUI",
+      "Show full content for selected entry",
+      "Render images inline",
+      "Syntax highlight code snippets",
+      "Show decoded content for base64/URL encoded",
+      "Display all metadata (detected type, copy count, source app, timestamp)",
+      "For JWT: show decoded header/payload",
+      "Verify preview renders correctly for all content types"
+    ],
+    "passes": false
+  },
+  {
+    "category": "ui",
+    "description": "Implement keyboard navigation",
+    "steps": [
+      "Arrow up/down to navigate list",
+      "Enter to paste selected entry (copy to clipboard and simulate Cmd+V)",
+      "Number keys 1-9 to quick-paste corresponding entry",
+      "Escape to close window",
+      "Cmd+Backspace to delete selected entry",
+      "Tab to move between search and list",
+      "Verify all keyboard shortcuts work"
+    ],
+    "passes": false
+  },
+  {
+    "category": "ui",
+    "description": "Create content type filter sidebar",
+    "steps": [
+      "Create FilterSidebarView in PastaUI",
+      "Show all content types with counts",
+      "Click to filter list by type",
+      "Show 'All' option at top",
+      "For URLs: show sub-categories by domain",
+      "Highlight active filter",
+      "Verify filtering works correctly"
+    ],
+    "passes": false
+  },
+  {
+    "category": "ui",
+    "description": "Create delete confirmation dialogs",
+    "steps": [
+      "Create DeleteConfirmationView for single entry deletion",
+      "Create BulkDeleteView for 'delete last X minutes'",
+      "Time picker: 5min, 15min, 30min, 1hr, custom",
+      "Show count of entries to be deleted",
+      "Require confirmation before deletion",
+      "Verify dialogs appear and function correctly"
+    ],
+    "passes": false
+  },
+  {
+    "category": "ui",
+    "description": "Create settings/preferences view",
+    "steps": [
+      "Create SettingsView in PastaUI",
+      "Global hotkey customization",
+      "Launch at login toggle",
+      "Storage location display",
+      "Clear all history button",
+      "Storage usage display (total size, image size)",
+      "Max entries limit (optional)",
+      "Excluded apps list",
+      "Verify all settings persist and apply"
+    ],
+    "passes": false
+  },
+  {
+    "category": "ui",
+    "description": "Create onboarding flow for permissions",
+    "steps": [
+      "Create OnboardingView in PastaUI",
+      "Welcome screen with app description",
+      "Accessibility permission request with instructions",
+      "Guide user to System Settings > Privacy > Accessibility",
+      "Detect when permission granted and proceed",
+      "Show completion screen",
+      "Only show on first launch or if permissions revoked",
+      "Verify onboarding flow completes successfully"
+    ],
+    "passes": false
+  },
+  {
+    "category": "ui",
+    "description": "Design and implement app icon and visual theme",
+    "steps": [
+      "Create app icon: pasta/noodle themed (fork with spaghetti, or clipboard with pasta)",
+      "Generate all required icon sizes for macOS",
+      "Define color palette: warm pasta colors (golden yellow, tomato red accents)",
+      "Create content type icons for each category",
+      "Apply consistent styling across all views",
+      "Add app icon to Assets.xcassets",
+      "Verify icon appears in menu bar and dock"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Implement paste action (copy to clipboard and trigger paste)",
+    "steps": [
+      "Create PasteService in PastaCore",
+      "Copy selected entry content to system clipboard",
+      "Use CGEvent to simulate Cmd+V keypress",
+      "Hide app window after paste",
+      "Handle different content types (text, image, file)",
+      "Write tests for paste functionality"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Implement launch at login",
+    "steps": [
+      "Use SMAppService for login item registration (macOS 13+)",
+      "Add toggle in settings",
+      "Persist preference in UserDefaults",
+      "Verify app launches at system startup when enabled"
+    ],
+    "passes": false
+  },
+  {
+    "category": "functional",
+    "description": "Implement app exclusion list",
+    "steps": [
+      "Create ExclusionManager in PastaCore",
+      "Store excluded app bundle IDs in UserDefaults",
+      "Check source app against exclusion list in ClipboardMonitor",
+      "Skip recording entries from excluded apps",
+      "UI to add/remove apps from exclusion list",
+      "Write tests for exclusion logic"
+    ],
+    "passes": false
+  },
+  {
+    "category": "integration",
+    "description": "Wire up all components in main app",
+    "steps": [
+      "Connect ClipboardMonitor to DatabaseManager",
+      "Connect SearchService to UI",
+      "Connect HotkeyManager to window visibility",
+      "Connect PasteService to list selection",
+      "Connect DeleteService to UI actions",
+      "Verify full clipboard -> store -> search -> paste flow works",
+      "Test with real clipboard operations"
+    ],
+    "passes": false
+  },
+  {
+    "category": "integration",
+    "description": "Performance optimization and testing",
+    "steps": [
+      "Profile with Instruments for memory leaks",
+      "Ensure list scrolling stays at 60fps with 10000+ entries",
+      "Optimize search to return results in <100ms",
+      "Lazy load images in list view",
+      "Add database indexes for common queries",
+      "Verify app uses <100MB RAM under normal use"
+    ],
+    "passes": false
+  },
+  {
+    "category": "integration",
+    "description": "Error handling and edge cases",
+    "steps": [
+      "Handle database corruption gracefully",
+      "Handle disk full when saving images",
+      "Handle clipboard access denied",
+      "Handle hotkey conflict with other apps",
+      "Add logging for debugging (os_log)",
+      "Show user-friendly error messages",
+      "Write tests for error scenarios"
+    ],
+    "passes": false
+  },
+  {
+    "category": "documentation",
+    "description": "Create README and user documentation",
+    "steps": [
+      "Write README.md with project overview",
+      "Document build instructions",
+      "Document keyboard shortcuts",
+      "Add screenshots/GIFs of app in action",
+      "Document content type detection capabilities",
+      "Add troubleshooting section",
+      "Verify documentation is accurate"
+    ],
+    "passes": false
+  }
 ]

@@ -22,3 +22,5 @@ Date: 2026-01-19
 - Added unit tests with mock pasteboard and controlled tick publisher
 - Marked PRD item "Implement clipboard monitoring service" as complete
 
+- Added EmailDetector (regex-based) in PastaDetectors with tests
+- Marked PRD item "Build email address detector" as complete
