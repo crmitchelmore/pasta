@@ -24,3 +24,5 @@ Date: 2026-01-19
 
 - Added EmailDetector (regex-based) in PastaDetectors with tests
 - Marked PRD item "Build email address detector" as complete
+- Added JWTDetector (base64url decode + claim extraction + expiry) in PastaDetectors with tests
+- Marked PRD item "Build JWT token detector" as complete

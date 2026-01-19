@@ -87,7 +87,7 @@
       "Show expiration status in metadata",
       "Write tests with valid/expired/malformed JWTs"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
