@@ -100,7 +100,7 @@
       "Handle .env file format",
       "Write tests with various env var formats"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
