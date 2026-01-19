@@ -134,3 +134,9 @@ Date: 2026-01-19
 - Added unit tests for ExclusionManager parsing and clipboard exclusion behavior
 - Ran `swift test`
 - Marked PRD item "Implement app exclusion list" as complete
+
+- Wired ClipboardMonitor → ContentTypeDetector/ImageStorageManager → DatabaseManager via new `AppViewModel`
+- Popover UI now binds to `AppViewModel.entries` and auto-refreshes when the clipboard changes
+- Images are persisted to disk and stored as `imagePath` (raw image data not stored in DB)
+- Ran `swift build` + `swift test`
+- Marked PRD item "Wire up all components in main app" as complete

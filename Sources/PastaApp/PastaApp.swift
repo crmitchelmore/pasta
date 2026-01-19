@@ -45,7 +45,7 @@ private struct PopoverRootView: View {
 
     @AppStorage(Defaults.didCompleteOnboarding) private var didCompleteOnboarding: Bool = false
 
-    @State private var entries: [ClipboardEntry] = []
+    @StateObject private var appModel = AppViewModel()
 
     @State private var searchQuery: String = ""
     @State private var isFuzzySearch: Bool = false
@@ -63,10 +63,7 @@ private struct PopoverRootView: View {
     @FocusState private var searchFocused: Bool
     @FocusState private var listFocused: Bool
 
-    private let database: DatabaseManager = {
-        // UI fallback if the on-disk DB can't be created for any reason.
-        (try? DatabaseManager()) ?? (try! DatabaseManager.inMemory())
-    }()
+    private var database: DatabaseManager { appModel.database }
 
     private var displayedEntries: [ClipboardEntry] {
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -86,7 +83,7 @@ private struct PopoverRootView: View {
         }
 
         if trimmed.isEmpty {
-            return applyFilters(entries)
+            return applyFilters(appModel.entries)
         }
 
         let searchService = SearchService(database: database)
@@ -125,7 +122,7 @@ private struct PopoverRootView: View {
 
             HStack(alignment: .top, spacing: 12) {
                 FilterSidebarView(
-                    entries: entries,
+                    entries: appModel.entries,
                     selectedContentType: $contentTypeFilter,
                     selectedURLDomain: $urlDomainFilter
                 )
@@ -160,7 +157,7 @@ private struct PopoverRootView: View {
                 Button("Delete Recent…") {
                     isShowingBulkDelete = true
                 }
-                .disabled(entries.isEmpty)
+                .disabled(appModel.entries.isEmpty)
 
                 if let lastBulkDeleteSummary {
                     Text(lastBulkDeleteSummary)
@@ -212,7 +209,7 @@ private struct PopoverRootView: View {
             }
         }
         .sheet(isPresented: $isShowingBulkDelete) {
-            BulkDeleteView(entries: entries) { minutes in
+            BulkDeleteView(entries: appModel.entries) { minutes in
                 do {
                     let imageStorage = try ImageStorageManager()
                     let deleteService = DeleteService(database: database, imageStorage: imageStorage)
@@ -238,7 +235,7 @@ private struct PopoverRootView: View {
     }
 
     private func refreshEntries() {
-        entries = (try? database.fetchRecent(limit: 1_000)) ?? []
+        appModel.refresh()
     }
 
     private func handleKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {

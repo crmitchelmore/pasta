@@ -433,7 +433,7 @@
       "Verify full clipboard -> store -> search -> paste flow works",
       "Test with real clipboard operations"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "integration",
