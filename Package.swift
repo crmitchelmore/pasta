@@ -56,6 +56,7 @@ let package = Package(
         .target(
             name: "PastaDetectors",
             dependencies: [
+                "PastaCore",
                 .product(name: "Fuse", package: "fuse-swift")
             ]
         ),

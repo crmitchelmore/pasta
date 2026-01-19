@@ -34,3 +34,5 @@ Date: 2026-01-19
 - Added FilePathDetector (Unix + Windows path detection, tilde expansion, existence checks)
 - Added unit tests for FilePathDetector (including real temp file existence)
 - Marked PRD item "Build file path detector" as complete
+- Added CodeDetector (language identification heuristics + fenced-code-block support) in PastaDetectors with tests
+- Marked PRD item "Build code snippet detector with language identification" as complete

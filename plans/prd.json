@@ -138,7 +138,7 @@
       "Return detected language and confidence",
       "Write tests with code samples from each language"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
