@@ -52,3 +52,8 @@ Date: 2026-01-19
 - Added ClipboardEntry.contentHash (SHA256) helper
 - Added unit test covering dedupe behavior
 - Marked PRD item "Implement deduplication with copy count tracking" as complete
+- Implemented FTS5-backed exact search (virtual table + triggers + rebuild migration)
+- Implemented fuzzy search using Fuse with match ranges
+- Added PastaCore SearchService with fuzzy/exact mode and optional content type filter
+- Added unit tests for SearchService (exact, fuzzy, and content type filtering)
+- Marked PRD item "Implement full-text search with fuzzy matching toggle" as complete

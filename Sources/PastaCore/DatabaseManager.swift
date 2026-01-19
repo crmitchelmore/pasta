@@ -53,6 +53,43 @@ public final class DatabaseManager {
             try db.create(index: "idx_clipboard_entries_contentHash", on: ClipboardEntry.databaseTableName, columns: ["contentHash"])
         }
 
+        migrator.registerMigration("createClipboardEntriesFTS") { db in
+            try db.execute(sql: """
+            CREATE VIRTUAL TABLE clipboard_entries_fts USING fts5(
+                content,
+                contentType,
+                content='clipboard_entries',
+                content_rowid='rowid'
+            );
+            """)
+
+            try db.execute(sql: """
+            CREATE TRIGGER clipboard_entries_ai AFTER INSERT ON clipboard_entries BEGIN
+                INSERT INTO clipboard_entries_fts(rowid, content, contentType)
+                VALUES (new.rowid, new.content, new.contentType);
+            END;
+            """)
+
+            try db.execute(sql: """
+            CREATE TRIGGER clipboard_entries_ad AFTER DELETE ON clipboard_entries BEGIN
+                INSERT INTO clipboard_entries_fts(clipboard_entries_fts, rowid, content, contentType)
+                VALUES('delete', old.rowid, old.content, old.contentType);
+            END;
+            """)
+
+            try db.execute(sql: """
+            CREATE TRIGGER clipboard_entries_au AFTER UPDATE ON clipboard_entries BEGIN
+                INSERT INTO clipboard_entries_fts(clipboard_entries_fts, rowid, content, contentType)
+                VALUES('delete', old.rowid, old.content, old.contentType);
+                INSERT INTO clipboard_entries_fts(rowid, content, contentType)
+                VALUES (new.rowid, new.content, new.contentType);
+            END;
+            """)
+
+            // Index any existing rows (important for existing on-disk databases).
+            try db.execute(sql: "INSERT INTO clipboard_entries_fts(clipboard_entries_fts) VALUES('rebuild');")
+        }
+
         return migrator
     }
 
@@ -106,9 +143,19 @@ public final class DatabaseManager {
     }
 
     public func fetchRecent(limit: Int = 50) throws -> [ClipboardEntry] {
+        try fetchRecent(contentType: nil, limit: limit)
+    }
+
+    public func fetchRecent(contentType: ContentType?, limit: Int = 50) throws -> [ClipboardEntry] {
         try dbQueue.read { db in
-            try ClipboardEntry
+            var request = ClipboardEntry
                 .order(Column("timestamp").desc)
+
+            if let contentType {
+                request = request.filter(Column("contentType") == contentType.rawValue)
+            }
+
+            return try request
                 .limit(limit)
                 .fetchAll(db)
         }
@@ -141,6 +188,36 @@ public final class DatabaseManager {
                 .order(Column("timestamp").desc)
                 .limit(limit)
                 .fetchAll(db)
+        }
+    }
+
+    /// Exact full-text search using the FTS5 virtual table.
+    ///
+    /// - Returns: Tuples of (ClipboardEntry, rank) where lower rank is better.
+    public func searchExact(query: String, contentType: ContentType?, limit: Int = 50) throws -> [(ClipboardEntry, Double)] {
+        try dbQueue.read { db in
+            var sql = """
+            SELECT e.*, bm25(clipboard_entries_fts) AS rank
+            FROM clipboard_entries_fts
+            JOIN clipboard_entries e ON e.rowid = clipboard_entries_fts.rowid
+            WHERE clipboard_entries_fts MATCH ?
+            """
+
+            var args: [DatabaseValueConvertible] = [query]
+
+            if let contentType {
+                sql += " AND e.contentType = ?"
+                args.append(contentType.rawValue)
+            }
+
+            sql += " ORDER BY rank ASC, e.timestamp DESC LIMIT ?"
+            args.append(limit)
+
+            let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+            return rows.compactMap { row in
+                guard let entry = try? ClipboardEntry(row: row) else { return nil }
+                return (entry, row["rank"] ?? 0.0)
+            }
         }
     }
 

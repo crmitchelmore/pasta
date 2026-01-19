@@ -39,7 +39,8 @@ let package = Package(
         .target(
             name: "PastaCore",
             dependencies: [
-                .product(name: "GRDB", package: "GRDB.swift")
+                .product(name: "GRDB", package: "GRDB.swift"),
+                .product(name: "Fuse", package: "fuse-swift")
             ]
         ),
         

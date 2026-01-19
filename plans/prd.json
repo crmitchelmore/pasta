@@ -202,7 +202,7 @@
       "Return ranked results with match highlighting info",
       "Write tests for search accuracy"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
