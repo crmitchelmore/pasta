@@ -281,7 +281,7 @@
       "Show result count",
       "Verify search updates list in real-time"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "ui",

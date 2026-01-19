@@ -38,10 +38,38 @@ private struct PopoverRootView: View {
 
     @State private var entries: [ClipboardEntry] = []
 
+    @State private var searchQuery: String = ""
+    @State private var isFuzzySearch: Bool = false
+    @State private var contentTypeFilter: ContentType? = nil
+
     private let database: DatabaseManager = {
         // UI fallback if the on-disk DB can't be created for any reason.
         (try? DatabaseManager()) ?? (try! DatabaseManager.inMemory())
     }()
+
+    private var displayedEntries: [ClipboardEntry] {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if trimmed.isEmpty {
+            if let contentTypeFilter {
+                return entries.filter { $0.contentType == contentTypeFilter }
+            }
+            return entries
+        }
+
+        let searchService = SearchService(database: database)
+        do {
+            let matches = try searchService.search(
+                query: trimmed,
+                mode: isFuzzySearch ? .fuzzy : .exact,
+                contentType: contentTypeFilter,
+                limit: 200
+            )
+            return matches.map { $0.entry }
+        } catch {
+            return []
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -54,7 +82,14 @@ private struct PopoverRootView: View {
                 Button("Close") { dismiss() }
             }
 
-            ClipboardListView(entries: entries)
+            SearchBarView(
+                query: $searchQuery,
+                isFuzzy: $isFuzzySearch,
+                contentType: $contentTypeFilter,
+                resultCount: displayedEntries.count
+            )
+
+            ClipboardListView(entries: displayedEntries)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
