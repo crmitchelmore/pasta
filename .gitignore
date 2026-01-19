@@ -11,3 +11,6 @@ DerivedData/
 *.dSYM
 Packages/
 Package.resolved
+
+# Copilot CLI prompt/context artifacts
+.ralph-*

@@ -9,4 +9,8 @@ Date: 2026-01-19
 - Implemented core `ClipboardEntry` model (with `ContentType` + `CodeLanguage`) in PastaCore
 - Added Codable round-trip unit test for `ClipboardEntry`
 - Marked PRD item "Create core data model for clipboard entries" as complete
+- Added `DatabaseManager` (GRDB) with migrations + CRUD/search APIs
+- Added in-memory database factory for tests
+- Added unit tests for DatabaseManager CRUD and ordering
+- Marked PRD item "Set up SQLite database with GRDB for local storage" as complete
 

@@ -34,8 +34,9 @@
 			"Add methods: insert, fetchRecent, fetchAll, delete, search",
 			"Write tests for CRUD operations"
 		],
-		"passes": false
+		"passes": true
 	},
+
 	{
 		"category": "setup",
 		"description": "Create image storage manager for clipboard images",
