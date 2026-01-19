@@ -17,4 +17,8 @@ Date: 2026-01-19
 - Implemented save/load/delete + total storage bytes API
 - Added unit tests for image storage manager
 - Marked PRD item "Create image storage manager for clipboard images" as complete
+- Added `ClipboardMonitor` (Combine publisher) with injectable pasteboard/workspace + timer-driven polling
+- Implemented content extraction for text, RTF, image (TIFF data), and file URLs
+- Added unit tests with mock pasteboard and controlled tick publisher
+- Marked PRD item "Implement clipboard monitoring service" as complete
 

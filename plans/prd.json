@@ -64,7 +64,7 @@
 			"Handle app lifecycle (start/stop monitoring)",
 			"Write tests with mock pasteboard"
 		],
-		"passes": false
+		"passes": true
 	},
 	{
 		"category": "functional",
