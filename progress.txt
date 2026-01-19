@@ -41,3 +41,9 @@ Date: 2026-01-19
 - Marked PRD item "Build prose/natural text detector" as complete
 - Added EncodingDetector (base64 + URL-percent decoding, nested decoding, preview metadata JSON) in PastaDetectors with tests
 - Marked PRD item "Build base64 and URL encoding decoder" as complete
+
+- Added ContentTypeDetector (unified pipeline) orchestrating detectors with priority selection
+- Aggregated detector outputs into a single JSON metadata blob (JWT/email/env/url/path/code/prose + encoding)
+- Implemented env-var block splitting into per-var split entries
+- Added integration-style unit tests for ContentTypeDetector
+- Marked PRD item "Create unified content type detection pipeline" as complete

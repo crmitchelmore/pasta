@@ -176,7 +176,7 @@
       "Return primary type + all detected metadata",
       "Write integration tests"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",
