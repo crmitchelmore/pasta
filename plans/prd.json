@@ -310,7 +310,7 @@
       "Tab to move between search and list",
       "Verify all keyboard shortcuts work"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "ui",

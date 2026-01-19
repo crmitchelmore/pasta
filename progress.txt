@@ -87,3 +87,6 @@ Date: 2026-01-19
 - Wired list selection -> preview panel in the menu bar popover
 - Marked PRD item "Create entry preview panel" as complete
 
+- Implemented keyboard navigation in the menu bar popover (↑/↓ selection, Enter paste, 1-9 quick paste, Esc close, Tab focus, Cmd+Backspace delete)
+- Marked PRD item "Implement keyboard navigation" as complete
+

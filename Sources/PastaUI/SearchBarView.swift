@@ -7,19 +7,20 @@ public struct SearchBarView: View {
     @Binding private var contentType: ContentType?
 
     private let resultCount: Int
-
-    @FocusState private var isFocused: Bool
+    private let searchFocused: FocusState<Bool>.Binding
 
     public init(
         query: Binding<String>,
         isFuzzy: Binding<Bool>,
         contentType: Binding<ContentType?>,
-        resultCount: Int
+        resultCount: Int,
+        searchFocused: FocusState<Bool>.Binding
     ) {
         _query = query
         _isFuzzy = isFuzzy
         _contentType = contentType
         self.resultCount = resultCount
+        self.searchFocused = searchFocused
     }
 
     public var body: some View {
@@ -30,7 +31,7 @@ public struct SearchBarView: View {
 
                 TextField("Search", text: $query)
                     .textFieldStyle(.plain)
-                    .focused($isFocused)
+                    .focused(searchFocused)
 
                 if !query.isEmpty {
                     Button {
@@ -65,11 +66,6 @@ public struct SearchBarView: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .help("Result count")
-        }
-        .onAppear {
-            DispatchQueue.main.async {
-                isFocused = true
-            }
         }
     }
 }

@@ -19,15 +19,24 @@ public struct ClipboardListView: View {
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(entries, id: \.id) { entry in
-                        ClipboardRowView(entry: entry, isSelected: selectedEntryID == entry.id)
-                            .onTapGesture { selectedEntryID = entry.id }
-                            .padding(.horizontal, 8)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(entries, id: \.id) { entry in
+                            ClipboardRowView(entry: entry, isSelected: selectedEntryID == entry.id)
+                                .id(entry.id)
+                                .onTapGesture { selectedEntryID = entry.id }
+                                .padding(.horizontal, 8)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+                .onChange(of: selectedEntryID) { _, id in
+                    guard let id else { return }
+                    withAnimation(.snappy) {
+                        proxy.scrollTo(id, anchor: .center)
                     }
                 }
-                .padding(.vertical, 8)
             }
         }
     }

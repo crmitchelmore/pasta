@@ -44,6 +44,9 @@ private struct PopoverRootView: View {
 
     @State private var selectedEntryID: UUID? = nil
 
+    @FocusState private var searchFocused: Bool
+    @FocusState private var listFocused: Bool
+
     private let database: DatabaseManager = {
         // UI fallback if the on-disk DB can't be created for any reason.
         (try? DatabaseManager()) ?? (try! DatabaseManager.inMemory())
@@ -88,12 +91,19 @@ private struct PopoverRootView: View {
                 query: $searchQuery,
                 isFuzzy: $isFuzzySearch,
                 contentType: $contentTypeFilter,
-                resultCount: displayedEntries.count
+                resultCount: displayedEntries.count,
+                searchFocused: $searchFocused
             )
 
             HStack(alignment: .top, spacing: 12) {
                 ClipboardListView(entries: displayedEntries, selectedEntryID: $selectedEntryID)
                     .frame(width: 320)
+                    .focusable()
+                    .focused($listFocused)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(listFocused ? Color.accentColor.opacity(0.7) : .clear, lineWidth: 2)
+                    }
 
                 PreviewPanelView(entry: displayedEntries.first(where: { $0.id == selectedEntryID }))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -104,7 +114,7 @@ private struct PopoverRootView: View {
 
             HStack {
                 Button("Refresh") {
-                    entries = (try? database.fetchRecent(limit: 1_000)) ?? []
+                    refreshEntries()
                 }
 
                 Spacer()
@@ -118,12 +128,170 @@ private struct PopoverRootView: View {
         .padding(16)
         .frame(width: 900, height: 640)
         .onAppear {
-            entries = (try? database.fetchRecent(limit: 1_000)) ?? []
+            refreshEntries()
+            if selectedEntryID == nil {
+                selectedEntryID = displayedEntries.first?.id
+            }
+            DispatchQueue.main.async {
+                searchFocused = true
+            }
         }
         .onChange(of: displayedEntries.map(\.id)) { _, ids in
             if let selectedEntryID, !ids.contains(selectedEntryID) {
                 self.selectedEntryID = nil
             }
+            if self.selectedEntryID == nil, let first = ids.first {
+                self.selectedEntryID = first
+            }
+        }
+        .onKeyPress { keyPress in
+            handleKeyPress(keyPress)
+        }
+    }
+
+    private func refreshEntries() {
+        entries = (try? database.fetchRecent(limit: 1_000)) ?? []
+    }
+
+    private func handleKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
+        switch keyPress.key {
+        case .escape:
+            dismiss()
+            return .handled
+
+        case .tab:
+            if keyPress.modifiers.contains(.shift) {
+                // Shift+Tab: reverse cycle.
+                if listFocused {
+                    listFocused = false
+                    searchFocused = true
+                } else {
+                    searchFocused = false
+                    listFocused = true
+                }
+            } else {
+                if searchFocused {
+                    searchFocused = false
+                    listFocused = true
+                } else {
+                    listFocused = false
+                    searchFocused = true
+                }
+            }
+            return .handled
+
+        case .upArrow:
+            moveSelection(delta: -1)
+            return .handled
+
+        case .downArrow:
+            moveSelection(delta: 1)
+            return .handled
+
+        case .return:
+            pasteSelectedEntry()
+            return .handled
+
+        case .delete:
+            if keyPress.modifiers.contains(.command) {
+                deleteSelectedEntry()
+                return .handled
+            }
+            return .ignored
+
+        default:
+            break
+        }
+
+        // Quick paste (1-9)
+        let chars = keyPress.characters
+        if keyPress.modifiers.isEmpty, chars.count == 1, let digit = Int(chars), (1...9).contains(digit) {
+            quickPaste(index: digit - 1)
+            return .handled
+        }
+
+        return .ignored
+    }
+
+    private func moveSelection(delta: Int) {
+        guard !displayedEntries.isEmpty else { return }
+
+        let currentIndex: Int
+        if let selectedEntryID, let idx = displayedEntries.firstIndex(where: { $0.id == selectedEntryID }) {
+            currentIndex = idx
+        } else {
+            currentIndex = 0
+        }
+
+        let nextIndex = min(max(currentIndex + delta, 0), displayedEntries.count - 1)
+        selectedEntryID = displayedEntries[nextIndex].id
+    }
+
+    private func quickPaste(index: Int) {
+        guard index >= 0, index < displayedEntries.count else { return }
+        selectedEntryID = displayedEntries[index].id
+        pasteSelectedEntry()
+    }
+
+    private func pasteSelectedEntry() {
+        guard let selectedEntryID,
+              let entry = displayedEntries.first(where: { $0.id == selectedEntryID }) else { return }
+
+        copyToPasteboard(entry)
+        simulateCommandV()
+
+        dismiss()
+        NSApplication.shared.hide(nil)
+    }
+
+    private func copyToPasteboard(_ entry: ClipboardEntry) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+
+        switch entry.contentType {
+        case .image:
+            if let data = entry.rawData {
+                pb.setData(data, forType: .tiff)
+            }
+
+        case .filePath:
+            let paths = entry.content
+                .split(separator: "\n")
+                .map(String.init)
+                .filter { !$0.isEmpty }
+            let urls = paths.map { URL(fileURLWithPath: $0) }
+            pb.writeObjects(urls as [NSURL])
+
+        default:
+            pb.setString(entry.content, forType: .string)
+        }
+    }
+
+    private func simulateCommandV() {
+        // Best-effort. Requires Accessibility permissions.
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let keyCodeV: CGKeyCode = 9
+
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: keyCodeV, keyDown: true)
+        keyDown?.flags = .maskCommand
+
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: keyCodeV, keyDown: false)
+        keyUp?.flags = .maskCommand
+
+        keyDown?.post(tap: .cghidEventTap)
+        keyUp?.post(tap: .cghidEventTap)
+    }
+
+    private func deleteSelectedEntry() {
+        guard let selectedEntryID else { return }
+
+        do {
+            let imageStorage = try ImageStorageManager()
+            let deleteService = DeleteService(database: database, imageStorage: imageStorage)
+            _ = try deleteService.delete(id: selectedEntryID)
+            refreshEntries()
+        } catch {
+            // Ignore and keep UI responsive.
         }
     }
 }
