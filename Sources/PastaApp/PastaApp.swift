@@ -5,6 +5,8 @@ import PastaCore
 import PastaDetectors
 import PastaUI
 
+// (PastaTheme lives in PastaUI)
+
 @main
 struct PastaApp: App {
     // Keep this alive for the lifetime of the app.
@@ -106,6 +108,7 @@ private struct PopoverRootView: View {
             HStack {
                 Text("Pasta")
                     .font(.headline)
+                    .foregroundStyle(PastaTheme.accent)
 
                 Spacer()
 
@@ -174,6 +177,7 @@ private struct PopoverRootView: View {
             }
         }
         .padding(16)
+        .tint(PastaTheme.accent)
         .frame(width: 900, height: 640)
         .onAppear {
             refreshEntries()

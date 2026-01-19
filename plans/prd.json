@@ -382,7 +382,7 @@
       "Add app icon to Assets.xcassets",
       "Verify icon appears in menu bar and dock"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "functional",

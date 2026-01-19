@@ -18,17 +18,6 @@ extension ContentType {
     }
 
     var tint: Color {
-        switch self {
-        case .text: return .secondary
-        case .email: return .blue
-        case .jwt: return .purple
-        case .envVar, .envVarBlock: return .green
-        case .prose: return .teal
-        case .image: return .pink
-        case .filePath: return .brown
-        case .url: return .indigo
-        case .code: return .orange
-        case .unknown: return .gray
-        }
+        PastaTheme.tint(for: self)
     }
 }

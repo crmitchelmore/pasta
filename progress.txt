@@ -116,3 +116,9 @@ Date: 2026-01-19
 - Wired onboarding to present on first launch and if permissions are revoked
 - Ran `swift build` + `swift test`
 - Marked PRD item "Create onboarding flow for permissions" as complete
+
+- Added PastaUI `PastaTheme` with a warm palette (gold/tomato/basil) and app-wide accent tint
+- Updated content-type tint colors to use the PastaTheme palette for a more cohesive UI
+- Verified AppIcon + MenuBarIcon assets in Assets.xcassets
+- Ran `swift build` + `swift test`
+- Marked PRD item "Design and implement app icon and visual theme" as complete
