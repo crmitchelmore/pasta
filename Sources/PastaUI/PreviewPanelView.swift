@@ -208,19 +208,40 @@ private struct MonospaceText: View {
 private struct ImagePreview: View {
     let path: String
 
+    @State private var image: NSImage?
+
     var body: some View {
-        if let image = NSImage(contentsOfFile: path) {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        } else {
-            ContentUnavailableView(
-                "Missing image",
-                systemImage: "photo",
-                description: Text(path)
-            )
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+        .onAppear {
+            guard image == nil else { return }
+            let path = self.path
+            DispatchQueue.global(qos: .userInitiated).async {
+                let loaded = NSImage(contentsOfFile: path)
+                DispatchQueue.main.async {
+                    self.image = loaded
+                }
+            }
+        }
+        .overlay {
+            if image == nil {
+                ContentUnavailableView(
+                    "Missing image",
+                    systemImage: "photo",
+                    description: Text(path)
+                )
+                .opacity(0) // keeps layout stable while loading
+            }
         }
     }
 }

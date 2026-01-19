@@ -107,7 +107,7 @@ public struct SettingsView: View {
                         Text("Max entries: \(maxEntries)")
                     }
                 }
-                .help("Enforcement implemented in a later PRD item")
+                .help("Keeps only the newest N entries (0 = unlimited).")
             }
 
             Section("Excluded apps") {

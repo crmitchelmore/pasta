@@ -5,6 +5,10 @@ import Foundation
 import PastaDetectors
 
 final class AppViewModel: ObservableObject {
+    private enum Defaults {
+        static let maxEntries = "pasta.maxEntries"
+    }
+
     @Published private(set) var entries: [ClipboardEntry] = []
 
     let database: DatabaseManager
@@ -51,10 +55,21 @@ final class AppViewModel: ObservableObject {
                         try? self.database.insert(e)
                     }
 
+                    self.enforceMaxEntriesLimit()
                     self.refresh()
                 }
             }
             .store(in: &cancellables)
+    }
+
+    private func enforceMaxEntriesLimit() {
+        let maxEntries = UserDefaults.standard.integer(forKey: Defaults.maxEntries)
+        guard maxEntries > 0 else { return }
+
+        guard let imagePaths = try? database.pruneToMaxEntries(maxEntries) else { return }
+        for path in imagePaths {
+            try? imageStorage.deleteImage(path: path)
+        }
     }
 
     private func enrich(_ entry: ClipboardEntry) throws -> [ClipboardEntry] {

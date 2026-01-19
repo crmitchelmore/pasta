@@ -51,6 +51,8 @@ public final class DatabaseManager {
             try db.create(index: "idx_clipboard_entries_timestamp", on: ClipboardEntry.databaseTableName, columns: ["timestamp"])
             try db.create(index: "idx_clipboard_entries_contentType", on: ClipboardEntry.databaseTableName, columns: ["contentType"])
             try db.create(index: "idx_clipboard_entries_contentHash", on: ClipboardEntry.databaseTableName, columns: ["contentHash"])
+            // Common query: WHERE contentType = ? ORDER BY timestamp DESC LIMIT ?
+            try db.create(index: "idx_clipboard_entries_contentType_timestamp", on: ClipboardEntry.databaseTableName, columns: ["contentType", "timestamp"])
         }
 
         migrator.registerMigration("createClipboardEntriesFTS") { db in
@@ -260,6 +262,43 @@ public final class DatabaseManager {
                 guard let entry = try? ClipboardEntry(row: row) else { return nil }
                 return (entry, row["rank"] ?? 0.0)
             }
+        }
+    }
+
+    /// Deletes entries older than the newest `maxEntries` and returns any associated image paths.
+    public func pruneToMaxEntries(_ maxEntries: Int) throws -> [String] {
+        guard maxEntries > 0 else { return [] }
+
+        return try dbQueue.write { db in
+            let imagePaths = try String.fetchAll(
+                db,
+                sql: """
+                SELECT imagePath
+                FROM clipboard_entries
+                WHERE rowid IN (
+                    SELECT rowid
+                    FROM clipboard_entries
+                    ORDER BY timestamp DESC
+                    LIMIT -1 OFFSET ?
+                ) AND imagePath IS NOT NULL
+                """,
+                arguments: [maxEntries]
+            )
+
+            try db.execute(
+                sql: """
+                DELETE FROM clipboard_entries
+                WHERE rowid IN (
+                    SELECT rowid
+                    FROM clipboard_entries
+                    ORDER BY timestamp DESC
+                    LIMIT -1 OFFSET ?
+                )
+                """,
+                arguments: [maxEntries]
+            )
+
+            return imagePaths
         }
     }
 
