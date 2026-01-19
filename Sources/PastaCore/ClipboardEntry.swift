@@ -81,3 +81,4 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord {
         container["sourceApp"] = sourceApp
         container["metadata"] = metadata
     }
+}
