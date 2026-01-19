@@ -9,7 +9,7 @@
 			"Create folder structure matching modules",
 			"Verify swift build succeeds"
 		],
-		"passes": false
+		"passes": true
 	},
 	{
 		"category": "setup",

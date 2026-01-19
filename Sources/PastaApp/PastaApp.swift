@@ -1,4 +1,3 @@
-// Placeholder - PastaApp main entry point will be implemented here
 import Foundation
 
 @main

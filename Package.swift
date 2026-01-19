@@ -29,6 +29,9 @@ let package = Package(
                 "PastaUI",
                 "PastaDetectors",
                 "HotKey"
+            ],
+            resources: [
+                .process("Resources")
             ]
         ),
         
