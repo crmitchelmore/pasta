@@ -446,7 +446,7 @@
       "Add database indexes for common queries",
       "Verify app uses <100MB RAM under normal use"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "integration",
@@ -460,7 +460,7 @@
       "Show user-friendly error messages",
       "Write tests for error scenarios"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "documentation",
@@ -474,6 +474,6 @@
       "Add troubleshooting section",
       "Verify documentation is accurate"
     ],
-    "passes": false
+    "passes": true
   }
 ]

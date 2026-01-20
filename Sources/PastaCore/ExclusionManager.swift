@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 
 public final class ExclusionManager {
     private let userDefaults: UserDefaults
@@ -21,6 +22,10 @@ public final class ExclusionManager {
 
     public func isExcluded(bundleIdentifier: String?) -> Bool {
         guard let bundleIdentifier, !bundleIdentifier.isEmpty else { return false }
-        return excludedBundleIdentifiers.contains(bundleIdentifier)
+        let excluded = excludedBundleIdentifiers.contains(bundleIdentifier)
+        if excluded {
+            PastaLogger.clipboard.debug("App excluded from clipboard history: \(bundleIdentifier)")
+        }
+        return excluded
     }
 }

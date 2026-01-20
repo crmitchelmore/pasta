@@ -5,14 +5,20 @@ import GRDB
 public enum ContentType: String, Codable, CaseIterable {
     case text
     case email
+    case phoneNumber
+    case ipAddress
+    case uuid
+    case hash
     case jwt
     case envVar
     case envVarBlock
     case prose
     case image
+    case screenshot
     case filePath
     case url
     case code
+    case shellCommand
     case unknown
 }
 
@@ -50,7 +56,10 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord {
     public var metadata: String?
 
     public var contentHash: String {
-        ClipboardEntry.sha256Hex(content)
+        if (contentType == .image || contentType == .screenshot), let data = rawData {
+            return ClipboardEntry.sha256Hex(data)
+        }
+        return ClipboardEntry.sha256Hex(content)
     }
 
     public init(
@@ -89,6 +98,11 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord {
 
     static func sha256Hex(_ string: String) -> String {
         let digest = SHA256.hash(data: Data(string.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func sha256Hex(_ data: Data) -> String {
+        let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

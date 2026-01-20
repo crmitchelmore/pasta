@@ -30,6 +30,17 @@ final class PasteServiceTests: XCTestCase {
         XCTAssertEqual(sim.callCount, 1)
     }
 
+    func testCopiesTextWithoutSimulatingCommandV() {
+        let pb = StubPasteboard()
+        let sim = StubSimulator()
+        let service = PasteService(pasteboard: pb, simulator: sim)
+
+        let entry = ClipboardEntry(content: "hello", contentType: .text)
+        XCTAssertTrue(service.copy(entry))
+        XCTAssertEqual(pb.written, .text("hello"))
+        XCTAssertEqual(sim.callCount, 0)
+    }
+
     func testPastesFilePathsAsURLs() {
         let pb = StubPasteboard()
         let sim = StubSimulator()

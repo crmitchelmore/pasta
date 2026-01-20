@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 
 #if canImport(AppKit)
 import AppKit
@@ -52,6 +53,8 @@ public final class HotkeyManager: ObservableObject {
         let initial = HotkeyManager.loadHotkey(from: userDefaults)
         hotKey = provider.makeHotKey(key: initial.key, modifiers: initial.modifiers)
         hotKey.keyDownHandler = onTrigger
+        
+        PastaLogger.hotkey.info("Hotkey registered: \(String(describing: initial.key)) with modifiers \(initial.modifiers.rawValue)")
 
         defaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
@@ -72,6 +75,7 @@ public final class HotkeyManager: ObservableObject {
         let pref = HotkeyManager.loadHotkey(from: userDefaults)
         hotKey = provider.makeHotKey(key: pref.key, modifiers: pref.modifiers)
         hotKey.keyDownHandler = onTrigger
+        PastaLogger.hotkey.info("Hotkey reloaded: \(String(describing: pref.key))")
     }
 
     private static func loadHotkey(from userDefaults: UserDefaults) -> (key: Key, modifiers: NSEvent.ModifierFlags) {

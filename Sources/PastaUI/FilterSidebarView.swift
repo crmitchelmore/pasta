@@ -7,85 +7,78 @@ public struct FilterSidebarView: View {
 
     @Binding private var selectedContentType: ContentType?
     @Binding private var selectedURLDomain: String?
+    @Binding private var selection: FilterSelection?
+
+    @State private var showDomains: Bool = false
 
     public init(
         entries: [ClipboardEntry],
         selectedContentType: Binding<ContentType?>,
-        selectedURLDomain: Binding<String?>
+        selectedURLDomain: Binding<String?>,
+        selection: Binding<FilterSelection?>
     ) {
         self.entries = entries
         _selectedContentType = selectedContentType
         _selectedURLDomain = selectedURLDomain
+        _selection = selection
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Filter")
-                .font(.headline)
+        List(selection: $selection) {
+            Section("All") {
+                sidebarRow(
+                    title: "All",
+                    systemImageName: "line.3.horizontal.decrease.circle",
+                    count: entries.count,
+                    selectionValue: .all
+                )
+            }
 
-            filterButton(
-                title: "All",
-                systemImageName: "line.3.horizontal.decrease.circle",
-                count: entries.count,
-                isSelected: selectedContentType == nil,
-                action: {
-                    selectedContentType = nil
-                    selectedURLDomain = nil
+            Section("Types") {
+                ForEach(ContentType.allCases, id: \.self) { type in
+                    sidebarRow(
+                        title: typeTitle(type),
+                        systemImageName: type.systemImageName,
+                        count: typeCounts[type, default: 0],
+                        tint: type.tint,
+                        selectionValue: .type(type)
+                    )
                 }
-            )
+            }
 
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(ContentType.allCases, id: \.self) { type in
-                        filterButton(
-                            title: typeTitle(type),
-                            systemImageName: type.systemImageName,
-                            count: typeCounts[type, default: 0],
-                            isSelected: selectedContentType == type,
-                            tint: type.tint,
-                            action: {
-                                selectedContentType = type
-                                if type != .url {
-                                    selectedURLDomain = nil
-                                }
-                            }
-                        )
-                    }
-
-                    if selectedContentType == .url, !domainCounts.isEmpty {
-                        Divider().padding(.vertical, 6)
-
-                        Text("Domains")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        filterButton(
+            if !domainCounts.isEmpty {
+                Section {
+                    DisclosureGroup("Domains", isExpanded: $showDomains) {
+                        sidebarRow(
                             title: "All Domains",
                             systemImageName: "globe",
                             count: domainCounts.values.reduce(0, +),
-                            isSelected: selectedURLDomain == nil,
-                            action: { selectedURLDomain = nil }
+                            selectionValue: .domain("")
                         )
 
                         ForEach(sortedDomains, id: \.domain) { item in
-                            filterButton(
+                            sidebarRow(
                                 title: item.domain,
                                 systemImageName: "link",
                                 count: item.count,
-                                isSelected: selectedURLDomain == item.domain,
-                                action: { selectedURLDomain = item.domain }
+                                selectionValue: .domain(item.domain)
                             )
                         }
                     }
                 }
-                .padding(.vertical, 2)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .listStyle(.sidebar)
+        .onAppear { syncSelectionFromBindings() }
+        .onChange(of: selection) { _, newValue in
+            applySelection(newValue)
+        }
+        .onChange(of: selectedContentType) { _, _ in
+            syncSelectionFromBindings()
+        }
+        .onChange(of: selectedURLDomain) { _, _ in
+            syncSelectionFromBindings()
+        }
     }
 
     private var typeCounts: [ContentType: Int] {
@@ -119,45 +112,64 @@ public struct FilterSidebarView: View {
             .map { ($0.key, $0.value) }
     }
 
-    private func filterButton(
+    private func sidebarRow(
         title: String,
         systemImageName: String,
         count: Int,
-        isSelected: Bool,
         tint: Color? = nil,
-        action: @escaping () -> Void
+        selectionValue: FilterSelection
     ) -> some View {
-        Button(action: action) {
+        let isDisabled = count == 0 && selectionValue != .all
+        return Label {
             HStack(spacing: 8) {
-                Image(systemName: systemImageName)
-                    .frame(width: 16)
-                    .foregroundStyle(tint ?? .secondary)
-
                 Text(title)
                     .lineLimit(1)
-
                 Spacer(minLength: 0)
-
-                Text("\(count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(isSelected ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        } icon: {
+            Image(systemName: systemImageName)
+                .foregroundStyle(tint ?? .secondary)
         }
-        .buttonStyle(.plain)
-        .disabled(count == 0)
-        .opacity(count == 0 ? 0.5 : 1.0)
+        .tag(selectionValue)
+        .disabled(isDisabled)
         .help(title)
     }
 
-    private func typeTitle(_ type: ContentType) -> String {
-        switch type {
-        case .envVar: return "Env"
-        case .envVarBlock: return "Env Block"
-        default:
-            return type.rawValue.capitalized
+    private func applySelection(_ selection: FilterSelection?) {
+        switch selection {
+        case .none, .all:
+            selectedContentType = nil
+            selectedURLDomain = nil
+        case .type(let type):
+            selectedContentType = type
+            if type != .url {
+                selectedURLDomain = nil
+            }
+        case .domain(let domain):
+            selectedContentType = .url
+            selectedURLDomain = domain.isEmpty ? nil : domain
         }
+    }
+
+    private func syncSelectionFromBindings() {
+        if let domain = selectedURLDomain, !domain.isEmpty {
+            selection = .domain(domain)
+            showDomains = true
+            return
+        }
+        if let type = selectedContentType {
+            selection = .type(type)
+            return
+        }
+        selection = .all
+    }
+
+    private func typeTitle(_ type: ContentType) -> String {
+        type.displayTitle
     }
 }

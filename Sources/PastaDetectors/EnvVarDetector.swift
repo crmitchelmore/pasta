@@ -58,7 +58,12 @@ public struct EnvVarDetector {
         let isBlock = detections.count >= 2
 
         // Confidence is highest when the text is essentially an env block (i.e. every non-comment line parsed).
-        let confidence: Double = (detections.count == nonEmptyNonCommentLineCount) ? 0.95 : 0.75
+        let confidence: Double
+        if detections.count == nonEmptyNonCommentLineCount {
+            confidence = isBlock ? 0.95 : 0.85
+        } else {
+            confidence = isBlock ? 0.8 : 0.7
+        }
         let adjusted = detections.map { Detection(key: $0.key, value: $0.value, isExported: $0.isExported, confidence: confidence) }
 
         return Output(detections: adjusted, isBlock: isBlock)

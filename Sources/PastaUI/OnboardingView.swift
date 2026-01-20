@@ -16,6 +16,7 @@ public struct OnboardingView: View {
 
     @State private var step: Step = .welcome
     @State private var isTrusted: Bool = AccessibilityPermission.isTrusted()
+    @State private var pollTimer: Timer? = nil
 
     private let onComplete: (Completion) -> Void
 
@@ -46,6 +47,10 @@ public struct OnboardingView: View {
         .frame(width: 520, height: 340)
         .onAppear {
             refreshTrust()
+            startPolling()
+        }
+        .onDisappear {
+            stopPolling()
         }
     }
 
@@ -90,16 +95,13 @@ public struct OnboardingView: View {
                     openAccessibilitySettings()
                 }
 
-                Button("Request Prompt") {
+                Button("Show Permission Prompt") {
                     AccessibilityPermission.requestPrompt()
                 }
                 .help("Shows the system prompt (if available).")
 
-                Button("Check Again") {
+                Button("Refresh Permission Status") {
                     refreshTrust()
-                    if isTrusted {
-                        step = .done
-                    }
                 }
             }
 
@@ -107,7 +109,7 @@ public struct OnboardingView: View {
                 Image(systemName: isTrusted ? "checkmark.circle.fill" : "xmark.circle")
                     .foregroundStyle(isTrusted ? .green : .secondary)
 
-                Text(isTrusted ? "Accessibility permission granted." : "Not granted yet.")
+                Text(isTrusted ? "Accessibility permission granted." : "Not granted yet. Pasta can still capture history.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -119,7 +121,7 @@ public struct OnboardingView: View {
             Text("You're all set")
                 .font(.headline)
 
-            Text("Use ⌃⌘C to open Pasta, search your clipboard history, and press Enter to paste.")
+            Text("Use ⌃⌘C to open Pasta, search your clipboard history, and press ↩︎ to paste.")
                 .foregroundStyle(.secondary)
 
             HStack {
@@ -143,6 +145,21 @@ public struct OnboardingView: View {
 
     private func refreshTrust() {
         isTrusted = AccessibilityPermission.isTrusted()
+        if isTrusted {
+            step = .done
+        }
+    }
+
+    private func startPolling() {
+        guard pollTimer == nil else { return }
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in
+            refreshTrust()
+        }
+    }
+
+    private func stopPolling() {
+        pollTimer?.invalidate()
+        pollTimer = nil
     }
 
     private func openAccessibilitySettings() {

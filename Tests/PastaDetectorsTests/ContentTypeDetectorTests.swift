@@ -47,6 +47,33 @@ final class ContentTypeDetectorTests: XCTestCase {
         XCTAssertEqual(out.primaryType, .url)
     }
 
+    func testDetectsIPAddressAsPrimary() throws {
+        let detector = ContentTypeDetector()
+        let out = detector.detect(in: "ping 192.168.1.5")
+        XCTAssertEqual(out.primaryType, .ipAddress)
+
+        let meta = try XCTUnwrap(parseJSON(out.metadataJSON))
+        XCTAssertNotNil(meta["ipAddresses"])
+    }
+
+    func testDetectsUUIDAsPrimary() throws {
+        let detector = ContentTypeDetector()
+        let out = detector.detect(in: "id=550e8400-e29b-41d4-a716-446655440000")
+        XCTAssertEqual(out.primaryType, .uuid)
+
+        let meta = try XCTUnwrap(parseJSON(out.metadataJSON))
+        XCTAssertNotNil(meta["uuids"])
+    }
+
+    func testDetectsHashAsPrimary() throws {
+        let detector = ContentTypeDetector()
+        let out = detector.detect(in: "sha256=9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08")
+        XCTAssertEqual(out.primaryType, .hash)
+
+        let meta = try XCTUnwrap(parseJSON(out.metadataJSON))
+        XCTAssertNotNil(meta["hashes"])
+    }
+
     private func parseJSON(_ json: String?) -> [String: Any]? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         return (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any]

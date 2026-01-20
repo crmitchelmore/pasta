@@ -140,3 +140,14 @@ Date: 2026-01-19
 - Images are persisted to disk and stored as `imagePath` (raw image data not stored in DB)
 - Ran `swift build` + `swift test`
 - Marked PRD item "Wire up all components in main app" as complete
+- Performance: enforced max entries limit, added DB index for common queries, and lazy-loaded images in the list; ran `swift build` + `swift test`
+
+- Added centralized error handling (`PastaError`) and structured logging (`PastaLogger` using `os.log`)
+- Improved database corruption handling: detect corrupt/not-a-db errors, attempt recovery by removing sqlite + wal/shm and recreating
+- Improved image save behavior on disk-full/read-only: save entry without image and notify user
+- Improved paste behavior when Accessibility is missing: still copies to clipboard, skips Cmd+V simulation, logs warning
+- Surfaced user-friendly errors via an alert in the menu bar popover
+- Marked PRD item "Error handling and edge cases" as complete
+
+- Updated README with usage flow, permissions guidance, embedded app/menu bar icons, and troubleshooting section
+- Marked PRD item "Create README and user documentation" as complete

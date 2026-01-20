@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import os.log
 
 #if canImport(AppKit)
 import AppKit
@@ -10,7 +11,13 @@ public final class ImageStorageManager {
 
     public init(imagesDirectoryURL: URL = ImageStorageManager.defaultImagesDirectoryURL()) throws {
         self.imagesDirectoryURL = imagesDirectoryURL
-        try FileManager.default.createDirectory(at: imagesDirectoryURL, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: imagesDirectoryURL, withIntermediateDirectories: true)
+            PastaLogger.storage.info("Image storage initialized at \(imagesDirectoryURL.path)")
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.storage, context: "Failed to create images directory")
+            throw PastaError.storageUnavailable(path: imagesDirectoryURL.path)
+        }
     }
 
     public static func defaultImagesDirectoryURL() -> URL {
@@ -27,7 +34,18 @@ public final class ImageStorageManager {
         let url = imagesDirectoryURL.appendingPathComponent(filename)
 
         if !FileManager.default.fileExists(atPath: url.path) {
-            try data.write(to: url, options: [.atomic])
+            do {
+                try data.write(to: url, options: [.atomic])
+                PastaLogger.storage.debug("Saved image to \(url.path) (\(data.count) bytes)")
+            } catch let error as NSError {
+                // Check for disk full errors
+                if error.domain == NSCocoaErrorDomain && (error.code == NSFileWriteOutOfSpaceError || error.code == NSFileWriteVolumeReadOnlyError) {
+                    PastaLogger.storage.error("Disk full or read-only when saving image")
+                    throw PastaError.diskFull(path: url.path, underlying: error)
+                }
+                PastaLogger.logError(error, logger: PastaLogger.storage, context: "Failed to save image")
+                throw PastaError.imageSaveFailed(underlying: error)
+            }
         }
 
         return url.path
@@ -46,7 +64,13 @@ public final class ImageStorageManager {
     public func deleteImage(path: String) throws {
         let url = URL(fileURLWithPath: path)
         if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
+            do {
+                try FileManager.default.removeItem(at: url)
+                PastaLogger.storage.debug("Deleted image at \(path)")
+            } catch {
+                PastaLogger.logError(error, logger: PastaLogger.storage, context: "Failed to delete image")
+                throw error
+            }
         }
     }
 

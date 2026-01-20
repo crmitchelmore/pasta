@@ -32,30 +32,45 @@ public struct ContentTypeDetector {
     }
 
     private let emailDetector: EmailDetector
+    private let phoneNumberDetector: PhoneNumberDetector
+    private let ipAddressDetector: IPAddressDetector
+    private let uuidDetector: UUIDDetector
+    private let hashDetector: HashDetector
     private let jwtDetector: JWTDetector
     private let envVarDetector: EnvVarDetector
     private let urlDetector: URLDetector
     private let filePathDetector: FilePathDetector
     private let codeDetector: CodeDetector
+    private let shellCommandDetector: ShellCommandDetector
     private let proseDetector: ProseDetector
     private let encodingDetector: EncodingDetector
 
     public init(
         emailDetector: EmailDetector = EmailDetector(),
+        phoneNumberDetector: PhoneNumberDetector = PhoneNumberDetector(),
+        ipAddressDetector: IPAddressDetector = IPAddressDetector(),
+        uuidDetector: UUIDDetector = UUIDDetector(),
+        hashDetector: HashDetector = HashDetector(),
         jwtDetector: JWTDetector = JWTDetector(),
         envVarDetector: EnvVarDetector = EnvVarDetector(),
         urlDetector: URLDetector = URLDetector(),
         filePathDetector: FilePathDetector = FilePathDetector(),
         codeDetector: CodeDetector = CodeDetector(),
+        shellCommandDetector: ShellCommandDetector = ShellCommandDetector(),
         proseDetector: ProseDetector = ProseDetector(),
         encodingDetector: EncodingDetector = EncodingDetector()
     ) {
         self.emailDetector = emailDetector
+        self.phoneNumberDetector = phoneNumberDetector
+        self.ipAddressDetector = ipAddressDetector
+        self.uuidDetector = uuidDetector
+        self.hashDetector = hashDetector
         self.jwtDetector = jwtDetector
         self.envVarDetector = envVarDetector
         self.urlDetector = urlDetector
         self.filePathDetector = filePathDetector
         self.codeDetector = codeDetector
+        self.shellCommandDetector = shellCommandDetector
         self.proseDetector = proseDetector
         self.encodingDetector = encodingDetector
     }
@@ -73,20 +88,30 @@ public struct ContentTypeDetector {
 
         let jwt = jwtDetector.detect(in: analysisText)
         let emails = emailDetector.detect(in: analysisText)
+        let phoneNumbers = phoneNumberDetector.detect(in: analysisText)
+        let ipAddresses = ipAddressDetector.detect(in: analysisText)
+        let uuids = uuidDetector.detect(in: analysisText)
+        let hashes = hashDetector.detect(in: analysisText)
         let env = envVarDetector.detect(in: analysisText)
         let urls = urlDetector.detect(in: analysisText)
         let paths = filePathDetector.detect(in: analysisText)
         let code = codeDetector.detect(in: analysisText)
+        let shellCommands = shellCommandDetector.detect(in: analysisText)
         let prose = proseDetector.detect(in: analysisText)
 
         let (primary, confidence) = selectPrimaryType(
             analysisText: analysisText,
             jwt: jwt,
             emails: emails,
+            phoneNumbers: phoneNumbers,
+            ipAddresses: ipAddresses,
+            uuids: uuids,
+            hashes: hashes,
             env: env,
             urls: urls,
             paths: paths,
             code: code,
+            shellCommands: shellCommands,
             prose: prose
         )
 
@@ -97,10 +122,15 @@ public struct ContentTypeDetector {
             encoding: encodingDetections.first,
             jwt: jwt,
             emails: emails,
+            phoneNumbers: phoneNumbers,
+            ipAddresses: ipAddresses,
+            uuids: uuids,
+            hashes: hashes,
             env: env,
             urls: urls,
             paths: paths,
             code: code,
+            shellCommands: shellCommands,
             prose: prose
         )
 
@@ -111,18 +141,39 @@ public struct ContentTypeDetector {
         analysisText: String,
         jwt: [JWTDetector.Detection],
         emails: [EmailDetector.Detection],
+        phoneNumbers: [PhoneNumberDetector.Detection],
+        ipAddresses: [IPAddressDetector.Detection],
+        uuids: [UUIDDetector.Detection],
+        hashes: [HashDetector.Detection],
         env: EnvVarDetector.Output?,
         urls: [URLDetector.Detection],
         paths: [FilePathDetector.Detection],
         code: [CodeDetector.Detection],
+        shellCommands: [ShellCommandDetector.Detection],
         prose: ProseDetector.Detection?
     ) -> (ContentType, Double) {
         // Priority order is the stable tiebreaker when confidences match.
         // We keep this order conservative for clipboard use.
-        let priorities: [ContentType] = [.jwt, .email, .envVarBlock, .envVar, .url, .filePath, .code, .prose, .text, .unknown]
+        let priorities: [ContentType] = [
+            .jwt,
+            .email,
+            .phoneNumber,
+            .ipAddress,
+            .uuid,
+            .hash,
+            .envVarBlock,
+            .envVar,
+            .shellCommand,
+            .url,
+            .filePath,
+            .code,
+            .prose,
+            .text,
+            .unknown
+        ]
 
         var candidates: [(ContentType, Double)] = []
-        candidates.reserveCapacity(8)
+        candidates.reserveCapacity(10)
 
         if let best = jwt.map(\.confidence).max() {
             candidates.append((.jwt, best))
@@ -130,9 +181,24 @@ public struct ContentTypeDetector {
         if let best = emails.map(\.confidence).max() {
             candidates.append((.email, best))
         }
+        if let best = phoneNumbers.map(\.confidence).max() {
+            candidates.append((.phoneNumber, best))
+        }
+        if let best = ipAddresses.map(\.confidence).max() {
+            candidates.append((.ipAddress, best))
+        }
+        if let best = uuids.map(\.confidence).max() {
+            candidates.append((.uuid, best))
+        }
+        if let best = hashes.map(\.confidence).max() {
+            candidates.append((.hash, best))
+        }
         if let env {
             let best = env.detections.map(\.confidence).max() ?? 0.0
             candidates.append((env.isBlock ? .envVarBlock : .envVar, best))
+        }
+        if let best = shellCommands.map(\.confidence).max() {
+            candidates.append((.shellCommand, best))
         }
         if let best = urls.map(\.confidence).max() {
             candidates.append((.url, best))
@@ -183,10 +249,15 @@ public struct ContentTypeDetector {
         encoding: EncodingDetector.Detection?,
         jwt: [JWTDetector.Detection],
         emails: [EmailDetector.Detection],
+        phoneNumbers: [PhoneNumberDetector.Detection],
+        ipAddresses: [IPAddressDetector.Detection],
+        uuids: [UUIDDetector.Detection],
+        hashes: [HashDetector.Detection],
         env: EnvVarDetector.Output?,
         urls: [URLDetector.Detection],
         paths: [FilePathDetector.Detection],
         code: [CodeDetector.Detection],
+        shellCommands: [ShellCommandDetector.Detection],
         prose: ProseDetector.Detection?
     ) -> String? {
         var meta: [String: Any] = [:]
@@ -226,6 +297,49 @@ public struct ContentTypeDetector {
             meta["emails"] = emails.map { ["email": $0.email, "confidence": $0.confidence] }
         }
 
+        if !phoneNumbers.isEmpty {
+            meta["phoneNumbers"] = phoneNumbers.map { ["number": $0.phoneNumber, "confidence": $0.confidence] }
+        }
+
+        if !ipAddresses.isEmpty {
+            meta["ipAddresses"] = ipAddresses.map { detection in
+                [
+                    "address": detection.address,
+                    "version": detection.version,
+                    "isPrivate": detection.isPrivate,
+                    "isLoopback": detection.isLoopback,
+                    "isLinkLocal": detection.isLinkLocal,
+                    "isMulticast": detection.isMulticast,
+                    "confidence": detection.confidence
+                ]
+            }
+        }
+
+        if !uuids.isEmpty {
+            meta["uuids"] = uuids.map { detection in
+                var obj: [String: Any] = [
+                    "uuid": detection.uuid,
+                    "variant": detection.variant,
+                    "confidence": detection.confidence
+                ]
+                if let version = detection.version {
+                    obj["version"] = version
+                }
+                return obj
+            }
+        }
+
+        if !hashes.isEmpty {
+            meta["hashes"] = hashes.map { detection in
+                [
+                    "hash": detection.hash,
+                    "kind": detection.kind,
+                    "bits": detection.bitLength,
+                    "confidence": detection.confidence
+                ]
+            }
+        }
+
         if let env {
             meta["env"] = [
                 "isBlock": env.isBlock,
@@ -252,6 +366,10 @@ public struct ContentTypeDetector {
 
         if !code.isEmpty {
             meta["code"] = code.map { ["language": $0.language.rawValue, "confidence": $0.confidence] }
+        }
+
+        if !shellCommands.isEmpty {
+            meta["shellCommands"] = shellCommands.map { ["command": $0.command, "executable": $0.executable, "confidence": $0.confidence] }
         }
 
         if let prose {

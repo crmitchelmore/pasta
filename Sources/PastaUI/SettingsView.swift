@@ -9,6 +9,7 @@ public struct SettingsView: View {
         static let launchAtLogin = "pasta.launchAtLogin"
         static let maxEntries = "pasta.maxEntries"
         static let excludedApps = "pasta.excludedApps"
+        static let appMode = "pasta.appMode"
     }
 
     @AppStorage(Defaults.hotkeyKey) private var hotkeyKey: String = "c"
@@ -17,6 +18,7 @@ public struct SettingsView: View {
     @AppStorage(Defaults.launchAtLogin) private var launchAtLogin: Bool = false
     @AppStorage(Defaults.maxEntries) private var maxEntries: Int = 0 // 0 = unlimited
     @AppStorage(Defaults.excludedApps) private var excludedAppsText: String = ""
+    @AppStorage(Defaults.appMode) private var appMode: String = "both"
 
     @State private var storageSummary: String = "—"
     @State private var clearAllSummary: String? = nil
@@ -61,6 +63,19 @@ public struct SettingsView: View {
                     .help("Appears in System Settings → General → Login Items")
             }
 
+            Section("App Mode") {
+                Picker("App appearance", selection: $appMode) {
+                    Text("Menu bar only").tag("menuBar")
+                    Text("Dock only").tag("dock")
+                    Text("Menu bar + Dock").tag("both")
+                }
+                .pickerStyle(.radioGroup)
+
+                Text("Changes apply immediately. Dock-only makes Pasta appear in ⌘⇥ app switcher.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Storage") {
                 LabeledContent("Database") {
                     Text(DatabaseManager.defaultDatabaseURL().path)
@@ -79,6 +94,10 @@ public struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                Text("Clearing history removes all entries and stored images from this Mac.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 HStack {
                     Button("Refresh") {

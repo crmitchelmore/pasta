@@ -23,7 +23,7 @@ public struct PreviewPanelView: View {
                         }
 
                         SectionBox(title: "Content") {
-                            if entry.contentType == .image, let imagePath = entry.imagePath {
+                            if (entry.contentType == .image || entry.contentType == .screenshot), let imagePath = entry.imagePath {
                                 ImagePreview(path: imagePath)
                             } else if entry.contentType == .code {
                                 CodePreview(code: entry.content, language: detectedCodeLanguage(from: entry))
@@ -50,6 +50,18 @@ public struct PreviewPanelView: View {
                                     if let claims = jwt.claimsPrettyJSON {
                                         LabeledContent("Claims") {
                                             MonospaceText(claims)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if let summary = metadataSummary(from: entry) {
+                            SectionBox(title: "Details") {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    ForEach(summary.items, id: \.title) { item in
+                                        LabeledContent(item.title) {
+                                            Text(item.value)
                                         }
                                     }
                                 }
@@ -84,7 +96,7 @@ public struct PreviewPanelView: View {
                 Image(systemName: entry.contentType.systemImageName)
                     .foregroundStyle(entry.contentType.tint)
 
-                Text(entry.contentType.rawValue.uppercased())
+                Text(entry.contentType.displayTitle.uppercased())
                     .font(.headline)
 
                 Spacer(minLength: 0)
@@ -129,6 +141,109 @@ public struct PreviewPanelView: View {
         guard let first = codes.first else { return nil }
         guard let lang = first["language"] as? String else { return nil }
         return CodeLanguage(rawValue: lang)
+    }
+
+    private struct MetadataSummary {
+        var items: [MetadataItem]
+    }
+
+    private struct MetadataItem {
+        var title: String
+        var value: String
+    }
+
+    private func metadataSummary(from entry: ClipboardEntry) -> MetadataSummary? {
+        guard let meta = entry.metadata else { return nil }
+        guard let dict = parseJSONDictionary(meta) else { return nil }
+
+        switch entry.contentType {
+        case .phoneNumber:
+            guard let phone = firstObject(dict["phoneNumbers"]) else { return nil }
+            let number = phone["number"] as? String ?? ""
+            let confidence = formatConfidence(phone["confidence"])
+            return compactSummary([
+                MetadataItem(title: "Number", value: number),
+                MetadataItem(title: "Confidence", value: confidence)
+            ])
+        case .ipAddress:
+            guard let ip = firstObject(dict["ipAddresses"]) else { return nil }
+            let address = ip["address"] as? String ?? ""
+            let version = ip["version"] as? String ?? ""
+            let scope = formatScope(from: ip)
+            let confidence = formatConfidence(ip["confidence"])
+            return compactSummary([
+                MetadataItem(title: "Address", value: address),
+                MetadataItem(title: "Version", value: version.uppercased()),
+                MetadataItem(title: "Scope", value: scope),
+                MetadataItem(title: "Confidence", value: confidence)
+            ])
+        case .uuid:
+            guard let uuid = firstObject(dict["uuids"]) else { return nil }
+            let value = uuid["uuid"] as? String ?? ""
+            let version = formatUUIDVersion(uuid["version"])
+            let variant = uuid["variant"] as? String ?? ""
+            let confidence = formatConfidence(uuid["confidence"])
+            return compactSummary([
+                MetadataItem(title: "UUID", value: value),
+                MetadataItem(title: "Version", value: version),
+                MetadataItem(title: "Variant", value: variant.uppercased()),
+                MetadataItem(title: "Confidence", value: confidence)
+            ])
+        case .hash:
+            guard let hash = firstObject(dict["hashes"]) else { return nil }
+            let value = hash["hash"] as? String ?? ""
+            let kind = hash["kind"] as? String ?? ""
+            let bits = formatBits(hash["bits"])
+            let confidence = formatConfidence(hash["confidence"])
+            return compactSummary([
+                MetadataItem(title: "Hash", value: value),
+                MetadataItem(title: "Kind", value: kind.uppercased()),
+                MetadataItem(title: "Bits", value: bits),
+                MetadataItem(title: "Confidence", value: confidence)
+            ])
+        default:
+            return nil
+        }
+    }
+
+    private func compactSummary(_ items: [MetadataItem?]) -> MetadataSummary? {
+        let compacted = items.compactMap { $0 }.filter { !$0.value.isEmpty }
+        guard !compacted.isEmpty else { return nil }
+        return MetadataSummary(items: compacted)
+    }
+
+    private func firstObject(_ value: Any?) -> [String: Any]? {
+        if let list = value as? [[String: Any]] {
+            return list.first
+        }
+        return nil
+    }
+
+    private func formatConfidence(_ value: Any?) -> String {
+        guard let confidence = value as? Double else { return "" }
+        return String(format: "%.0f%%", confidence * 100)
+    }
+
+    private func formatBits(_ value: Any?) -> String {
+        if let bits = value as? Int { return "\(bits)" }
+        if let bits = value as? Double { return "\(Int(bits))" }
+        return ""
+    }
+
+    private func formatScope(from dict: [String: Any]) -> String {
+        var scopes: [String] = []
+        if (dict["isPrivate"] as? Bool) == true { scopes.append("private") }
+        if (dict["isLoopback"] as? Bool) == true { scopes.append("loopback") }
+        if (dict["isLinkLocal"] as? Bool) == true { scopes.append("link-local") }
+        if (dict["isMulticast"] as? Bool) == true { scopes.append("multicast") }
+        if scopes.isEmpty { scopes.append("public") }
+        return scopes.joined(separator: ", ")
+    }
+
+    private func formatUUIDVersion(_ value: Any?) -> String {
+        if let version = value as? Int { return "v\(version)" }
+        if let version = value as? Double { return "v\(Int(version))" }
+        return "unknown"
     }
 
     private struct JWTPreview {

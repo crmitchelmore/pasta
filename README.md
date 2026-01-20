@@ -22,9 +22,17 @@ swift build
 # Run tests
 swift test
 
-# Run the app
+# Run the app (menu bar app)
 swift run PastaApp
 ```
+
+## Usage
+
+1. Copy anything (text, URLs, images, files, etc.).
+2. Press **`⌃⌘C`** to show Pasta.
+3. Search, navigate with **↑/↓**, then press **Enter** to paste.
+
+> Note: Pasting via simulated **⌘V** requires Accessibility permission. Without it, Pasta will still copy the selection to your clipboard.
 
 ## Keyboard Shortcuts
 
@@ -76,7 +84,44 @@ Pasta/
 ## Requirements
 
 - macOS 14.0 (Sonoma) or later
-- Accessibility permission (for global hotkey)
+- Accessibility permission (recommended)
+  - Needed for reliable global hotkey handling and for simulating paste (**⌘V**)
+  - If not granted, Pasta still works as a clipboard history viewer and can copy items back to the clipboard
+
+## Screenshots
+
+<p align="center">
+  <img src="Sources/PastaApp/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512.png" width="128" alt="Pasta app icon" />
+  <img src="Sources/PastaApp/Resources/Assets.xcassets/MenuBarIcon.imageset/menubar@2x.png" width="48" alt="Pasta menu bar icon" />
+</p>
+
+## Permissions
+
+Pasta can optionally request Accessibility access to support global shortcuts and paste simulation.
+
+- Open **System Settings → Privacy & Security → Accessibility**
+- Enable **Pasta**
+
+If you revoke Accessibility permission, Pasta will show onboarding again and will fall back to “copy-only” paste.
+
+## Troubleshooting
+
+- **`⌃⌘C` hotkey does nothing**
+  - Ensure Pasta is running (menu bar icon present).
+  - Grant Accessibility permission (see *Permissions* above).
+  - Check for hotkey conflicts in other apps.
+
+- **Enter copies but doesn’t paste into the target app**
+  - This usually means Accessibility permission is missing or was revoked.
+  - Pasta will still copy the selected entry to the clipboard; you can paste manually with **⌘V**.
+
+- **History looks empty or missing items**
+  - Items copied from excluded apps won’t be recorded (see Settings).
+  - If the database becomes corrupt, Pasta will attempt recovery by recreating the local DB.
+
+- **Where is my data stored?**
+  - Database: `~/Library/Application Support/Pasta/pasta.db`
+  - Images: `~/Library/Application Support/Pasta/Images/`
 
 ## Development
 
@@ -89,6 +134,26 @@ This project uses [Ralph](https://github.com/soderlind/ralph) for AI-assisted de
 # Multiple iterations
 ./ralph.sh --prompt prompts/pasta.txt --prd plans/prd.json --allow-profile safe 10
 ```
+
+## Distribution
+
+For local distribution builds, run:
+
+```bash
+./build_release.sh
+```
+
+This generates `.build/release/PastaApp.app`. To ship outside the Mac App Store, sign and notarize the app:
+
+```bash
+codesign --deep --force --options runtime --sign "Developer ID Application: YOUR NAME" ".build/release/PastaApp.app"
+xcrun notarytool submit ".build/release/PastaApp.app" --wait --keychain-profile "notary"
+```
+
+### App Store vs Independent Distribution
+
+- **App Store:** Requires sandboxing, entitlements, and App Store review. Clipboard and accessibility behaviors often need additional justification and may require changes to permission handling.
+- **Independent (Developer ID):** Faster iteration and fewer restrictions. Recommended if you want full clipboard/accessibility behavior without App Store constraints.
 
 ## Storage
 

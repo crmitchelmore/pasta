@@ -1,20 +1,49 @@
 import Foundation
 import GRDB
+import os.log
 
 public final class DatabaseManager {
     private let dbQueue: DatabaseQueue
 
     public init(databaseURL: URL = DatabaseManager.defaultDatabaseURL()) throws {
-        try FileManager.default.createDirectory(
-            at: databaseURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        do {
+            try FileManager.default.createDirectory(
+                at: databaseURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to create database directory")
+            throw PastaError.storageUnavailable(path: databaseURL.deletingLastPathComponent().path)
+        }
 
         var config = Configuration()
         config.foreignKeysEnabled = true
 
-        self.dbQueue = try DatabaseQueue(path: databaseURL.path, configuration: config)
-        try DatabaseManager.migrator.migrate(dbQueue)
+        var queue: DatabaseQueue
+        do {
+            queue = try DatabaseQueue(path: databaseURL.path, configuration: config)
+            try DatabaseManager.migrator.migrate(queue)
+            PastaLogger.database.info("Database initialized at \(databaseURL.path)")
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.database, context: "Database initialization or migration failed")
+
+            if DatabaseManager.isCorruptionError(error) {
+                PastaLogger.database.warning("Database appears corrupted, attempting recovery")
+                do {
+                    try DatabaseManager.attemptRecovery(databaseURL: databaseURL)
+                    queue = try DatabaseQueue(path: databaseURL.path, configuration: config)
+                    try DatabaseManager.migrator.migrate(queue)
+                    PastaLogger.database.info("Database recovered and re-initialized at \(databaseURL.path)")
+                } catch {
+                    PastaLogger.logError(error, logger: PastaLogger.database, context: "Database recovery failed")
+                    throw PastaError.databaseCorrupted(underlying: error)
+                }
+            } else {
+                throw PastaError.databaseInitializationFailed(underlying: error)
+            }
+        }
+
+        self.dbQueue = queue
     }
 
     public static func inMemory() throws -> DatabaseManager {
@@ -29,6 +58,24 @@ public final class DatabaseManager {
 
     private init(dbQueue: DatabaseQueue) {
         self.dbQueue = dbQueue
+    }
+
+    private static func isCorruptionError(_ error: Error) -> Bool {
+        if let dbError = error as? DatabaseError {
+            return dbError.resultCode == .SQLITE_CORRUPT || dbError.resultCode == .SQLITE_NOTADB
+        }
+
+        let msg = error.localizedDescription.lowercased()
+        return msg.contains("corrupt") || msg.contains("malformed") || msg.contains("not a database")
+    }
+
+    private static func attemptRecovery(databaseURL: URL) throws {
+        let fm = FileManager.default
+        for url in [databaseURL, databaseURL.appendingPathExtension("wal"), databaseURL.appendingPathExtension("shm")] {
+            if fm.fileExists(atPath: url.path) {
+                try fm.removeItem(at: url)
+            }
+        }
     }
 
     private static var migrator: DatabaseMigrator {
@@ -105,42 +152,49 @@ public final class DatabaseManager {
     public func insert(_ entry: ClipboardEntry) throws {
         let contentHash = entry.contentHash
 
-        try dbQueue.write { db in
-            if let existingID: String = try String.fetchOne(
-                db,
-                sql: "SELECT id FROM \(ClipboardEntry.databaseTableName) WHERE contentHash = ? LIMIT 1",
-                arguments: [contentHash]
-            ) {
+        do {
+            try dbQueue.write { db in
+                if let existingID: String = try String.fetchOne(
+                    db,
+                    sql: "SELECT id FROM \(ClipboardEntry.databaseTableName) WHERE contentHash = ? LIMIT 1",
+                    arguments: [contentHash]
+                ) {
+                    try db.execute(
+                        sql: """
+                        UPDATE \(ClipboardEntry.databaseTableName)
+                        SET copyCount = copyCount + 1, timestamp = ?
+                        WHERE id = ?
+                        """,
+                        arguments: [entry.timestamp, existingID]
+                    )
+                    PastaLogger.database.debug("Updated duplicate entry with hash \(contentHash)")
+                    return
+                }
+
                 try db.execute(
                     sql: """
-                    UPDATE \(ClipboardEntry.databaseTableName)
-                    SET copyCount = copyCount + 1, timestamp = ?
-                    WHERE id = ?
+                    INSERT INTO \(ClipboardEntry.databaseTableName)
+                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    arguments: [entry.timestamp, existingID]
+                    arguments: [
+                        entry.id.uuidString,
+                        entry.content,
+                        entry.contentType.rawValue,
+                        entry.rawData,
+                        entry.imagePath,
+                        entry.timestamp,
+                        entry.copyCount,
+                        entry.sourceApp,
+                        entry.metadata,
+                        contentHash,
+                    ]
                 )
-                return
+                PastaLogger.database.debug("Inserted new entry with type \(entry.contentType.rawValue)")
             }
-
-            try db.execute(
-                sql: """
-                INSERT INTO \(ClipboardEntry.databaseTableName)
-                (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                arguments: [
-                    entry.id.uuidString,
-                    entry.content,
-                    entry.contentType.rawValue,
-                    entry.rawData,
-                    entry.imagePath,
-                    entry.timestamp,
-                    entry.copyCount,
-                    entry.sourceApp,
-                    entry.metadata,
-                    contentHash,
-                ]
-            )
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert entry")
+            throw error
         }
     }
 

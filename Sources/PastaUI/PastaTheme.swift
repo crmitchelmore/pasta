@@ -15,13 +15,19 @@ public enum PastaTheme {
         switch type {
         case .text: return .secondary
         case .email: return tomato
+        case .phoneNumber: return .teal
+        case .ipAddress: return .mint
+        case .uuid: return .gray
+        case .hash: return .gray
         case .jwt: return ink
         case .envVar, .envVarBlock: return basil
         case .prose: return olive
         case .image: return .pink
+        case .screenshot: return .cyan
         case .filePath: return .brown
         case .url: return .indigo
         case .code: return accent
+        case .shellCommand: return .green
         case .unknown: return .gray
         }
     }

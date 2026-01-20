@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import os.log
 
 #if canImport(AppKit)
 import AppKit
@@ -133,31 +134,43 @@ public final class ClipboardMonitor {
         if let lastSeenChangeCount, changeCount == lastSeenChangeCount { return }
         lastSeenChangeCount = changeCount
 
-        guard let contents = pasteboard.readContents() else { return }
+        guard let contents = pasteboard.readContents() else {
+            // If we can't read the clipboard, it might be an access issue
+            PastaLogger.clipboard.warning("Failed to read clipboard contents - may be access denied")
+            return
+        }
+        
         if contents == lastEmittedContents { return }
         lastEmittedContents = contents
 
         let sourceApp = workspace?.frontmostApplicationIdentifier()
         if exclusionManager.isExcluded(bundleIdentifier: sourceApp) {
+            PastaLogger.clipboard.debug("Skipped entry from excluded app: \(sourceApp ?? "unknown")")
             return
         }
 
         let entry = ClipboardEntry(
             content: contentString(for: contents),
-            contentType: contentType(for: contents),
+            contentType: contentType(for: contents, sourceApp: sourceApp),
             rawData: rawData(for: contents),
             timestamp: now(),
             sourceApp: sourceApp
         )
 
+        PastaLogger.clipboard.debug("Captured clipboard entry of type \(entry.contentType.rawValue)")
         subject.send(entry)
     }
 
-    private func contentType(for contents: PasteboardContents) -> ContentType {
+    private func contentType(for contents: PasteboardContents, sourceApp: String?) -> ContentType {
         switch contents {
         case .text, .rtf:
             return .text
         case .image:
+            // Detect screenshots by source app
+            if let app = sourceApp?.lowercased(),
+               app.contains("screenshot") || app.contains("screencapture") {
+                return .screenshot
+            }
             return .image
         case .filePaths:
             return .filePath

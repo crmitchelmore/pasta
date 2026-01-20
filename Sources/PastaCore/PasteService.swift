@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 
 #if canImport(AppKit)
 import AppKit
@@ -77,19 +78,43 @@ public final class PasteService {
         self.simulator = simulator
     }
 
+    /// Copies the entry to the system pasteboard without simulating Cmd+V.
+    @discardableResult
+    public func copy(_ entry: ClipboardEntry) -> Bool {
+        guard let contents = makeContents(for: entry) else {
+            PastaLogger.clipboard.warning("Cannot create pasteboard contents for entry type \(entry.contentType.rawValue)")
+            return false
+        }
+
+        pasteboard.write(contents)
+        PastaLogger.clipboard.debug("Copied entry of type \(entry.contentType.rawValue)")
+        return true
+    }
+
     /// Copies the entry to the system pasteboard, then simulates Cmd+V.
     /// Returns false if the entry cannot be represented on the pasteboard.
     @discardableResult
     public func paste(_ entry: ClipboardEntry) -> Bool {
-        guard let contents = makeContents(for: entry) else { return false }
+        guard let contents = makeContents(for: entry) else {
+            PastaLogger.clipboard.warning("Cannot create pasteboard contents for entry type \(entry.contentType.rawValue)")
+            return false
+        }
+        
         pasteboard.write(contents)
-        simulator.simulateCommandV()
+
+        if AccessibilityPermission.isTrusted() {
+            simulator.simulateCommandV()
+        } else {
+            PastaLogger.clipboard.warning("Accessibility permission not granted; copied to clipboard but cannot simulate Cmd+V")
+        }
+
+        PastaLogger.clipboard.debug("Pasted entry of type \(entry.contentType.rawValue)")
         return true
     }
 
     private func makeContents(for entry: ClipboardEntry) -> Contents? {
         switch entry.contentType {
-        case .image:
+        case .image, .screenshot:
             guard let data = entry.rawData else { return nil }
             return .imageTIFF(data)
 
@@ -110,6 +135,12 @@ public final class PasteService {
 #else
 public final class PasteService {
     public init() {}
+
+    @discardableResult
+    public func copy(_ entry: ClipboardEntry) -> Bool {
+        _ = entry
+        return false
+    }
 
     @discardableResult
     public func paste(_ entry: ClipboardEntry) -> Bool {

@@ -4,10 +4,25 @@ import SwiftUI
 public struct ClipboardListView: View {
     public let entries: [ClipboardEntry]
     @Binding private var selectedEntryID: UUID?
+    private let onCopy: (ClipboardEntry) -> Void
+    private let onPaste: (ClipboardEntry) -> Void
+    private let onDelete: (ClipboardEntry) -> Void
+    private let onReveal: (ClipboardEntry) -> Void
 
-    public init(entries: [ClipboardEntry], selectedEntryID: Binding<UUID?> = .constant(nil)) {
+    public init(
+        entries: [ClipboardEntry],
+        selectedEntryID: Binding<UUID?> = .constant(nil),
+        onCopy: @escaping (ClipboardEntry) -> Void,
+        onPaste: @escaping (ClipboardEntry) -> Void,
+        onDelete: @escaping (ClipboardEntry) -> Void,
+        onReveal: @escaping (ClipboardEntry) -> Void
+    ) {
         self.entries = entries
         _selectedEntryID = selectedEntryID
+        self.onCopy = onCopy
+        self.onPaste = onPaste
+        self.onDelete = onDelete
+        self.onReveal = onReveal
     }
 
     public var body: some View {
@@ -15,36 +30,31 @@ public struct ClipboardListView: View {
             ContentUnavailableView(
                 "No clipboard history",
                 systemImage: "doc.on.clipboard",
-                description: Text("Copy something to start building your history.")
+                description: Text("Copy anything to build your history. Press ⌘F to search or ↩︎ to paste.")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(entries, id: \.id) { entry in
-                            ClipboardRowView(entry: entry, isSelected: selectedEntryID == entry.id)
-                                .id(entry.id)
-                                .onTapGesture { selectedEntryID = entry.id }
-                                .padding(.horizontal, 8)
+            List(selection: $selectedEntryID) {
+                ForEach(entries, id: \.id) { entry in
+                    ClipboardRowView(entry: entry)
+                        .tag(entry.id)
+                        .contextMenu {
+                            Button("Paste") { onPaste(entry) }
+                            Button("Copy") { onCopy(entry) }
+                            Button("Delete", role: .destructive) { onDelete(entry) }
+                            if entry.contentType == .filePath {
+                                Button("Reveal in Finder") { onReveal(entry) }
+                            }
                         }
-                    }
-                    .padding(.vertical, 8)
-                }
-                .onChange(of: selectedEntryID) { _, id in
-                    guard let id else { return }
-                    withAnimation(.snappy) {
-                        proxy.scrollTo(id, anchor: .center)
-                    }
                 }
             }
+            .listStyle(.inset)
         }
     }
 }
 
 private struct ClipboardRowView: View {
     let entry: ClipboardEntry
-    let isSelected: Bool
 
     private var isLarge: Bool {
         entry.content.utf8.count > 10 * 1024
@@ -74,6 +84,12 @@ private struct ClipboardRowView: View {
 
                 HStack(spacing: 8) {
                     ContentTypeBadge(type: entry.contentType)
+                    
+                    if let appName = entry.sourceApp?.displayName {
+                        Text(appName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
 
                     Text(entry.timestamp, style: .relative)
                         .font(.caption)
@@ -87,12 +103,7 @@ private struct ClipboardRowView: View {
                 }
             }
         }
-        .padding(10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(isSelected ? Color.accentColor.opacity(0.7) : .clear, lineWidth: 2)
-        }
+        .padding(.vertical, 6)
     }
 }
 
@@ -119,13 +130,15 @@ private extension ClipboardEntry {
     }
 }
 
-private extension ContentType {
-    var badgeTitle: String {
-        switch self {
-        case .envVar: return "ENV"
-        case .envVarBlock: return "ENV BLOCK"
-        default: return rawValue.uppercased()
+private extension String {
+    /// Convert bundle identifier to friendly app name
+    var displayName: String {
+        // Strip "com.apple." or "com.xxx." prefix and capitalize
+        let parts = self.split(separator: ".")
+        if let last = parts.last {
+            return String(last).capitalized
         }
+        return self
     }
 }
 
@@ -140,7 +153,13 @@ private extension ContentType {
         return e
     }
 
-    return ClipboardListView(entries: items)
+    return ClipboardListView(
+        entries: items,
+        onCopy: { _ in },
+        onPaste: { _ in },
+        onDelete: { _ in },
+        onReveal: { _ in }
+    )
         .frame(width: 420, height: 600)
         .padding()
 }
