@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: macos-14
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Resolve Swift dependencies
+        run: swift package resolve
+      
+      - name: Build
+        run: swift build -c debug
+      
+      - name: Run tests
+        run: swift test --parallel
+      
+      - name: Build release
+        run: swift build -c release

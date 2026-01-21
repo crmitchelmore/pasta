@@ -64,7 +64,6 @@ private struct SectionData: Identifiable {
     let id: String  // group name as ID
     let name: String
     let rows: [RowData]
-    let startIndex: Int  // global index offset for ⌘1-9
 }
 
 // MARK: - Main List View
@@ -145,7 +144,7 @@ public struct ClipboardListView: View {
         // If searching, return flat list
         if !trimmedQuery.isEmpty {
             let rows = entries.map { RowData(from: $0) }
-            sections = [SectionData(id: "Results", name: "Results", rows: rows, startIndex: 0)]
+            sections = [SectionData(id: "Results", name: "Results", rows: rows)]
             return
         }
         
@@ -159,16 +158,13 @@ public struct ClipboardListView: View {
         
         // Build sections in order
         var result: [SectionData] = []
-        var runningIndex = 0
         for group in TimeGroup.allCases {
             guard let rows = groups[group], !rows.isEmpty else { continue }
             result.append(SectionData(
                 id: group.rawValue,
                 name: group.rawValue,
-                rows: rows,
-                startIndex: runningIndex
+                rows: rows
             ))
-            runningIndex += rows.count
         }
         sections = result
     }
@@ -275,11 +271,9 @@ public struct ClipboardListView: View {
             List(selection: isSelectionMode ? nil : $selectedEntryID) {
                 ForEach(sections) { section in
                     Section {
-                        ForEach(Array(section.rows.enumerated()), id: \.element.id) { idx, row in
-                            let globalIndex = section.startIndex + idx
+                        ForEach(section.rows) { row in
                             OptimizedRowView(
                                 row: row,
-                                quickPasteIndex: globalIndex < 9 ? globalIndex : nil,
                                 isHovered: hoveredID == row.id,
                                 isSelected: isSelectionMode && selectedIDs.contains(row.id),
                                 isSelectionMode: isSelectionMode
@@ -349,7 +343,6 @@ public struct ClipboardListView: View {
 /// Lightweight, equatable row view that only re-renders when data changes
 private struct OptimizedRowView: View, Equatable {
     let row: RowData
-    let quickPasteIndex: Int?
     let isHovered: Bool
     let isSelected: Bool
     let isSelectionMode: Bool
@@ -357,7 +350,6 @@ private struct OptimizedRowView: View, Equatable {
     // Equatable: SwiftUI skips body evaluation when this returns true
     static func == (lhs: OptimizedRowView, rhs: OptimizedRowView) -> Bool {
         lhs.row == rhs.row &&
-        lhs.quickPasteIndex == rhs.quickPasteIndex &&
         lhs.isHovered == rhs.isHovered &&
         lhs.isSelected == rhs.isSelected &&
         lhs.isSelectionMode == rhs.isSelectionMode
@@ -370,14 +362,6 @@ private struct OptimizedRowView: View, Equatable {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isSelected ? Color.accentColor : .secondary)
                     .font(.title3)
-            }
-            
-            // Quick paste shortcut badge (⌘1-9)
-            if let index = quickPasteIndex, !isSelectionMode {
-                Text("⌘\(index + 1)")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24)
             }
             
             // Content type icon

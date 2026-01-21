@@ -463,6 +463,7 @@ private struct HotkeyRecorderField: NSViewRepresentable {
 
 private class HotkeyTextField: NSTextField {
     var onKeyRecorded: ((String, Int) -> Void)?
+    private var localMonitor: Any?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -481,7 +482,7 @@ private class HotkeyTextField: NSTextField {
         bezelStyle = .roundedBezel
         alignment = .center
         font = .monospacedSystemFont(ofSize: 13, weight: .medium)
-        placeholderString = "Press keys..."
+        placeholderString = "Click, then press keys..."
         stringValue = ""
         
         // Make it focusable
@@ -491,12 +492,42 @@ private class HotkeyTextField: NSTextField {
     override var acceptsFirstResponder: Bool { true }
 
     override func becomeFirstResponder() -> Bool {
-        stringValue = ""
-        placeholderString = "Press keys..."
-        return super.becomeFirstResponder()
+        let result = super.becomeFirstResponder()
+        if result {
+            stringValue = ""
+            placeholderString = "Press keys..."
+            startMonitoring()
+        }
+        return result
     }
-
-    override func keyDown(with event: NSEvent) {
+    
+    override func resignFirstResponder() -> Bool {
+        stopMonitoring()
+        if stringValue.isEmpty {
+            placeholderString = "Click, then press keys..."
+        }
+        return super.resignFirstResponder()
+    }
+    
+    private func startMonitoring() {
+        stopMonitoring()
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.window?.firstResponder == self.currentEditor() || self.window?.firstResponder == self else {
+                return event
+            }
+            self.handleKeyEvent(event)
+            return nil // Consume the event
+        }
+    }
+    
+    private func stopMonitoring() {
+        if let monitor = localMonitor {
+            NSEvent.removeMonitor(monitor)
+            localMonitor = nil
+        }
+    }
+    
+    private func handleKeyEvent(_ event: NSEvent) {
         guard let characters = event.charactersIgnoringModifiers?.lowercased(),
               !characters.isEmpty else { return }
 
@@ -506,11 +537,15 @@ private class HotkeyTextField: NSTextField {
         // Require at least one modifier
         guard !modifiers.isEmpty else {
             placeholderString = "Add ⌘, ⌃, ⌥, or ⇧"
+            stringValue = ""
             return
         }
 
         updateDisplay(key: key, modifiers: Int(modifiers.rawValue))
         onKeyRecorded?(key, Int(modifiers.rawValue))
+        
+        // Resign first responder after successful capture
+        window?.makeFirstResponder(nil)
     }
 
     func updateDisplay(key: String, modifiers: Int) {
@@ -522,6 +557,10 @@ private class HotkeyTextField: NSTextField {
         if flags.contains(.command) { parts.append("⌘") }
         parts.append(key.uppercased())
         stringValue = parts.joined()
+    }
+    
+    deinit {
+        stopMonitoring()
     }
 }
 

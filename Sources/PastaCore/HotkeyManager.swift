@@ -38,8 +38,13 @@ public final class HotkeyManager: ObservableObject {
     private let onTrigger: () -> Void
     private let userDefaults: UserDefaults
 
-    private var hotKey: HotKeyProtocol
+    private var hotKey: HotKeyProtocol?
     private var defaultsObserver: NSObjectProtocol?
+    private var globalMonitor: Any?
+    
+    // Store current hotkey config for global monitor matching
+    private var currentKey: Key = .c
+    private var currentModifiers: NSEvent.ModifierFlags = [.control, .command]
 
     public init(
         provider: HotKeyProviding = SystemHotKeyProvider(),
@@ -51,8 +56,10 @@ public final class HotkeyManager: ObservableObject {
         self.onTrigger = onTrigger
 
         let initial = HotkeyManager.loadHotkey(from: userDefaults)
-        hotKey = provider.makeHotKey(key: initial.key, modifiers: initial.modifiers)
-        hotKey.keyDownHandler = onTrigger
+        currentKey = initial.key
+        currentModifiers = initial.modifiers
+        
+        setupHotkey(key: initial.key, modifiers: initial.modifiers)
         
         PastaLogger.hotkey.info("Hotkey registered: \(String(describing: initial.key)) with modifiers \(initial.modifiers.rawValue)")
 
@@ -69,18 +76,59 @@ public final class HotkeyManager: ObservableObject {
         if let defaultsObserver {
             NotificationCenter.default.removeObserver(defaultsObserver)
         }
+        if let globalMonitor {
+            NSEvent.removeMonitor(globalMonitor)
+        }
+    }
+    
+    private func setupHotkey(key: Key, modifiers: NSEvent.ModifierFlags) {
+        // Primary: Use HotKey library (Carbon Event Manager)
+        // Note: Carbon hotkeys work globally without accessibility permissions
+        // but may not work when running via `swift run` (needs proper app bundle)
+        hotKey = provider.makeHotKey(key: key, modifiers: modifiers)
+        hotKey?.keyDownHandler = { [weak self] in
+            PastaLogger.hotkey.debug("HotKey library triggered")
+            self?.onTrigger()
+        }
+        
+        // Fallback: Global event monitor (requires accessibility permissions)
+        // This catches the hotkey when Carbon registration doesn't work
+        if let oldMonitor = globalMonitor {
+            NSEvent.removeMonitor(oldMonitor)
+        }
+        
+        // Convert Key to keyCode for reliable matching
+        let targetKeyCode = key.carbonKeyCode
+        
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return }
+            
+            let eventModifiers = event.modifierFlags.intersection([.control, .option, .shift, .command])
+            guard eventModifiers == self.currentModifiers else { return }
+            
+            // Match by keyCode for reliability
+            if event.keyCode == targetKeyCode {
+                PastaLogger.hotkey.debug("Global monitor triggered (keyCode: \(event.keyCode))")
+                DispatchQueue.main.async {
+                    self.onTrigger()
+                }
+            }
+        }
+        
+        PastaLogger.hotkey.debug("Global monitor installed for keyCode \(targetKeyCode) with modifiers \(modifiers.rawValue)")
     }
 
     public func reloadFromUserDefaults() {
         let pref = HotkeyManager.loadHotkey(from: userDefaults)
-        hotKey = provider.makeHotKey(key: pref.key, modifiers: pref.modifiers)
-        hotKey.keyDownHandler = onTrigger
+        currentKey = pref.key
+        currentModifiers = pref.modifiers
+        setupHotkey(key: pref.key, modifiers: pref.modifiers)
         PastaLogger.hotkey.info("Hotkey reloaded: \(String(describing: pref.key))")
     }
 
     private static func loadHotkey(from userDefaults: UserDefaults) -> (key: Key, modifiers: NSEvent.ModifierFlags) {
         let keyString = userDefaults.string(forKey: Defaults.hotkeyKey) ?? "c"
-        let key = keyFromString(keyString)
+        let key = keyFromString(keyString) ?? .c
 
         let stored = userDefaults.object(forKey: Defaults.hotkeyModifiers) as? NSNumber
         let raw = stored?.uintValue ?? NSEvent.ModifierFlags([.control, .command]).rawValue
@@ -89,7 +137,7 @@ public final class HotkeyManager: ObservableObject {
         return (key, modifiers)
     }
     
-    private static func keyFromString(_ str: String) -> Key {
+    private static func keyFromString(_ str: String) -> Key? {
         switch str.lowercased() {
         case "a": return .a
         case "b": return .b
@@ -139,7 +187,7 @@ public final class HotkeyManager: ObservableObject {
         case ",": return .comma
         case ".": return .period
         case "/": return .slash
-        default: return .c
+        default: return nil
         }
     }
 }

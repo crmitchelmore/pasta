@@ -4,9 +4,12 @@ import ApplicationServices
 
 public enum AccessibilityPermission {
     /// Returns true if the current process is trusted for Accessibility features (eg CGEvent posting).
+    /// Note: AXIsProcessTrusted() can be cached by the system; changes may not reflect immediately.
     public static func isTrusted() -> Bool {
         #if canImport(ApplicationServices)
-        AXIsProcessTrusted()
+        // Use AXIsProcessTrustedWithOptions without prompt to force a fresh check
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false] as CFDictionary
+        return AXIsProcessTrustedWithOptions(options)
         #else
         false
         #endif
