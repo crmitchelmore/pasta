@@ -150,6 +150,7 @@ final class QuickSearchWindow: NSPanel {
 final class QuickSearchController: ObservableObject {
     private var window: QuickSearchWindow?
     private var hostingView: NSHostingView<AnyView>?
+    private var resignObserver: NSObjectProtocol?
     
     @Published private(set) var isVisible: Bool = false
     
@@ -212,7 +213,7 @@ final class QuickSearchController: ObservableObject {
         hostingView = hosting
         
         // Hide on deactivation
-        NotificationCenter.default.addObserver(
+        resignObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification,
             object: window,
             queue: .main
@@ -221,6 +222,12 @@ final class QuickSearchController: ObservableObject {
             Task { @MainActor in
                 self.hide()
             }
+        }
+    }
+    
+    deinit {
+        if let observer = resignObserver {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
 }

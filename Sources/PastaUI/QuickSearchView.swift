@@ -40,7 +40,7 @@ public struct QuickSearchView: View {
                 resultsList
             }
         }
-        .frame(width: 680, height: min(500, CGFloat(100 + viewModel.results.count * 52)))
+        .frame(width: 680, height: max(400, min(500, CGFloat(100 + viewModel.results.count * 52))))
         .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
