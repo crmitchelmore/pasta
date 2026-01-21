@@ -62,20 +62,24 @@ jobs:
       - name: Create app bundle structure
         run: |
           BUILD_DIR=".build/universal"
-          APP_DIR="${BUILD_DIR}/${APP_NAME}.app"
+          # App bundle is named "Pasta.app" but executable inside is still "PastaApp"
+          APP_DIR="${BUILD_DIR}/${DMG_NAME}.app"
           
           echo "==> Creating app bundle at $APP_DIR"
           rm -rf "$APP_DIR"
           mkdir -p "$APP_DIR/Contents/MacOS"
           mkdir -p "$APP_DIR/Contents/Resources"
           
-          # Copy the universal binary
-          cp ".build/release/${APP_NAME}" "$APP_DIR/Contents/MacOS/${APP_NAME}"
+          # Copy the universal binary (keep internal name as PastaApp)
+          cp ".build/universal/${APP_NAME}" "$APP_DIR/Contents/MacOS/${APP_NAME}"
           
           # Copy resources
           if [ -d "Sources/PastaApp/Resources" ]; then
             cp -R Sources/PastaApp/Resources/* "$APP_DIR/Contents/Resources/" || true
           fi
+          
+          # Copy app icon to Resources
+          cp "Resources/DMG/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
           
           # Make executable
           chmod +x "$APP_DIR/Contents/MacOS/${APP_NAME}"
@@ -101,14 +105,22 @@ jobs:
               <string>${GITHUB_REF_NAME#v}</string>
               <key>CFBundleExecutable</key>
               <string>${APP_NAME}</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
               <key>LSApplicationCategoryType</key>
               <string>public.app-category.productivity</string>
               <key>LSMinimumSystemVersion</key>
               <string>14.0</string>
               <key>NSHighResolutionCapable</key>
               <true/>
+              <key>NSPrincipalClass</key>
+              <string>NSApplication</string>
               <key>NSHumanReadableCopyright</key>
               <string>© $(date +%Y) Pasta</string>
+              <key>CFBundleIconFile</key>
+              <string>AppIcon</string>
               <key>CFBundleIconName</key>
               <string>AppIcon</string>
               <key>LSUIElement</key>
@@ -251,9 +263,9 @@ jobs:
             --window-pos 200 120 \
             --window-size 660 400 \
             --icon-size 100 \
-            --icon "${APP_NAME}.app" 180 200 \
+            --icon "${DMG_NAME}.app" 180 200 \
             --app-drop-link 480 200 \
-            --hide-extension "${APP_NAME}.app" \
+            --hide-extension "${DMG_NAME}.app" \
             --no-internet-enable \
             "${DMG_FILE}" \
             "${APP_DIR}"
