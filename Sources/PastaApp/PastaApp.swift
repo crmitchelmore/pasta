@@ -160,7 +160,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.applyAppMode()
+            Task { @MainActor in
+                self?.applyAppMode()
+            }
         }
     }
 
@@ -368,6 +370,8 @@ struct PanelContentView: View {
 
     var body: some View {
         applyChrome(to: baseView)
+            .withAppearance()
+            .tint(PastaTheme.accent)
     }
 
     @ViewBuilder
@@ -577,13 +581,13 @@ struct PanelContentView: View {
             break
         }
 
-        // Quick paste (1-9)
+        // Quick paste (Cmd+1-9)
         let chars = keyPress.characters
         if keyPress.modifiers.contains(.command), chars.lowercased() == "f" {
             searchFocused = true
             return .handled
         }
-        if keyPress.modifiers.isEmpty, chars.count == 1, let digit = Int(chars), (1...9).contains(digit) {
+        if keyPress.modifiers.contains(.command), chars.count == 1, let digit = Int(chars), (1...9).contains(digit) {
             quickPaste(index: digit - 1)
             return .handled
         }

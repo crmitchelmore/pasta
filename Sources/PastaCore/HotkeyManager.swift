@@ -80,19 +80,67 @@ public final class HotkeyManager: ObservableObject {
 
     private static func loadHotkey(from userDefaults: UserDefaults) -> (key: Key, modifiers: NSEvent.ModifierFlags) {
         let keyString = userDefaults.string(forKey: Defaults.hotkeyKey) ?? "c"
-        let key: Key
-        switch keyString.lowercased() {
-        case "v": key = .v
-        case "p": key = .p
-        case "space": key = .space
-        default: key = .c
-        }
+        let key = keyFromString(keyString)
 
         let stored = userDefaults.object(forKey: Defaults.hotkeyModifiers) as? NSNumber
         let raw = stored?.uintValue ?? NSEvent.ModifierFlags([.control, .command]).rawValue
         let modifiers = NSEvent.ModifierFlags(rawValue: raw)
 
         return (key, modifiers)
+    }
+    
+    private static func keyFromString(_ str: String) -> Key {
+        switch str.lowercased() {
+        case "a": return .a
+        case "b": return .b
+        case "c": return .c
+        case "d": return .d
+        case "e": return .e
+        case "f": return .f
+        case "g": return .g
+        case "h": return .h
+        case "i": return .i
+        case "j": return .j
+        case "k": return .k
+        case "l": return .l
+        case "m": return .m
+        case "n": return .n
+        case "o": return .o
+        case "p": return .p
+        case "q": return .q
+        case "r": return .r
+        case "s": return .s
+        case "t": return .t
+        case "u": return .u
+        case "v": return .v
+        case "w": return .w
+        case "x": return .x
+        case "y": return .y
+        case "z": return .z
+        case "0": return .zero
+        case "1": return .one
+        case "2": return .two
+        case "3": return .three
+        case "4": return .four
+        case "5": return .five
+        case "6": return .six
+        case "7": return .seven
+        case "8": return .eight
+        case "9": return .nine
+        case "space": return .space
+        case "`": return .grave
+        case "-": return .minus
+        case "=": return .equal
+        case "[": return .leftBracket
+        case "]": return .rightBracket
+        case "\\": return .backslash
+        case ";": return .semicolon
+        case "'": return .quote
+        case ",": return .comma
+        case ".": return .period
+        case "/": return .slash
+        default: return .c
+        }
     }
 }
 #else

@@ -50,6 +50,8 @@ public struct ClipboardListView: View {
     @State private var selectedIDs: Set<UUID> = []
     @State private var hoveredID: UUID? = nil
     @State private var deleteConfirmEntry: ClipboardEntry? = nil
+    @State private var cachedGroups: [(String, [ClipboardEntry])] = []
+    @State private var lastEntriesHash: Int = 0
 
     public init(
         entries: [ClipboardEntry],
@@ -75,7 +77,7 @@ public struct ClipboardListView: View {
         self.onReveal = onReveal
     }
 
-    private var groupedEntries: [(String, [ClipboardEntry])] {
+    private func computeGroupedEntries() -> [(String, [ClipboardEntry])] {
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         
         // If searching text, return flat list (no groups)
@@ -117,6 +119,15 @@ public struct ClipboardListView: View {
                 listContent
             }
         }
+        .onChange(of: entries.count) { _, _ in
+            updateCachedGroups()
+        }
+        .onChange(of: searchQuery) { _, _ in
+            updateCachedGroups()
+        }
+        .onAppear {
+            updateCachedGroups()
+        }
         .alert("Delete Entry?", isPresented: .init(
             get: { deleteConfirmEntry != nil },
             set: { if !$0 { deleteConfirmEntry = nil } }
@@ -133,6 +144,13 @@ public struct ClipboardListView: View {
                 Text("Delete \"\(entry.previewText.prefix(50))\"?")
             }
         }
+    }
+    
+    private func updateCachedGroups() {
+        let newHash = entries.count ^ (searchQuery.hashValue &* 31)
+        guard newHash != lastEntriesHash else { return }
+        lastEntriesHash = newHash
+        cachedGroups = computeGroupedEntries()
     }
     
     @ViewBuilder
@@ -195,50 +213,65 @@ public struct ClipboardListView: View {
     
     @ViewBuilder
     private var listContent: some View {
-        List(selection: isSelectionMode ? nil : $selectedEntryID) {
-            ForEach(groupedEntries, id: \.0) { groupName, groupEntries in
-                Section {
-                    ForEach(groupEntries, id: \.id) { entry in
-                        ClipboardRowView(
-                            entry: entry,
-                            isHovered: hoveredID == entry.id,
-                            isSelected: isSelectionMode && selectedIDs.contains(entry.id),
-                            isSelectionMode: isSelectionMode,
-                            onDelete: { deleteConfirmEntry = entry },
-                            onToggleSelect: {
-                                if selectedIDs.contains(entry.id) {
-                                    selectedIDs.remove(entry.id)
-                                } else {
-                                    selectedIDs.insert(entry.id)
+        ScrollViewReader { proxy in
+            List(selection: isSelectionMode ? nil : $selectedEntryID) {
+                ForEach(Array(cachedGroups.enumerated()), id: \.element.0) { groupIndex, group in
+                    let (groupName, groupEntries) = group
+                    let baseIndex = cachedGroups.prefix(groupIndex).reduce(0) { $0 + $1.1.count }
+                    
+                    Section {
+                        ForEach(Array(groupEntries.enumerated()), id: \.element.id) { entryIndex, entry in
+                            let globalIndex = baseIndex + entryIndex
+                            ClipboardRowView(
+                                entry: entry,
+                                index: globalIndex < 9 ? globalIndex : nil,
+                                isHovered: hoveredID == entry.id,
+                                isSelected: isSelectionMode && selectedIDs.contains(entry.id),
+                                isSelectionMode: isSelectionMode,
+                                onDelete: { deleteConfirmEntry = entry },
+                                onToggleSelect: {
+                                    if selectedIDs.contains(entry.id) {
+                                        selectedIDs.remove(entry.id)
+                                    } else {
+                                        selectedIDs.insert(entry.id)
+                                    }
+                                }
+                            )
+                            .id(entry.id)
+                            .tag(entry.id)
+                            .onHover { isHovered in
+                                hoveredID = isHovered ? entry.id : nil
+                            }
+                            .contextMenu {
+                                Button("Paste") { onPaste(entry) }
+                                Button("Copy") { onCopy(entry) }
+                                Divider()
+                                Button("Delete", role: .destructive) { deleteConfirmEntry = entry }
+                                if entry.contentType == .filePath {
+                                    Divider()
+                                    Button("Reveal in Finder") { onReveal(entry) }
                                 }
                             }
-                        )
-                        .tag(entry.id)
-                        .onHover { isHovered in
-                            hoveredID = isHovered ? entry.id : nil
                         }
-                        .contextMenu {
-                            Button("Paste") { onPaste(entry) }
-                            Button("Copy") { onCopy(entry) }
-                            Divider()
-                            Button("Delete", role: .destructive) { deleteConfirmEntry = entry }
-                            if entry.contentType == .filePath {
-                                Divider()
-                                Button("Reveal in Finder") { onReveal(entry) }
-                            }
+                    } header: {
+                        if cachedGroups.count > 1 || cachedGroups.first?.0 != "Results" {
+                            Text(groupName)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .textCase(.uppercase)
                         }
                     }
-                } header: {
-                    if groupedEntries.count > 1 || groupedEntries.first?.0 != "Results" {
-                        Text(groupName)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .textCase(.uppercase)
+                }
+            }
+            .listStyle(.inset)
+            .onChange(of: selectedEntryID) { _, newValue in
+                if let id = newValue {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(id, anchor: .center)
                     }
                 }
             }
         }
-        .listStyle(.inset)
     }
 }
 
@@ -246,6 +279,7 @@ public struct ClipboardListView: View {
 
 private struct ClipboardRowView: View {
     let entry: ClipboardEntry
+    let index: Int?  // nil if not in first 9
     let isHovered: Bool
     let isSelected: Bool
     let isSelectionMode: Bool
@@ -268,6 +302,14 @@ private struct ClipboardRowView: View {
                         .font(.title3)
                 }
                 .buttonStyle(.plain)
+            }
+            
+            // Quick paste shortcut badge (⌘1-9)
+            if let index, !isSelectionMode {
+                Text("⌘\(index + 1)")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24)
             }
             
             // Content type icon

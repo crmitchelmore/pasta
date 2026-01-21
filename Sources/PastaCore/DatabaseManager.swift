@@ -435,4 +435,16 @@ public final class DatabaseManager {
         }
     }
 
+    /// Efficiently checks if an entry with the given content hash exists.
+    public func existsWithHash(_ hash: String) throws -> Bool {
+        try dbQueue.read { db in
+            let count = try Int.fetchOne(
+                db,
+                sql: "SELECT 1 FROM \(ClipboardEntry.databaseTableName) WHERE contentHash = ? LIMIT 1",
+                arguments: [hash]
+            )
+            return count != nil
+        }
+    }
+
 }

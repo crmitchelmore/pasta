@@ -11,6 +11,8 @@ public struct SearchBarView: View {
     private let suggestions: [SearchSuggestion]
     private let onOpenSettings: () -> Void
     private let searchFocused: FocusState<Bool>.Binding
+    
+    @State private var isFieldFocused: Bool = false
 
     public init(
         query: Binding<String>,
@@ -34,10 +36,11 @@ public struct SearchBarView: View {
         HStack(spacing: 12) {
             // Main search bar - the hero element
             HStack(spacing: 0) {
-                // Search icon
+                // Search icon with subtle pulse when focused
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isFieldFocused ? Color.accentColor : .secondary)
+                    .scaleEffect(isFieldFocused ? 1.1 : 1.0)
                     .frame(width: 44)
                 
                 // Search input
@@ -45,13 +48,20 @@ public struct SearchBarView: View {
                     text: $query,
                     placeholder: "Search your clipboard history...",
                     suggestions: suggestions,
-                    isFocused: searchFocused
+                    isFocused: searchFocused,
+                    onFocusChange: { focused in
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            isFieldFocused = focused
+                        }
+                    }
                 )
                 
                 // Clear button (when has text)
                 if !query.isEmpty {
                     Button {
-                        query = ""
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            query = ""
+                        }
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 16))
@@ -59,6 +69,7 @@ public struct SearchBarView: View {
                     }
                     .buttonStyle(.plain)
                     .padding(.trailing, 12)
+                    .transition(.scale.combined(with: .opacity))
                 }
                 
                 // Result count badge
@@ -69,26 +80,46 @@ public struct SearchBarView: View {
                     .padding(.vertical, 4)
                     .background(
                         Capsule()
-                            .fill(Color.accentColor.opacity(0.8))
+                            .fill(Color.accentColor)
                     )
                     .padding(.trailing, 12)
+                    .contentTransition(.numericText(value: Double(resultCount)))
             }
             .frame(height: 48)
             .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(
-                                searchFocused.wrappedValue 
-                                    ? Color.accentColor.opacity(0.6) 
-                                    : Color.primary.opacity(0.1),
-                                lineWidth: searchFocused.wrappedValue ? 2 : 1
-                            )
-                    )
-            )
-            .shadow(color: .black.opacity(0.06), radius: 3, y: 2)
+            .background {
+                // Layered background for depth
+                ZStack {
+                    // Base fill
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(nsColor: .controlBackgroundColor))
+                    
+                    // Accent glow overlay when focused
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.accentColor.opacity(isFieldFocused ? 0.08 : 0))
+                    
+                    // Border with gradient
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(
+                            isFieldFocused
+                                ? Color.accentColor.opacity(0.8)
+                                : Color.primary.opacity(0.1),
+                            lineWidth: isFieldFocused ? 2 : 1
+                        )
+                }
+            }
+            // Outer glow - accent colored, expands on focus
+            .background {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.accentColor)
+                    .blur(radius: isFieldFocused ? 16 : 8)
+                    .opacity(isFieldFocused ? 0.4 : 0.0)
+                    .scaleEffect(isFieldFocused ? 1.04 : 0.96)
+            }
+            // Soft drop shadow
+            .shadow(color: Color.accentColor.opacity(isFieldFocused ? 0.3 : 0), radius: 8, y: 2)
+            .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+            .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isFieldFocused)
             
             // Settings button - separate from search bar, larger hit target
             SettingsButton(onTap: onOpenSettings)
@@ -198,6 +229,7 @@ private struct SearchFieldWithSuggestions: NSViewRepresentable {
     let placeholder: String
     let suggestions: [SearchSuggestion]
     let isFocused: FocusState<Bool>.Binding?
+    let onFocusChange: (Bool) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -378,6 +410,7 @@ private struct SearchFieldWithSuggestions: NSViewRepresentable {
 
         func controlTextDidBeginEditing(_ obj: Notification) {
             parent.isFocused?.wrappedValue = true
+            parent.onFocusChange(true)
             filterSuggestions()
         }
 
@@ -389,6 +422,7 @@ private struct SearchFieldWithSuggestions: NSViewRepresentable {
 
         func controlTextDidEndEditing(_ obj: Notification) {
             parent.isFocused?.wrappedValue = false
+            parent.onFocusChange(false)
             // Delay hiding to allow click on suggestion
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 self?.hideSuggestionsWindow()

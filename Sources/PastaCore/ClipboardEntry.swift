@@ -2,7 +2,7 @@ import CryptoKit
 import Foundation
 import GRDB
 
-public enum ContentType: String, Codable, CaseIterable {
+public enum ContentType: String, Codable, CaseIterable, Sendable {
     case text
     case email
     case phoneNumber
@@ -41,7 +41,7 @@ public enum CodeLanguage: String, Codable, CaseIterable {
     case unknown
 }
 
-public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord {
+public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Sendable {
     public static let databaseTableName = "clipboard_entries"
 
     public let id: UUID

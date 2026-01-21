@@ -10,6 +10,7 @@ public struct SettingsView: View {
         static let maxEntries = "pasta.maxEntries"
         static let excludedApps = "pasta.excludedApps"
         static let appMode = "pasta.appMode"
+        static let appearance = "pasta.appearance"
         static let retentionDays = "pasta.retentionDays"
         static let pauseMonitoring = "pasta.pauseMonitoring"
         static let playSounds = "pasta.playSounds"
@@ -24,6 +25,7 @@ public struct SettingsView: View {
     @AppStorage(Defaults.maxEntries) private var maxEntries: Int = 0
     @AppStorage(Defaults.excludedApps) private var excludedAppsText: String = ""
     @AppStorage(Defaults.appMode) private var appMode: String = "both"
+    @AppStorage(Defaults.appearance) private var appearance: String = "system"
     @AppStorage(Defaults.retentionDays) private var retentionDays: Int = 0
     @AppStorage(Defaults.pauseMonitoring) private var pauseMonitoring: Bool = false
     @AppStorage(Defaults.playSounds) private var playSounds: Bool = false
@@ -41,7 +43,8 @@ public struct SettingsView: View {
                 hotkeyKey: $hotkeyKey,
                 hotkeyModifiersRaw: $hotkeyModifiersRaw,
                 launchAtLogin: $launchAtLogin,
-                appMode: $appMode
+                appMode: $appMode,
+                appearance: $appearance
             )
             .tabItem {
                 Label("General", systemImage: "gearshape")
@@ -77,6 +80,8 @@ public struct SettingsView: View {
             .tag(SettingsTab.import)
         }
         .frame(width: 500, height: 420)
+        .withAppearance()
+        .tint(PastaTheme.accent)
     }
 
     private enum SettingsTab: Hashable {
@@ -91,6 +96,7 @@ private struct GeneralSettingsTab: View {
     @Binding var hotkeyModifiersRaw: Int
     @Binding var launchAtLogin: Bool
     @Binding var appMode: String
+    @Binding var appearance: String
 
     var body: some View {
         Form {
@@ -129,7 +135,22 @@ private struct GeneralSettingsTab: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {
-                Label("Appearance", systemImage: "macwindow")
+                Label("App Icon", systemImage: "macwindow")
+            }
+            
+            Section {
+                Picker("Theme", selection: $appearance) {
+                    Text("System").tag("system")
+                    Text("Light").tag("light")
+                    Text("Dark").tag("dark")
+                }
+                .pickerStyle(.radioGroup)
+                
+                Text("Choose how Pasta appears on your Mac.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Appearance", systemImage: "circle.lefthalf.filled")
             }
         }
         .formStyle(.grouped)
@@ -509,6 +530,7 @@ private class HotkeyTextField: NSTextField {
 private struct ImportSettingsTab: View {
     @State private var importResults: [ClipboardApp: ImportResult] = [:]
     @State private var isImporting: ClipboardApp? = nil
+    @State private var importProgress: ImportProgress? = nil
     @State private var showError: Bool = false
     @State private var errorMessage: String = ""
     
@@ -526,6 +548,7 @@ private struct ImportSettingsTab: View {
                         app: app,
                         result: importResults[app],
                         isImporting: isImporting == app,
+                        progress: isImporting == app ? importProgress : nil,
                         onImport: { importFrom(app) }
                     )
                 }
@@ -543,17 +566,23 @@ private struct ImportSettingsTab: View {
     
     private func importFrom(_ app: ClipboardApp) {
         isImporting = app
+        importProgress = nil
         
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 let database = try DatabaseManager()
                 let imageStorage = try ImageStorageManager()
                 let importService = ImportService(database: database, imageStorage: imageStorage)
-                let result = try importService.importFrom(app)
+                let result = try importService.importFrom(app) { progress in
+                    DispatchQueue.main.async {
+                        self.importProgress = progress
+                    }
+                }
                 
                 DispatchQueue.main.async {
                     importResults[app] = result
                     isImporting = nil
+                    importProgress = nil
                     
                     // Post notification to refresh main view
                     NotificationCenter.default.post(name: .entriesDidChange, object: nil)
@@ -563,6 +592,7 @@ private struct ImportSettingsTab: View {
                     errorMessage = error.localizedDescription
                     showError = true
                     isImporting = nil
+                    importProgress = nil
                 }
             }
         }
@@ -573,46 +603,76 @@ private struct ImportAppRow: View {
     let app: ClipboardApp
     let result: ImportResult?
     let isImporting: Bool
+    let progress: ImportProgress?
     let onImport: () -> Void
     
     var body: some View {
-        HStack {
-            Image(systemName: app.iconName)
-                .font(.title2)
-                .foregroundStyle(app.isAvailable ? .primary : .tertiary)
-                .frame(width: 32)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(app.rawValue)
-                    .font(.headline)
-                    .foregroundStyle(app.isAvailable ? .primary : .secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: app.iconName)
+                    .font(.title2)
+                    .foregroundStyle(app.isAvailable ? .primary : .tertiary)
+                    .frame(width: 32)
                 
-                Text(app.description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                
-                if let result {
-                    Text(result.summary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(app.rawValue)
+                        .font(.headline)
+                        .foregroundStyle(app.isAvailable ? .primary : .secondary)
+                    
+                    Text(app.description)
                         .font(.caption)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(.secondary)
+                    
+                    if let result, !isImporting {
+                        Text(result.summary)
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
+                }
+                
+                Spacer()
+                
+                if isImporting {
+                    if progress == nil {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                } else if app.isAvailable {
+                    Button("Import") {
+                        onImport()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                } else {
+                    Text("Not installed")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
             }
             
-            Spacer()
-            
-            if isImporting {
-                ProgressView()
-                    .controlSize(.small)
-            } else if app.isAvailable {
-                Button("Import") {
-                    onImport()
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            } else {
-                Text("Not installed")
+            // Progress bar section
+            if isImporting, let progress {
+                VStack(alignment: .leading, spacing: 4) {
+                    ProgressView(value: progress.fraction) {
+                        HStack {
+                            Text("Processing \(progress.current) of \(progress.total)")
+                            Spacer()
+                            Text("\(Int(progress.fraction * 100))%")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    .progressViewStyle(.linear)
+                    
+                    HStack(spacing: 12) {
+                        Label("\(progress.imported)", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Label("\(progress.skipped)", systemImage: "arrow.right.circle.fill")
+                            .foregroundStyle(.orange)
+                    }
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                }
+                .padding(.leading, 40)
             }
         }
         .padding(.vertical, 4)

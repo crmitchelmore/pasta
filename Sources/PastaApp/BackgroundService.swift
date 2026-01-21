@@ -26,7 +26,6 @@ final class BackgroundService: ObservableObject {
     private let screenshotMonitor: ScreenshotMonitor
     
     private var cancellables: Set<AnyCancellable> = []
-    private let processingQueue = DispatchQueue(label: "pasta.background.processing")
     private var pruneTimer: Timer?
     
     private enum Defaults {
@@ -126,15 +125,16 @@ final class BackgroundService: ObservableObject {
     }
     
     private func pruneOldEntries() {
-        processingQueue.async { [weak self] in
-            guard let self else { return }
-            
-            let retentionDays = UserDefaults.standard.integer(forKey: Defaults.retentionDays)
+        let retentionDays = UserDefaults.standard.integer(forKey: Defaults.retentionDays)
+        let db = self.database
+        let storage = self.imageStorage
+        
+        Task.detached {
             if retentionDays > 0 {
                 do {
-                    let imagePaths = try self.database.pruneOlderThan(days: retentionDays)
+                    let imagePaths = try db.pruneOlderThan(days: retentionDays)
                     for path in imagePaths {
-                        try? self.imageStorage.deleteImage(path: path)
+                        try? storage.deleteImage(path: path)
                     }
                     if !imagePaths.isEmpty {
                         PastaLogger.database.debug("Pruned \(imagePaths.count) images due to retention policy")
@@ -144,9 +144,9 @@ final class BackgroundService: ObservableObject {
                 }
             }
             
-            self.enforceMaxEntriesLimit()
+            await self.enforceMaxEntriesLimit()
             
-            DispatchQueue.main.async {
+            await MainActor.run {
                 self.refresh()
             }
         }
@@ -180,28 +180,33 @@ final class BackgroundService: ObservableObject {
                 }
                 
                 PastaLogger.clipboard.debug("New clipboard entry received: \(entry.contentType.rawValue)")
-                self.processingQueue.async {
+                
+                let db = self.database
+                let storage = self.imageStorage
+                let detector = self.contentTypeDetector
+                let storeImages = UserDefaults.standard.bool(forKey: Defaults.storeImages)
+                let deduplicate = UserDefaults.standard.bool(forKey: Defaults.deduplicateEntries)
+                
+                Task.detached {
                     let enriched: [ClipboardEntry]
                     do {
-                        enriched = try self.enrich(entry)
+                        enriched = try Self.enrich(entry, detector: detector, imageStorage: storage, storeImages: storeImages)
                     } catch {
                         PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Failed to enrich entry")
                         enriched = [entry]
                     }
 
-                    let deduplicate = UserDefaults.standard.bool(forKey: Defaults.deduplicateEntries)
-                    
                     for e in enriched {
                         do {
-                            try self.database.insert(e, deduplicate: deduplicate)
+                            try db.insert(e, deduplicate: deduplicate)
                             PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)")
                         } catch {
                             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert entry")
                         }
                     }
 
-                    self.enforceMaxEntriesLimit()
-                    DispatchQueue.main.async {
+                    await self.enforceMaxEntriesLimit()
+                    await MainActor.run {
                         self.refresh()
                         self.provideFeedback(for: enriched.first)
                     }
@@ -225,28 +230,33 @@ final class BackgroundService: ObservableObject {
                 }
                 
                 PastaLogger.clipboard.debug("New screenshot entry received: \(entry.content)")
-                self.processingQueue.async {
+                
+                let db = self.database
+                let storage = self.imageStorage
+                let detector = self.contentTypeDetector
+                let storeImages = UserDefaults.standard.bool(forKey: Defaults.storeImages)
+                let deduplicate = UserDefaults.standard.bool(forKey: Defaults.deduplicateEntries)
+                
+                Task.detached {
                     let enriched: [ClipboardEntry]
                     do {
-                        enriched = try self.enrich(entry)
+                        enriched = try Self.enrich(entry, detector: detector, imageStorage: storage, storeImages: storeImages)
                     } catch {
                         PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Failed to enrich screenshot entry")
                         enriched = [entry]
                     }
 
-                    let deduplicate = UserDefaults.standard.bool(forKey: Defaults.deduplicateEntries)
-                    
                     for e in enriched {
                         do {
-                            try self.database.insert(e, deduplicate: deduplicate)
+                            try db.insert(e, deduplicate: deduplicate)
                             PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)")
                         } catch {
                             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert screenshot entry")
                         }
                     }
 
-                    self.enforceMaxEntriesLimit()
-                    DispatchQueue.main.async {
+                    await self.enforceMaxEntriesLimit()
+                    await MainActor.run {
                         self.refresh()
                         self.provideFeedback(for: enriched.first)
                     }
@@ -301,21 +311,21 @@ final class BackgroundService: ObservableObject {
         }
     }
     
-    private func enrich(_ entry: ClipboardEntry) throws -> [ClipboardEntry] {
+    private nonisolated static func enrich(
+        _ entry: ClipboardEntry,
+        detector: ContentTypeDetector,
+        imageStorage: ImageStorageManager,
+        storeImages: Bool
+    ) throws -> [ClipboardEntry] {
         var entry = entry
-        
-        let storeImages = UserDefaults.standard.bool(forKey: Defaults.storeImages)
 
         if entry.contentType == .image || entry.contentType == .screenshot, let data = entry.rawData {
             if storeImages {
                 do {
                     entry.imagePath = try imageStorage.saveImage(data)
                     entry.rawData = nil
-                } catch let error as PastaError {
+                } catch {
                     PastaLogger.logError(error, logger: PastaLogger.storage, context: "Failed to save image, continuing without it")
-                    DispatchQueue.main.async {
-                        self.lastError = error
-                    }
                     entry.rawData = nil
                 }
             } else {
@@ -326,7 +336,7 @@ final class BackgroundService: ObservableObject {
             return [entry]
         }
 
-        let output = contentTypeDetector.detect(in: entry.content)
+        let output = detector.detect(in: entry.content)
 
         if output.primaryType == .envVarBlock, !output.splitEntries.isEmpty {
             return output.splitEntries.map { split in

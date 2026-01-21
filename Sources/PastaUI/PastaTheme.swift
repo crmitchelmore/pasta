@@ -1,10 +1,13 @@
+import AppKit
 import PastaCore
 import SwiftUI
 
 public enum PastaTheme {
+    // Fresh coral-orange tint - vibrant and modern
+    public static let accent = Color(red: 1.0, green: 0.45, blue: 0.35) // coral
+    
     // Warm pasta palette
-    public static let accent = Color(red: 0.94, green: 0.74, blue: 0.18) // golden
-
+    static let golden = Color(red: 0.94, green: 0.74, blue: 0.18)
     static let tomato = Color(red: 0.84, green: 0.22, blue: 0.18)
     static let basil = Color(red: 0.18, green: 0.55, blue: 0.30)
     static let olive = Color(red: 0.35, green: 0.45, blue: 0.22)
@@ -26,9 +29,56 @@ public enum PastaTheme {
         case .screenshot: return .cyan
         case .filePath: return .brown
         case .url: return .indigo
-        case .code: return accent
+        case .code: return golden
         case .shellCommand: return .green
         case .unknown: return .gray
         }
+    }
+}
+
+// MARK: - Appearance Mode
+
+public enum AppearanceMode: String, CaseIterable {
+    case system
+    case light
+    case dark
+    
+    public var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+    
+    public var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: return nil
+        case .light: return NSAppearance(named: .aqua)
+        case .dark: return NSAppearance(named: .darkAqua)
+        }
+    }
+}
+
+// MARK: - Appearance View Modifier
+
+public struct AppearanceModifier: ViewModifier {
+    @AppStorage("pasta.appearance") private var appearance: String = "system"
+    
+    private var mode: AppearanceMode {
+        AppearanceMode(rawValue: appearance) ?? .system
+    }
+    
+    public init() {}
+    
+    public func body(content: Content) -> some View {
+        content
+            .preferredColorScheme(mode.colorScheme)
+    }
+}
+
+public extension View {
+    func withAppearance() -> some View {
+        modifier(AppearanceModifier())
     }
 }
