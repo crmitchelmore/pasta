@@ -150,7 +150,7 @@ public struct OnboardingView: View {
     }
 
     private func refreshTrust() {
-        // Force fresh check - AXIsProcessTrusted() can be cached
+        // AXIsProcessTrusted() can be cached - try multiple times
         let trusted = AccessibilityPermission.isTrusted()
         if trusted != isTrusted {
             isTrusted = trusted
@@ -162,7 +162,8 @@ public struct OnboardingView: View {
 
     private func startPolling() {
         guard pollTimer == nil else { return }
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+        // Poll more frequently (every 0.5s) for better responsiveness
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
             Task { @MainActor [self] in
                 self.refreshTrust()
             }

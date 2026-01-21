@@ -7,9 +7,8 @@ public enum AccessibilityPermission {
     /// Note: AXIsProcessTrusted() can be cached by the system; changes may not reflect immediately.
     public static func isTrusted() -> Bool {
         #if canImport(ApplicationServices)
-        // Use AXIsProcessTrustedWithOptions without prompt to force a fresh check
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: false] as CFDictionary
-        return AXIsProcessTrustedWithOptions(options)
+        // Use simple AXIsProcessTrusted() - AXIsProcessTrustedWithOptions can have issues
+        return AXIsProcessTrusted()
         #else
         false
         #endif
@@ -18,7 +17,7 @@ public enum AccessibilityPermission {
     /// Best-effort: asks the system to show the Accessibility permission prompt.
     public static func requestPrompt() {
         #if canImport(ApplicationServices)
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as NSString: true]
         _ = AXIsProcessTrustedWithOptions(options)
         #endif
     }
