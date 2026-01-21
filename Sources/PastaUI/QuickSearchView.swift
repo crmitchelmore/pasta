@@ -5,19 +5,16 @@ import SwiftUI
 // MARK: - Quick Search View (Spotlight-like)
 
 public struct QuickSearchView: View {
-    @ObservedObject private var viewModel: QuickSearchViewModel
+    @ObservedObject private var manager = QuickSearchManager.shared
     private let onDismiss: () -> Void
     private let onPaste: (ClipboardEntry) -> Void
     
     @FocusState private var isSearchFocused: Bool
     
     public init(
-        database: DatabaseManager,
-        entries: [ClipboardEntry],
         onDismiss: @escaping () -> Void,
         onPaste: @escaping (ClipboardEntry) -> Void
     ) {
-        self._viewModel = ObservedObject(wrappedValue: QuickSearchViewModel(database: database, entries: entries))
         self.onDismiss = onDismiss
         self.onPaste = onPaste
     }
@@ -34,18 +31,25 @@ public struct QuickSearchView: View {
                 .opacity(0.5)
             
             // Results
-            if viewModel.results.isEmpty && !viewModel.query.isEmpty {
+            if manager.results.isEmpty && !manager.query.isEmpty {
                 emptyState
             } else {
                 resultsList
             }
         }
-        .frame(width: 680, height: max(400, min(500, CGFloat(100 + viewModel.results.count * 52))))
+        .frame(width: 680, height: max(400, min(500, CGFloat(100 + manager.results.count * 52))))
         .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
         .onAppear {
+            manager.prepareForSearch()
             isSearchFocused = true
+        }
+        .onChange(of: manager.query) { _, _ in
+            manager.searchQueryChanged()
+        }
+        .onChange(of: manager.selectedFilter) { _, _ in
+            manager.searchQueryChanged()
         }
     }
     
@@ -55,20 +59,20 @@ public struct QuickSearchView: View {
                 .font(.title2)
                 .foregroundStyle(.secondary)
             
-            TextField("Search clipboard history...", text: $viewModel.query)
+            TextField("Search clipboard history...", text: $manager.query)
                 .textFieldStyle(.plain)
                 .font(.title3)
                 .focused($isSearchFocused)
                 .onSubmit {
-                    if let first = viewModel.results.first {
-                        onPaste(first)
+                    if let entry = manager.selectedEntry {
+                        onPaste(entry)
                         onDismiss()
                     }
                 }
             
-            if !viewModel.query.isEmpty {
+            if !manager.query.isEmpty {
                 Button {
-                    viewModel.query = ""
+                    manager.query = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
@@ -76,7 +80,7 @@ public struct QuickSearchView: View {
                 .buttonStyle(.plain)
             }
             
-            Text("⌘\(viewModel.results.isEmpty ? "" : "1-9")")
+            Text("⌘\(manager.results.isEmpty ? "" : "1-9")")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .padding(.horizontal, 6)
@@ -93,20 +97,20 @@ public struct QuickSearchView: View {
                 FilterChip(
                     title: "All",
                     icon: "tray.full",
-                    isSelected: viewModel.selectedFilter == nil,
+                    isSelected: manager.selectedFilter == nil,
                     count: nil
                 ) {
-                    viewModel.selectedFilter = nil
+                    manager.selectedFilter = nil
                 }
                 
-                ForEach(viewModel.availableFilters, id: \.type) { filter in
+                ForEach(manager.availableFilters, id: \.type) { filter in
                     FilterChip(
                         title: filter.type.displayTitle,
                         icon: filter.type.systemImageName,
-                        isSelected: viewModel.selectedFilter == filter.type,
+                        isSelected: manager.selectedFilter == filter.type,
                         count: filter.count
                     ) {
-                        viewModel.selectedFilter = filter.type
+                        manager.selectedFilter = filter.type
                     }
                 }
             }
@@ -120,7 +124,7 @@ public struct QuickSearchView: View {
             Image(systemName: "magnifyingglass")
                 .font(.largeTitle)
                 .foregroundStyle(.tertiary)
-            Text("No results for \"\(viewModel.query)\"")
+            Text("No results for \"\(manager.query)\"")
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -131,12 +135,12 @@ public struct QuickSearchView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(Array(viewModel.results.prefix(9).enumerated()), id: \.element.id) { index, entry in
+                    ForEach(Array(manager.results.prefix(9).enumerated()), id: \.element.id) { index, entry in
                         QuickSearchRow(
                             entry: entry,
                             index: index + 1,
-                            isSelected: viewModel.selectedIndex == index,
-                            query: viewModel.query
+                            isSelected: manager.selectedIndex == index,
+                            query: manager.query
                         )
                         .id(entry.id)
                         .onTapGesture {
@@ -148,22 +152,22 @@ public struct QuickSearchView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
             }
-            .onChange(of: viewModel.selectedIndex) { _, newIndex in
-                if let entry = viewModel.results[safe: newIndex] {
+            .onChange(of: manager.selectedIndex) { _, newIndex in
+                if let entry = manager.results[safe: newIndex] {
                     proxy.scrollTo(entry.id, anchor: .center)
                 }
             }
         }
         .onKeyPress(.downArrow) {
-            viewModel.moveSelection(by: 1)
+            manager.moveSelection(by: 1)
             return .handled
         }
         .onKeyPress(.upArrow) {
-            viewModel.moveSelection(by: -1)
+            manager.moveSelection(by: -1)
             return .handled
         }
         .onKeyPress(.return) {
-            if let entry = viewModel.results[safe: viewModel.selectedIndex] {
+            if let entry = manager.selectedEntry {
                 onPaste(entry)
                 onDismiss()
             }
@@ -180,7 +184,7 @@ public struct QuickSearchView: View {
                 return .ignored
             }
             let index = digit - 1
-            if let entry = viewModel.results[safe: index] {
+            if let entry = manager.results[safe: index] {
                 onPaste(entry)
                 onDismiss()
             }
@@ -292,96 +296,6 @@ private struct FilterChip: View {
             )
         }
         .buttonStyle(.plain)
-    }
-}
-
-// MARK: - View Model
-
-@MainActor
-public final class QuickSearchViewModel: ObservableObject {
-    @Published var query: String = "" {
-        didSet { updateResults() }
-    }
-    @Published var selectedFilter: ContentType? = nil {
-        didSet { updateResults() }
-    }
-    @Published private(set) var results: [ClipboardEntry] = []
-    @Published var selectedIndex: Int = 0
-    
-    struct FilterInfo: Equatable {
-        let type: ContentType
-        let count: Int
-    }
-    @Published private(set) var availableFilters: [FilterInfo] = []
-    
-    private let database: DatabaseManager
-    private var allEntries: [ClipboardEntry]
-    // Cache search service to avoid recreation per keystroke
-    private lazy var searchService = SearchService(database: database)
-    
-    init(database: DatabaseManager, entries: [ClipboardEntry]) {
-        self.database = database
-        self.allEntries = entries
-        computeAvailableFilters()
-        updateResults()
-    }
-    
-    func updateEntries(_ entries: [ClipboardEntry]) {
-        self.allEntries = entries
-        computeAvailableFilters()
-        updateResults()
-    }
-    
-    func moveSelection(by delta: Int) {
-        let maxIndex = min(results.count, 9) - 1
-        guard maxIndex >= 0 else { return }
-        selectedIndex = max(0, min(maxIndex, selectedIndex + delta))
-    }
-    
-    private func computeAvailableFilters() {
-        // Only count first 1000 entries to avoid O(n) on huge lists
-        var counts: [ContentType: Int] = [:]
-        for entry in allEntries.prefix(1000) {
-            counts[entry.contentType, default: 0] += 1
-        }
-        
-        // Show types that have entries, sorted by count
-        availableFilters = counts
-            .filter { $0.value > 0 }
-            .sorted { $0.value > $1.value }
-            .prefix(8)
-            .map { FilterInfo(type: $0.key, count: $0.value) }
-    }
-    
-    private func updateResults() {
-        selectedIndex = 0
-        
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        if trimmed.isEmpty {
-            // Show recent entries when no search query (already sorted by timestamp)
-            var filtered: [ClipboardEntry]
-            if let filter = selectedFilter {
-                // Filter only first 500 entries then take 9
-                filtered = allEntries.lazy.filter { $0.contentType == filter }.prefix(9).map { $0 }
-            } else {
-                filtered = Array(allEntries.prefix(9))
-            }
-            results = filtered
-            return
-        }
-        
-        // Use cached search service for query
-        do {
-            let matches = try searchService.search(
-                query: trimmed,
-                contentType: selectedFilter,
-                limit: 20
-            )
-            results = matches.map(\.entry)
-        } catch {
-            results = []
-        }
     }
 }
 

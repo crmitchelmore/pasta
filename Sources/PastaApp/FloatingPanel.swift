@@ -201,6 +201,13 @@ final class QuickSearchController: ObservableObject {
         isVisible = false
     }
     
+    /// Pre-create the window at app launch for instant appearance later
+    func preCreateWindow() {
+        if window == nil {
+            createWindow()
+        }
+    }
+    
     private func createWindow() {
         guard let contentBuilder else { return }
         

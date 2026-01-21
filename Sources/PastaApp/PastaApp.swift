@@ -65,15 +65,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start background clipboard monitoring (runs even when panel is closed)
         BackgroundService.shared.start()
         
+        // Initialize quick search manager with entries publisher (pre-warms index)
+        QuickSearchManager.shared.initialize(
+            entriesPublisher: BackgroundService.shared.$entries.eraseToAnyPublisher()
+        )
+        
         // Create the floating panel controller (main window)
         panelController = PanelController(
             size: NSSize(width: 900, height: 640),
             content: { PanelContentView() }
         )
         
-        // Create quick search controller (Spotlight-like popup)
+        // Create quick search controller and pre-create window
         quickSearchController = QuickSearchController()
         setupQuickSearch()
+        quickSearchController?.preCreateWindow()
         
         // Show the main window on launch
         panelController?.show()
@@ -108,10 +114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func setupQuickSearch() {
-        quickSearchController?.setContent { [weak self] in
+        quickSearchController?.setContent {
             QuickSearchView(
-                database: BackgroundService.shared.database,
-                entries: BackgroundService.shared.entries,
                 onDismiss: { [weak self] in
                     self?.quickSearchController?.hide()
                 },
@@ -123,8 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func toggleQuickSearch() {
-        // Refresh content before showing
-        setupQuickSearch()
+        // Just toggle - content and data are pre-warmed
         quickSearchController?.toggle()
     }
     
