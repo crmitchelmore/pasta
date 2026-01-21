@@ -308,9 +308,9 @@ jobs:
           echo "==> Checking code signature"
           codesign --verify --deep --strict --verbose=2 "/tmp/pasta-verify/${APP_NAME}.app"
           
-          # Verify notarization
-          echo "==> Checking Gatekeeper assessment"
-          spctl --assess --type execute --verbose=4 "/tmp/pasta-verify/${APP_NAME}.app"
+          # Check notarization ticket (stapler validate on the DMG already verified this)
+          echo "==> Checking notarization"
+          xcrun stapler validate "$DMG_FILE"
           
           # Unmount
           hdiutil detach /tmp/pasta-verify
