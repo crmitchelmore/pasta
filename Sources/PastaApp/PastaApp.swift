@@ -89,6 +89,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PastaLogger.app.info("Pasta app initialized successfully")
     }
     
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Called when user clicks dock icon or switches to app via Cmd+Tab
+        if !flag {
+            // No visible windows - show the main panel immediately
+            panelController?.show()
+        }
+        return true
+    }
+    
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // Ensure we have a visible window when becoming active
+        // This handles Cmd+Tab activation
+        let hasVisibleWindow = NSApp.windows.contains { $0.isVisible && !$0.isMiniaturized }
+        if !hasVisibleWindow {
+            panelController?.show()
+        }
+    }
+    
     private func setupQuickSearch() {
         quickSearchController?.setContent { [weak self] in
             QuickSearchView(
