@@ -321,7 +321,7 @@ jobs:
           
           # Verify signature
           echo "==> Checking code signature"
-          codesign --verify --deep --strict --verbose=2 "/tmp/pasta-verify/${APP_NAME}.app"
+          codesign --verify --deep --strict --verbose=2 "/tmp/pasta-verify/${DMG_NAME}.app"
           
           # Check notarization ticket (stapler validate on the DMG already verified this)
           echo "==> Checking notarization"
