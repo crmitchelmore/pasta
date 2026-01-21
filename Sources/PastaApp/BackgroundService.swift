@@ -109,7 +109,10 @@ final class BackgroundService: ObservableObject {
     }
     
     func refresh() {
-        let latest = (try? database.fetchRecent(limit: 1_000)) ?? []
+        // Use maxEntries setting, or 10,000 as a reasonable default for display
+        let displayLimit = UserDefaults.standard.integer(forKey: Defaults.maxEntries)
+        let limit = displayLimit > 0 ? displayLimit : 10_000
+        let latest = (try? database.fetchRecent(limit: limit)) ?? []
         PastaLogger.ui.debug("Refreshed entries: \(latest.count) items")
         self.entries = latest
     }

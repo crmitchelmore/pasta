@@ -139,7 +139,8 @@ private struct SettingsButton: NSViewRepresentable {
         button.isBordered = false
         button.wantsLayer = true
         button.layer?.cornerRadius = 10
-        button.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        // Use a semi-transparent color that works in both light and dark mode
+        button.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
         
         // Create a larger image
         let config = NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)
@@ -165,7 +166,8 @@ private struct SettingsButton: NSViewRepresentable {
     }
     
     func updateNSView(_ nsView: NSButton, context: Context) {
-        nsView.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+        // Keep using the same semi-transparent color
+        nsView.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
     }
     
     func makeCoordinator() -> Coordinator {
