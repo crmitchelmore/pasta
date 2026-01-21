@@ -69,12 +69,18 @@ public struct SettingsView: View {
                 Label("Storage", systemImage: "internaldrive")
             }
             .tag(SettingsTab.storage)
+            
+            ImportSettingsTab()
+            .tabItem {
+                Label("Import", systemImage: "square.and.arrow.down")
+            }
+            .tag(SettingsTab.import)
         }
         .frame(width: 500, height: 420)
     }
 
     private enum SettingsTab: Hashable {
-        case general, clipboard, storage
+        case general, clipboard, storage, `import`
     }
 }
 
@@ -496,4 +502,125 @@ private class HotkeyTextField: NSTextField {
         parts.append(key.uppercased())
         stringValue = parts.joined()
     }
+}
+
+// MARK: - Import Settings Tab
+
+private struct ImportSettingsTab: View {
+    @State private var importResults: [ClipboardApp: ImportResult] = [:]
+    @State private var isImporting: ClipboardApp? = nil
+    @State private var showError: Bool = false
+    @State private var errorMessage: String = ""
+    
+    var body: some View {
+        Form {
+            Section {
+                Text("Import clipboard history from other apps. Duplicate entries will be skipped automatically.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            
+            Section {
+                ForEach(ClipboardApp.allCases) { app in
+                    ImportAppRow(
+                        app: app,
+                        result: importResults[app],
+                        isImporting: isImporting == app,
+                        onImport: { importFrom(app) }
+                    )
+                }
+            } header: {
+                Label("Available Sources", systemImage: "tray.and.arrow.down")
+            }
+        }
+        .formStyle(.grouped)
+        .alert("Import Error", isPresented: $showError) {
+            Button("OK") { }
+        } message: {
+            Text(errorMessage)
+        }
+    }
+    
+    private func importFrom(_ app: ClipboardApp) {
+        isImporting = app
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let database = try DatabaseManager()
+                let imageStorage = try ImageStorageManager()
+                let importService = ImportService(database: database, imageStorage: imageStorage)
+                let result = try importService.importFrom(app)
+                
+                DispatchQueue.main.async {
+                    importResults[app] = result
+                    isImporting = nil
+                    
+                    // Post notification to refresh main view
+                    NotificationCenter.default.post(name: .entriesDidChange, object: nil)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    errorMessage = error.localizedDescription
+                    showError = true
+                    isImporting = nil
+                }
+            }
+        }
+    }
+}
+
+private struct ImportAppRow: View {
+    let app: ClipboardApp
+    let result: ImportResult?
+    let isImporting: Bool
+    let onImport: () -> Void
+    
+    var body: some View {
+        HStack {
+            Image(systemName: app.iconName)
+                .font(.title2)
+                .foregroundStyle(app.isAvailable ? .primary : .tertiary)
+                .frame(width: 32)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(app.rawValue)
+                    .font(.headline)
+                    .foregroundStyle(app.isAvailable ? .primary : .secondary)
+                
+                Text(app.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                
+                if let result {
+                    Text(result.summary)
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+            }
+            
+            Spacer()
+            
+            if isImporting {
+                ProgressView()
+                    .controlSize(.small)
+            } else if app.isAvailable {
+                Button("Import") {
+                    onImport()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            } else {
+                Text("Not installed")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Notification Name Extension
+
+extension Notification.Name {
+    static let entriesDidChange = Notification.Name("pasta.entriesDidChange")
 }
