@@ -220,24 +220,40 @@ jobs:
       # CREATE DMG
       # ============================================================================
       
-      - name: Create DMG
+      - name: Install create-dmg
+        run: brew install create-dmg
+      
+      - name: Generate DMG assets
+        run: |
+          cd Resources/DMG
+          
+          echo "==> Generating app icon (icns)"
+          chmod +x create-icns.sh
+          ./create-icns.sh
+          
+          echo "==> Generating background image"
+          chmod +x create-background.sh
+          ./create-background.sh
+      
+      - name: Create fancy DMG
         id: dmg
         run: |
-          DMG_TEMP="${RUNNER_TEMP}/${DMG_NAME}"
           DMG_FILE="${DMG_NAME}-${{ steps.version.outputs.version }}.dmg"
           
-          echo "==> Creating temporary DMG folder"
-          mkdir -p "$DMG_TEMP"
-          cp -R "${APP_DIR}" "$DMG_TEMP/"
-          
-          # Create Applications symlink for drag-and-drop installation
-          ln -s /Applications "$DMG_TEMP/Applications"
-          
-          echo "==> Creating DMG"
-          hdiutil create -volname "${DMG_NAME}" \
-            -srcfolder "$DMG_TEMP" \
-            -ov -format UDZO \
-            "${DMG_FILE}"
+          echo "==> Creating DMG with custom background and layout"
+          create-dmg \
+            --volname "${DMG_NAME}" \
+            --volicon "Resources/DMG/AppIcon.icns" \
+            --background "Resources/DMG/background@2x.png" \
+            --window-pos 200 120 \
+            --window-size 660 400 \
+            --icon-size 100 \
+            --icon "${APP_NAME}.app" 180 200 \
+            --app-drop-link 480 200 \
+            --hide-extension "${APP_NAME}.app" \
+            --no-internet-enable \
+            "${DMG_FILE}" \
+            "${APP_DIR}"
           
           echo "dmg_file=$DMG_FILE" >> $GITHUB_OUTPUT
           echo "==> DMG created: $DMG_FILE"
