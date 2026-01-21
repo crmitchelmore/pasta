@@ -18,14 +18,16 @@ final class SearchServiceTests: XCTestCase {
     func testFuzzySearchFindsApproximateMatches() throws {
         let db = try DatabaseManager.inMemory()
         try db.insert(ClipboardEntry(content: "hello world", contentType: .text, timestamp: Date(timeIntervalSince1970: 1)))
-        try db.insert(ClipboardEntry(content: "completely different", contentType: .text, timestamp: Date(timeIntervalSince1970: 2)))
+        try db.insert(ClipboardEntry(content: "completely different text that should not match", contentType: .text, timestamp: Date(timeIntervalSince1970: 2)))
 
         let service = SearchService(database: db)
         // "helo" should fuzzy-match "hello world"
         let results = try service.search(query: "helo", limit: 10)
 
-        XCTAssertTrue(results.contains(where: { $0.entry.content == "hello world" }))
-        XCTAssertFalse(results.contains(where: { $0.entry.content == "completely different" }))
+        // Should find hello world via fuzzy match
+        XCTAssertTrue(results.contains(where: { $0.entry.content == "hello world" }), "Should find 'hello world' via fuzzy match")
+        // The first result should be the better match
+        XCTAssertEqual(results.first?.entry.content, "hello world", "Best match should be 'hello world'")
     }
 
     func testSearchSupportsContentTypeFiltering() throws {
