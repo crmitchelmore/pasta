@@ -3,7 +3,7 @@ import SwiftUI
 
 // MARK: - Time Group Helpers
 
-public enum TimeGroup: String, CaseIterable {
+public enum TimeGroup: String, CaseIterable, Sendable {
     case lastMinute = "Last Minute"
     case last5Minutes = "Last 5 Minutes"
     case last15Minutes = "Last 15 Minutes"
@@ -32,6 +32,41 @@ public enum TimeGroup: String, CaseIterable {
     }
 }
 
+// MARK: - Lightweight Row Data (for Equatable diffing)
+
+/// Minimal data needed to render a row - used for efficient diffing
+private struct RowData: Equatable, Identifiable {
+    let id: UUID
+    let previewText: String
+    let contentType: ContentType
+    let sourceAppName: String?
+    let timestamp: Date
+    let copyCount: Int
+    let isLarge: Bool
+    let hasFilePath: Bool
+    
+    init(from entry: ClipboardEntry) {
+        self.id = entry.id
+        let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.previewText = trimmed.isEmpty ? "(empty)" : String(trimmed.prefix(200))
+        self.contentType = entry.contentType
+        self.sourceAppName = entry.sourceApp?.displayName
+        self.timestamp = entry.timestamp
+        self.copyCount = entry.copyCount
+        self.isLarge = entry.content.utf8.count > 10 * 1024
+        self.hasFilePath = entry.contentType == .filePath
+    }
+}
+
+// MARK: - Grouped Section Data
+
+private struct SectionData: Identifiable {
+    let id: String  // group name as ID
+    let name: String
+    let rows: [RowData]
+    let startIndex: Int  // global index offset for ⌘1-9
+}
+
 // MARK: - Main List View
 
 public struct ClipboardListView: View {
@@ -50,8 +85,11 @@ public struct ClipboardListView: View {
     @State private var selectedIDs: Set<UUID> = []
     @State private var hoveredID: UUID? = nil
     @State private var deleteConfirmEntry: ClipboardEntry? = nil
-    @State private var cachedGroups: [(String, [ClipboardEntry])] = []
-    @State private var lastEntriesHash: Int = 0
+    
+    // Cached computed data for performance
+    @State private var sections: [SectionData] = []
+    @State private var entryLookup: [UUID: ClipboardEntry] = [:]
+    @State private var lastDataHash: Int = 0
 
     public init(
         entries: [ClipboardEntry],
@@ -77,37 +115,69 @@ public struct ClipboardListView: View {
         self.onReveal = onReveal
     }
 
-    private func computeGroupedEntries() -> [(String, [ClipboardEntry])] {
+    /// Compute a stable hash for change detection
+    private func computeDataHash() -> Int {
+        var hasher = Hasher()
+        hasher.combine(entries.count)
+        hasher.combine(searchQuery)
+        // Include first/last entry IDs for content change detection
+        if let first = entries.first { hasher.combine(first.id) }
+        if let last = entries.last { hasher.combine(last.id) }
+        return hasher.finalize()
+    }
+    
+    /// Rebuild cached section data - runs off main thread implicitly via onChange
+    private func rebuildSections() {
+        let newHash = computeDataHash()
+        guard newHash != lastDataHash else { return }
+        lastDataHash = newHash
+        
+        // Build lookup table for callbacks
+        var lookup: [UUID: ClipboardEntry] = [:]
+        lookup.reserveCapacity(entries.count)
+        for entry in entries {
+            lookup[entry.id] = entry
+        }
+        entryLookup = lookup
+        
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        // If searching text, return flat list (no groups)
+        // If searching, return flat list
         if !trimmedQuery.isEmpty {
-            return [("Results", entries)]
+            let rows = entries.map { RowData(from: $0) }
+            sections = [SectionData(id: "Results", name: "Results", rows: rows, startIndex: 0)]
+            return
         }
         
         // Group by time
         let now = Date()
-        var groups: [TimeGroup: [ClipboardEntry]] = [:]
+        var groups: [TimeGroup: [RowData]] = [:]
         for entry in entries {
             let group = TimeGroup.group(for: entry.timestamp, now: now)
-            groups[group, default: []].append(entry)
+            groups[group, default: []].append(RowData(from: entry))
         }
         
-        // Return in order, excluding empty groups
-        return TimeGroup.allCases.compactMap { group in
-            guard let items = groups[group], !items.isEmpty else { return nil }
-            return (group.rawValue, items)
+        // Build sections in order
+        var result: [SectionData] = []
+        var runningIndex = 0
+        for group in TimeGroup.allCases {
+            guard let rows = groups[group], !rows.isEmpty else { continue }
+            result.append(SectionData(
+                id: group.rawValue,
+                name: group.rawValue,
+                rows: rows,
+                startIndex: runningIndex
+            ))
+            runningIndex += rows.count
         }
+        sections = result
     }
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Toolbar
             listToolbar
-            
             Divider()
             
-            // List content
             if entries.isEmpty {
                 ContentUnavailableView(
                     "No clipboard history",
@@ -119,15 +189,10 @@ public struct ClipboardListView: View {
                 listContent
             }
         }
-        .onChange(of: entries.count) { _, _ in
-            updateCachedGroups()
-        }
-        .onChange(of: searchQuery) { _, _ in
-            updateCachedGroups()
-        }
-        .onAppear {
-            updateCachedGroups()
-        }
+        .onChange(of: entries.count) { _, _ in rebuildSections() }
+        .onChange(of: searchQuery) { _, _ in rebuildSections() }
+        .onChange(of: entries.first?.id) { _, _ in rebuildSections() }
+        .onAppear { rebuildSections() }
         .alert("Delete Entry?", isPresented: .init(
             get: { deleteConfirmEntry != nil },
             set: { if !$0 { deleteConfirmEntry = nil } }
@@ -141,16 +206,9 @@ public struct ClipboardListView: View {
             }
         } message: {
             if let entry = deleteConfirmEntry {
-                Text("Delete \"\(entry.previewText.prefix(50))\"?")
+                Text("Delete \"\(entry.content.prefix(50))\"?")
             }
         }
-    }
-    
-    private func updateCachedGroups() {
-        let newHash = entries.count ^ (searchQuery.hashValue &* 31)
-        guard newHash != lastEntriesHash else { return }
-        lastEntriesHash = newHash
-        cachedGroups = computeGroupedEntries()
     }
     
     @ViewBuilder
@@ -215,47 +273,57 @@ public struct ClipboardListView: View {
     private var listContent: some View {
         ScrollViewReader { proxy in
             List(selection: isSelectionMode ? nil : $selectedEntryID) {
-                ForEach(Array(cachedGroups.enumerated()), id: \.element.0) { groupIndex, group in
-                    let (groupName, groupEntries) = group
-                    let baseIndex = cachedGroups.prefix(groupIndex).reduce(0) { $0 + $1.1.count }
-                    
+                ForEach(sections) { section in
                     Section {
-                        ForEach(Array(groupEntries.enumerated()), id: \.element.id) { entryIndex, entry in
-                            let globalIndex = baseIndex + entryIndex
-                            ClipboardRowView(
-                                entry: entry,
-                                index: globalIndex < 9 ? globalIndex : nil,
-                                isHovered: hoveredID == entry.id,
-                                isSelected: isSelectionMode && selectedIDs.contains(entry.id),
-                                isSelectionMode: isSelectionMode,
-                                onDelete: { deleteConfirmEntry = entry },
-                                onToggleSelect: {
-                                    if selectedIDs.contains(entry.id) {
-                                        selectedIDs.remove(entry.id)
-                                    } else {
-                                        selectedIDs.insert(entry.id)
-                                    }
-                                }
+                        ForEach(Array(section.rows.enumerated()), id: \.element.id) { idx, row in
+                            let globalIndex = section.startIndex + idx
+                            OptimizedRowView(
+                                row: row,
+                                quickPasteIndex: globalIndex < 9 ? globalIndex : nil,
+                                isHovered: hoveredID == row.id,
+                                isSelected: isSelectionMode && selectedIDs.contains(row.id),
+                                isSelectionMode: isSelectionMode
                             )
-                            .id(entry.id)
-                            .tag(entry.id)
+                            .equatable()
+                            .id(row.id)
+                            .tag(row.id)
                             .onHover { isHovered in
-                                hoveredID = isHovered ? entry.id : nil
+                                hoveredID = isHovered ? row.id : nil
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    if let entry = entryLookup[row.id] {
+                                        deleteConfirmEntry = entry
+                                    }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                             .contextMenu {
-                                Button("Paste") { onPaste(entry) }
-                                Button("Copy") { onCopy(entry) }
-                                Divider()
-                                Button("Delete", role: .destructive) { deleteConfirmEntry = entry }
-                                if entry.contentType == .filePath {
+                                if let entry = entryLookup[row.id] {
+                                    Button("Paste") { onPaste(entry) }
+                                    Button("Copy") { onCopy(entry) }
                                     Divider()
-                                    Button("Reveal in Finder") { onReveal(entry) }
+                                    Button("Delete", role: .destructive) { deleteConfirmEntry = entry }
+                                    if entry.contentType == .filePath {
+                                        Divider()
+                                        Button("Reveal in Finder") { onReveal(entry) }
+                                    }
+                                }
+                            }
+                            .onTapGesture {
+                                if isSelectionMode {
+                                    if selectedIDs.contains(row.id) {
+                                        selectedIDs.remove(row.id)
+                                    } else {
+                                        selectedIDs.insert(row.id)
+                                    }
                                 }
                             }
                         }
                     } header: {
-                        if cachedGroups.count > 1 || cachedGroups.first?.0 != "Results" {
-                            Text(groupName)
+                        if sections.count > 1 || sections.first?.name != "Results" {
+                            Text(section.name)
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
                                 .textCase(.uppercase)
@@ -264,9 +332,10 @@ public struct ClipboardListView: View {
                 }
             }
             .listStyle(.inset)
+            .scrollContentBackground(.hidden)
             .onChange(of: selectedEntryID) { _, newValue in
                 if let id = newValue {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(.easeInOut(duration: 0.15)) {
                         proxy.scrollTo(id, anchor: .center)
                     }
                 }
@@ -275,37 +344,36 @@ public struct ClipboardListView: View {
     }
 }
 
-// MARK: - Row View
+// MARK: - Optimized Row View (Equatable for minimal re-rendering)
 
-private struct ClipboardRowView: View {
-    let entry: ClipboardEntry
-    let index: Int?  // nil if not in first 9
+/// Lightweight, equatable row view that only re-renders when data changes
+private struct OptimizedRowView: View, Equatable {
+    let row: RowData
+    let quickPasteIndex: Int?
     let isHovered: Bool
     let isSelected: Bool
     let isSelectionMode: Bool
-    let onDelete: () -> Void
-    let onToggleSelect: () -> Void
-
-    private var isLarge: Bool {
-        entry.content.utf8.count > 10 * 1024
+    
+    // Equatable: SwiftUI skips body evaluation when this returns true
+    static func == (lhs: OptimizedRowView, rhs: OptimizedRowView) -> Bool {
+        lhs.row == rhs.row &&
+        lhs.quickPasteIndex == rhs.quickPasteIndex &&
+        lhs.isHovered == rhs.isHovered &&
+        lhs.isSelected == rhs.isSelected &&
+        lhs.isSelectionMode == rhs.isSelectionMode
     }
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            // Selection checkbox (in selection mode)
+            // Selection checkbox
             if isSelectionMode {
-                Button {
-                    onToggleSelect()
-                } label: {
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-                        .font(.title3)
-                }
-                .buttonStyle(.plain)
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    .font(.title3)
             }
             
             // Quick paste shortcut badge (⌘1-9)
-            if let index, !isSelectionMode {
+            if let index = quickPasteIndex, !isSelectionMode {
                 Text("⌘\(index + 1)")
                     .font(.system(size: 10, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
@@ -313,20 +381,20 @@ private struct ClipboardRowView: View {
             }
             
             // Content type icon
-            Image(systemName: entry.contentType.systemImageName)
-                .foregroundStyle(entry.contentType.tint)
+            Image(systemName: row.contentType.systemImageName)
+                .foregroundStyle(row.contentType.tint)
                 .frame(width: 18)
 
             // Content
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(entry.previewText)
+                    Text(row.previewText)
                         .lineLimit(2)
                         .font(.body)
 
                     Spacer(minLength: 0)
 
-                    if isLarge {
+                    if row.isLarge {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                             .help("Large entry (>10KB)")
@@ -334,20 +402,20 @@ private struct ClipboardRowView: View {
                 }
 
                 HStack(spacing: 8) {
-                    ContentTypeBadge(type: entry.contentType)
+                    ContentTypeBadge(type: row.contentType)
                     
-                    if let appName = entry.sourceApp?.displayName {
+                    if let appName = row.sourceAppName {
                         Text(appName)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
 
-                    Text(entry.timestamp, style: .relative)
+                    Text(row.timestamp, style: .relative)
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    if entry.copyCount > 1 {
-                        Text("×\(entry.copyCount)")
+                    if row.copyCount > 1 {
+                        Text("×\(row.copyCount)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -356,15 +424,9 @@ private struct ClipboardRowView: View {
             
             // Delete button (on hover, not in selection mode)
             if isHovered && !isSelectionMode {
-                Button {
-                    onDelete()
-                } label: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                }
-                .buttonStyle(.borderless)
-                .help("Delete")
+                Image(systemName: "trash")
+                    .foregroundStyle(.red)
+                    .font(.caption)
             }
         }
         .padding(.vertical, 6)
@@ -389,16 +451,6 @@ private struct ContentTypeBadge: View {
 
 // MARK: - Extensions
 
-private extension ClipboardEntry {
-    var previewText: String {
-        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            return "(empty)"
-        }
-        return trimmed
-    }
-}
-
 private extension String {
     var displayName: String {
         let parts = self.split(separator: ".")
@@ -414,7 +466,7 @@ private extension String {
     let items = (0..<50).map { idx in
         var e = base
         e.content = "Item \(idx): \(String(repeating: "x", count: (idx % 40) + 1))"
-        e.timestamp = Date().addingTimeInterval(-Double(idx) * 60) // Spread over time
+        e.timestamp = Date().addingTimeInterval(-Double(idx) * 60)
         e.copyCount = (idx % 5) + 1
         e.contentType = ContentType.allCases[idx % ContentType.allCases.count]
         return e
