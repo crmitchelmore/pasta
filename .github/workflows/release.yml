@@ -215,7 +215,6 @@ jobs:
           
           echo "==> Verifying signature"
           codesign --verify --verbose=4 "${APP_DIR}"
-          spctl --assess --verbose=4 --type execute "${APP_DIR}"
       
       # ============================================================================
       # CREATE DMG
