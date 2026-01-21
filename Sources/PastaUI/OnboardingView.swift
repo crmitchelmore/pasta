@@ -15,10 +15,15 @@ public struct OnboardingView: View {
     }
 
     @State private var step: Step = .welcome
-    @State private var isTrusted: Bool = AccessibilityPermission.isTrusted()
+    @State private var hasAccessibility: Bool = AccessibilityPermission.isTrusted()
+    @State private var hasInputMonitoring: Bool = AccessibilityPermission.hasInputMonitoring()
     @State private var pollTimer: Timer? = nil
 
     private let onComplete: (Completion) -> Void
+    
+    private var hasAllPermissions: Bool {
+        hasAccessibility && hasInputMonitoring
+    }
 
     public init(onComplete: @escaping (Completion) -> Void) {
         self.onComplete = onComplete
@@ -84,41 +89,74 @@ public struct OnboardingView: View {
 
     private var accessibility: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Grant Accessibility permission")
+            Text("Grant Permissions")
                 .font(.headline)
 
-            Text("Open System Settings → Privacy & Security → Accessibility, then enable Pasta.")
+            Text("Pasta needs two permissions for global hotkeys to work:")
                 .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                // Accessibility permission
+                HStack(spacing: 8) {
+                    Image(systemName: hasAccessibility ? "checkmark.circle.fill" : "xmark.circle")
+                        .foregroundStyle(hasAccessibility ? .green : .orange)
+                    Text("Accessibility")
+                        .fontWeight(.medium)
+                    Text("(for pasting)")
+                        .foregroundStyle(.secondary)
+                }
+                
+                // Input Monitoring permission
+                HStack(spacing: 8) {
+                    Image(systemName: hasInputMonitoring ? "checkmark.circle.fill" : "xmark.circle")
+                        .foregroundStyle(hasInputMonitoring ? .green : .orange)
+                    Text("Input Monitoring")
+                        .fontWeight(.medium)
+                    Text("(for global hotkey)")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 4)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 12) {
                     Button("Open Accessibility Settings") {
                         openAccessibilitySettings()
                     }
+                    .disabled(hasAccessibility)
 
-                    Button("Show Permission Prompt") {
-                        AccessibilityPermission.requestPrompt()
+                    Button("Open Input Monitoring") {
+                        openInputMonitoringSettings()
                     }
-                    .help("Shows the system prompt (if available).")
+                    .disabled(hasInputMonitoring)
                 }
                 
-                Button("Refresh Permission Status") {
-                    refreshTrust()
+                HStack(spacing: 12) {
+                    Button("Request Permissions") {
+                        AccessibilityPermission.requestPrompt()
+                        AccessibilityPermission.requestInputMonitoring()
+                        refreshTrust()
+                    }
+                    
+                    Button("Refresh Status") {
+                        refreshTrust()
+                    }
                 }
             }
 
-            HStack(spacing: 8) {
-                Image(systemName: isTrusted ? "checkmark.circle.fill" : "xmark.circle")
-                    .foregroundStyle(isTrusted ? .green : .secondary)
-
-                Text(isTrusted ? "Accessibility permission granted." : "Not granted yet. Pasta can still capture history.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if hasAllPermissions {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("All permissions granted!")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+            } else {
+                Text("Note: You may need to restart Pasta after granting permissions for them to take effect.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
-            
-            Text("Note: Permission detection can sometimes be delayed. If you've granted permission but it's not detected, try clicking Refresh or restarting the app.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
         }
     }
 
@@ -150,13 +188,10 @@ public struct OnboardingView: View {
     }
 
     private func refreshTrust() {
-        // AXIsProcessTrusted() can be cached - try multiple times
-        let trusted = AccessibilityPermission.isTrusted()
-        if trusted != isTrusted {
-            isTrusted = trusted
-            if trusted {
-                step = .done
-            }
+        hasAccessibility = AccessibilityPermission.isTrusted()
+        hasInputMonitoring = AccessibilityPermission.hasInputMonitoring()
+        if hasAllPermissions {
+            step = .done
         }
     }
 
@@ -178,6 +213,12 @@ public struct OnboardingView: View {
 
     private func openAccessibilitySettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+    
+    private func openInputMonitoringSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
             NSWorkspace.shared.open(url)
         }
     }
