@@ -1,0 +1,400 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Triggers on version tags like v1.0.0, v2.1.3, etc.
+
+env:
+  APP_NAME: PastaApp
+  BUNDLE_ID: com.pasta.clipboard
+  DMG_NAME: Pasta
+
+jobs:
+  build-and-release:
+    name: Build, Sign, Notarize & Release
+    runs-on: macos-14  # macOS Sonoma required for Swift 5.9+ and macOS 14 target
+    
+    steps:
+      # ============================================================================
+      # CHECKOUT & SETUP
+      # ============================================================================
+      
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for proper version detection
+      
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Extract version from tag (e.g., v1.2.3 -> 1.2.3)
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+      
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: '5.9'
+      
+      # ============================================================================
+      # BUILD
+      # ============================================================================
+      
+      - name: Resolve Swift dependencies
+        run: swift package resolve
+      
+      - name: Build release binary
+        run: swift build -c release --arch arm64 --arch x86_64
+      
+      - name: Create app bundle structure
+        run: |
+          BUILD_DIR=".build/apple/Products/Release"
+          APP_DIR="${BUILD_DIR}/${APP_NAME}.app"
+          
+          echo "==> Creating app bundle at $APP_DIR"
+          rm -rf "$APP_DIR"
+          mkdir -p "$APP_DIR/Contents/MacOS"
+          mkdir -p "$APP_DIR/Contents/Resources"
+          
+          # Copy the universal binary
+          cp ".build/release/${APP_NAME}" "$APP_DIR/Contents/MacOS/${APP_NAME}"
+          
+          # Copy resources
+          if [ -d "Sources/PastaApp/Resources" ]; then
+            cp -R Sources/PastaApp/Resources/* "$APP_DIR/Contents/Resources/" || true
+          fi
+          
+          # Make executable
+          chmod +x "$APP_DIR/Contents/MacOS/${APP_NAME}"
+          
+          echo "APP_DIR=$APP_DIR" >> $GITHUB_ENV
+      
+      - name: Generate Info.plist with version
+        run: |
+          cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>Pasta</string>
+              <key>CFBundleDisplayName</key>
+              <string>Pasta</string>
+              <key>CFBundleIdentifier</key>
+              <string>${BUNDLE_ID}</string>
+              <key>CFBundleVersion</key>
+              <string>${GITHUB_RUN_NUMBER}</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${GITHUB_REF_NAME#v}</string>
+              <key>CFBundleExecutable</key>
+              <string>${APP_NAME}</string>
+              <key>LSApplicationCategoryType</key>
+              <string>public.app-category.productivity</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>14.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSHumanReadableCopyright</key>
+              <string>© $(date +%Y) Pasta</string>
+              <key>CFBundleIconName</key>
+              <string>AppIcon</string>
+              <key>LSUIElement</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+          
+          echo "==> Info.plist created"
+          cat "${APP_DIR}/Contents/Info.plist"
+      
+      # ============================================================================
+      # CODE SIGNING
+      # ============================================================================
+      
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_PASSWORD }}
+        run: |
+          # Create temporary keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          
+          echo "==> Creating temporary keychain"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          
+          echo "==> Importing certificate"
+          echo "$CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+          security import certificate.p12 \
+            -k "$KEYCHAIN_PATH" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/productsign
+          
+          # Set keychain search list
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          
+          # Clean up certificate file
+          rm certificate.p12
+          
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
+          
+          echo "==> Certificate imported successfully"
+      
+      - name: Find signing identity
+        id: signing
+        run: |
+          # Find the Developer ID Application certificate
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application" | head -1 | grep -o '".*"' | tr -d '"')
+          
+          if [ -z "$IDENTITY" ]; then
+            echo "ERROR: No Developer ID Application certificate found!"
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+            exit 1
+          fi
+          
+          echo "identity=$IDENTITY" >> $GITHUB_OUTPUT
+          echo "==> Found signing identity: $IDENTITY"
+      
+      - name: Create entitlements file
+        run: |
+          cat > entitlements.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>com.apple.security.automation.apple-events</key>
+              <true/>
+              <key>com.apple.security.cs.disable-library-validation</key>
+              <true/>
+          </dict>
+          </plist>
+          PLIST
+          
+          echo "==> Entitlements file created"
+          cat entitlements.plist
+      
+      - name: Code sign app bundle
+        run: |
+          echo "==> Signing app bundle with hardened runtime"
+          
+          # Sign all nested binaries and frameworks first
+          find "${APP_DIR}/Contents" -type f -perm +111 | while read binary; do
+            if file "$binary" | grep -q "Mach-O"; then
+              echo "Signing: $binary"
+              codesign --force \
+                --sign "${{ steps.signing.outputs.identity }}" \
+                --options runtime \
+                --timestamp \
+                --entitlements entitlements.plist \
+                "$binary" || true
+            fi
+          done
+          
+          # Sign the app bundle
+          codesign --deep --force \
+            --sign "${{ steps.signing.outputs.identity }}" \
+            --options runtime \
+            --timestamp \
+            --entitlements entitlements.plist \
+            "${APP_DIR}"
+          
+          echo "==> Verifying signature"
+          codesign --verify --verbose=4 "${APP_DIR}"
+          spctl --assess --verbose=4 --type execute "${APP_DIR}"
+      
+      # ============================================================================
+      # CREATE DMG
+      # ============================================================================
+      
+      - name: Create DMG
+        id: dmg
+        run: |
+          DMG_TEMP="${RUNNER_TEMP}/${DMG_NAME}"
+          DMG_FILE="${DMG_NAME}-${{ steps.version.outputs.version }}.dmg"
+          
+          echo "==> Creating temporary DMG folder"
+          mkdir -p "$DMG_TEMP"
+          cp -R "${APP_DIR}" "$DMG_TEMP/"
+          
+          # Create Applications symlink for drag-and-drop installation
+          ln -s /Applications "$DMG_TEMP/Applications"
+          
+          echo "==> Creating DMG"
+          hdiutil create -volname "${DMG_NAME}" \
+            -srcfolder "$DMG_TEMP" \
+            -ov -format UDZO \
+            "${DMG_FILE}"
+          
+          echo "dmg_file=$DMG_FILE" >> $GITHUB_OUTPUT
+          echo "==> DMG created: $DMG_FILE"
+          ls -lh "$DMG_FILE"
+      
+      # ============================================================================
+      # NOTARIZATION
+      # ============================================================================
+      
+      - name: Notarize DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
+          
+          echo "==> Submitting DMG for notarization"
+          xcrun notarytool submit "$DMG_FILE" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait \
+            --timeout 30m
+          
+          echo "==> Notarization successful"
+      
+      - name: Staple notarization ticket
+        run: |
+          DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
+          
+          echo "==> Stapling notarization ticket to DMG"
+          xcrun stapler staple "$DMG_FILE"
+          
+          echo "==> Verifying stapled ticket"
+          xcrun stapler validate "$DMG_FILE"
+      
+      # ============================================================================
+      # VERIFICATION
+      # ============================================================================
+      
+      - name: Verify signed and notarized DMG
+        run: |
+          DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
+          
+          echo "==> Verifying DMG"
+          
+          # Mount DMG
+          hdiutil attach "$DMG_FILE" -mountpoint /tmp/pasta-verify
+          
+          # Verify signature
+          echo "==> Checking code signature"
+          codesign --verify --deep --strict --verbose=2 "/tmp/pasta-verify/${APP_NAME}.app"
+          
+          # Verify notarization
+          echo "==> Checking Gatekeeper assessment"
+          spctl --assess --type execute --verbose=4 "/tmp/pasta-verify/${APP_NAME}.app"
+          
+          # Unmount
+          hdiutil detach /tmp/pasta-verify
+          
+          echo "==> ✅ All verifications passed!"
+      
+      # ============================================================================
+      # RELEASE
+      # ============================================================================
+      
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          
+          cat > release_notes.md <<EOF
+          # Pasta ${VERSION}
+          
+          ## 🍝 Your clipboard, al dente.
+          
+          A blazing-fast, local-first clipboard history manager for macOS with intelligent content detection.
+          
+          ### Installation
+          
+          1. Download \`${{ steps.dmg.outputs.dmg_file }}\`
+          2. Open the DMG and drag **Pasta** to your Applications folder
+          3. Launch Pasta from Applications
+          4. Grant Accessibility permissions when prompted (recommended for full functionality)
+          
+          ### Requirements
+          
+          - macOS 14.0 (Sonoma) or later
+          - Apple Silicon (M1/M2/M3) or Intel Mac
+          
+          ### Features
+          
+          - ✨ **Unlimited clipboard history** — Never lose a copied item
+          - 🧠 **Smart content detection** — Auto-categorizes emails, JWTs, code, URLs, and more
+          - ⚡ **Ultra-fast search** — Full-text search with fuzzy matching
+          - ⌨️  **Keyboard-first** — Global hotkey (\`⌃⌘C\`) and full navigation
+          - 👁️  **Rich previews** — Images, decoded base64, syntax-highlighted code
+          - 🔒 **Privacy-first** — 100% local storage, no cloud sync
+          
+          ### Usage
+          
+          1. Copy anything (text, URLs, images, etc.)
+          2. Press **\`⌃⌘C\`** to show Pasta
+          3. Search, navigate with **↑/↓**, press **Enter** to paste
+          
+          ### Verification
+          
+          This release is code-signed and notarized by Apple for secure distribution outside the Mac App Store.
+          
+          \`\`\`bash
+          # Verify code signature
+          codesign --verify --deep --strict /Applications/Pasta.app
+          
+          # Check notarization
+          spctl --assess --type execute --verbose /Applications/Pasta.app
+          \`\`\`
+          
+          ### Changelog
+          
+          See commit history for detailed changes.
+          
+          ---
+          
+          **SHA-256 Checksum:**
+          \`\`\`
+          $(shasum -a 256 "${{ steps.dmg.outputs.dmg_file }}" | awk '{print $1}')
+          \`\`\`
+          EOF
+          
+          echo "Release notes generated"
+          cat release_notes.md
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Pasta ${{ steps.version.outputs.version }}
+          body_path: release_notes.md
+          files: |
+            ${{ steps.dmg.outputs.dmg_file }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # ============================================================================
+      # CLEANUP
+      # ============================================================================
+      
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          if [ -f "$KEYCHAIN_PATH" ]; then
+            echo "==> Cleaning up keychain"
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
+      
+      - name: Upload build artifacts (for debugging)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-build-artifacts
+          path: |
+            .build/
+            entitlements.plist
+            release_notes.md
+          retention-days: 7

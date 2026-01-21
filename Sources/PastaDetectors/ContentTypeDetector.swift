@@ -357,9 +357,11 @@ public struct ContentTypeDetector {
                     "path": d.path,
                     "exists": d.exists,
                     "filename": d.filename,
+                    "fileType": d.fileType.rawValue,
                     "confidence": d.confidence
                 ]
                 if let ext = d.fileExtension { obj["extension"] = ext }
+                if let mime = d.mimeType { obj["mimeType"] = mime }
                 return obj
             }
         }

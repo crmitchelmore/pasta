@@ -356,4 +356,83 @@ public final class DatabaseManager {
         }
     }
 
+    /// Deletes entries older than the specified number of days and returns any associated image paths.
+    public func pruneOlderThan(days: Int, now: Date = Date()) throws -> [String] {
+        guard days > 0 else { return [] }
+
+        let cutoff = now.addingTimeInterval(-Double(days) * 24 * 60 * 60)
+
+        return try dbQueue.write { db in
+            let imagePaths = try String.fetchAll(
+                db,
+                sql: "SELECT imagePath FROM \(ClipboardEntry.databaseTableName) WHERE timestamp < ? AND imagePath IS NOT NULL",
+                arguments: [cutoff]
+            )
+
+            try db.execute(
+                sql: "DELETE FROM \(ClipboardEntry.databaseTableName) WHERE timestamp < ?",
+                arguments: [cutoff]
+            )
+
+            let deleted = db.changesCount
+            if deleted > 0 {
+                PastaLogger.database.info("Pruned \(deleted) entries older than \(days) days")
+            }
+
+            return imagePaths
+        }
+    }
+
+    /// Inserts an entry, optionally deduplicating by content hash.
+    public func insert(_ entry: ClipboardEntry, deduplicate: Bool) throws {
+        let contentHash = entry.contentHash
+
+        do {
+            try dbQueue.write { db in
+                if deduplicate {
+                    if let existingID: String = try String.fetchOne(
+                        db,
+                        sql: "SELECT id FROM \(ClipboardEntry.databaseTableName) WHERE contentHash = ? LIMIT 1",
+                        arguments: [contentHash]
+                    ) {
+                        try db.execute(
+                            sql: """
+                            UPDATE \(ClipboardEntry.databaseTableName)
+                            SET copyCount = copyCount + 1, timestamp = ?
+                            WHERE id = ?
+                            """,
+                            arguments: [entry.timestamp, existingID]
+                        )
+                        PastaLogger.database.debug("Updated duplicate entry with hash \(contentHash)")
+                        return
+                    }
+                }
+
+                try db.execute(
+                    sql: """
+                    INSERT INTO \(ClipboardEntry.databaseTableName)
+                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    arguments: [
+                        entry.id.uuidString,
+                        entry.content,
+                        entry.contentType.rawValue,
+                        entry.rawData,
+                        entry.imagePath,
+                        entry.timestamp,
+                        entry.copyCount,
+                        entry.sourceApp,
+                        entry.metadata,
+                        contentHash,
+                    ]
+                )
+                PastaLogger.database.debug("Inserted new entry with type \(entry.contentType.rawValue)")
+            }
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert entry")
+            throw error
+        }
+    }
+
 }

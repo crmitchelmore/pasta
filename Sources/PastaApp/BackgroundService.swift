@@ -1,8 +1,13 @@
 import Combine
 import Foundation
+import UserNotifications
 
 @preconcurrency import PastaCore
 import PastaDetectors
+
+#if canImport(AppKit)
+import AppKit
+#endif
 
 /// Singleton service that runs clipboard monitoring in the background.
 /// This ensures clipboard capture works even when the panel is closed.
@@ -22,9 +27,16 @@ final class BackgroundService: ObservableObject {
     
     private var cancellables: Set<AnyCancellable> = []
     private let processingQueue = DispatchQueue(label: "pasta.background.processing")
+    private var pruneTimer: Timer?
     
     private enum Defaults {
         static let maxEntries = "pasta.maxEntries"
+        static let retentionDays = "pasta.retentionDays"
+        static let pauseMonitoring = "pasta.pauseMonitoring"
+        static let playSounds = "pasta.playSounds"
+        static let showNotifications = "pasta.showNotifications"
+        static let storeImages = "pasta.storeImages"
+        static let deduplicateEntries = "pasta.deduplicateEntries"
     }
     
     private init() {
@@ -71,17 +83,29 @@ final class BackgroundService: ObservableObject {
         
         subscribe()
         refresh()
+        
+        // Run initial pruning
+        pruneOldEntries()
     }
     
     func start() {
+        let isPaused = UserDefaults.standard.bool(forKey: Defaults.pauseMonitoring)
+        if isPaused {
+            PastaLogger.app.info("Clipboard monitoring is paused by user setting")
+            return
+        }
+        
         clipboardMonitor.start()
         screenshotMonitor.start()
+        startPruneTimer()
         PastaLogger.app.info("Background clipboard monitoring started")
     }
     
     func stop() {
         clipboardMonitor.stop()
         screenshotMonitor.stop()
+        pruneTimer?.invalidate()
+        pruneTimer = nil
         PastaLogger.app.info("Background clipboard monitoring stopped")
     }
     
@@ -91,10 +115,69 @@ final class BackgroundService: ObservableObject {
         self.entries = latest
     }
     
+    private func startPruneTimer() {
+        // Prune every hour
+        pruneTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.pruneOldEntries()
+            }
+        }
+    }
+    
+    private func pruneOldEntries() {
+        processingQueue.async { [weak self] in
+            guard let self else { return }
+            
+            let retentionDays = UserDefaults.standard.integer(forKey: Defaults.retentionDays)
+            if retentionDays > 0 {
+                do {
+                    let imagePaths = try self.database.pruneOlderThan(days: retentionDays)
+                    for path in imagePaths {
+                        try? self.imageStorage.deleteImage(path: path)
+                    }
+                    if !imagePaths.isEmpty {
+                        PastaLogger.database.debug("Pruned \(imagePaths.count) images due to retention policy")
+                    }
+                } catch {
+                    PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to prune old entries")
+                }
+            }
+            
+            self.enforceMaxEntriesLimit()
+            
+            DispatchQueue.main.async {
+                self.refresh()
+            }
+        }
+    }
+    
     private func subscribe() {
+        // Observe pause monitoring setting
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                let isPaused = UserDefaults.standard.bool(forKey: Defaults.pauseMonitoring)
+                if isPaused {
+                    self.clipboardMonitor.stop()
+                    self.screenshotMonitor.stop()
+                    PastaLogger.app.info("Clipboard monitoring paused")
+                } else {
+                    self.clipboardMonitor.start()
+                    self.screenshotMonitor.start()
+                    PastaLogger.app.info("Clipboard monitoring resumed")
+                }
+            }
+            .store(in: &cancellables)
+        
         clipboardMonitor.publisher
             .sink { [weak self] entry in
                 guard let self else { return }
+                
+                // Check if paused
+                if UserDefaults.standard.bool(forKey: Defaults.pauseMonitoring) {
+                    return
+                }
+                
                 PastaLogger.clipboard.debug("New clipboard entry received: \(entry.contentType.rawValue)")
                 self.processingQueue.async {
                     let enriched: [ClipboardEntry]
@@ -105,9 +188,11 @@ final class BackgroundService: ObservableObject {
                         enriched = [entry]
                     }
 
+                    let deduplicate = UserDefaults.standard.bool(forKey: Defaults.deduplicateEntries)
+                    
                     for e in enriched {
                         do {
-                            try self.database.insert(e)
+                            try self.database.insert(e, deduplicate: deduplicate)
                             PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)")
                         } catch {
                             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert entry")
@@ -117,6 +202,7 @@ final class BackgroundService: ObservableObject {
                     self.enforceMaxEntriesLimit()
                     DispatchQueue.main.async {
                         self.refresh()
+                        self.provideFeedback(for: enriched.first)
                     }
                 }
             }
@@ -125,6 +211,18 @@ final class BackgroundService: ObservableObject {
         screenshotMonitor.publisher
             .sink { [weak self] entry in
                 guard let self else { return }
+                
+                // Check if paused
+                if UserDefaults.standard.bool(forKey: Defaults.pauseMonitoring) {
+                    return
+                }
+                
+                // Check if storing images is enabled
+                if !UserDefaults.standard.bool(forKey: Defaults.storeImages) {
+                    PastaLogger.clipboard.debug("Skipped screenshot - image storage disabled")
+                    return
+                }
+                
                 PastaLogger.clipboard.debug("New screenshot entry received: \(entry.content)")
                 self.processingQueue.async {
                     let enriched: [ClipboardEntry]
@@ -135,9 +233,11 @@ final class BackgroundService: ObservableObject {
                         enriched = [entry]
                     }
 
+                    let deduplicate = UserDefaults.standard.bool(forKey: Defaults.deduplicateEntries)
+                    
                     for e in enriched {
                         do {
-                            try self.database.insert(e)
+                            try self.database.insert(e, deduplicate: deduplicate)
                             PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)")
                         } catch {
                             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert screenshot entry")
@@ -147,10 +247,44 @@ final class BackgroundService: ObservableObject {
                     self.enforceMaxEntriesLimit()
                     DispatchQueue.main.async {
                         self.refresh()
+                        self.provideFeedback(for: enriched.first)
                     }
                 }
             }
             .store(in: &cancellables)
+    }
+    
+    private func provideFeedback(for entry: ClipboardEntry?) {
+        guard let entry else { return }
+        
+        // Play sound
+        if UserDefaults.standard.bool(forKey: Defaults.playSounds) {
+            #if canImport(AppKit)
+            NSSound(named: .init("Tink"))?.play()
+            #endif
+        }
+        
+        // Show notification
+        if UserDefaults.standard.bool(forKey: Defaults.showNotifications) {
+            let content = UNMutableNotificationContent()
+            content.title = "Clipboard captured"
+            content.body = entry.content.prefix(100).trimmingCharacters(in: .whitespacesAndNewlines)
+            if content.body.isEmpty {
+                content.body = entry.contentType.rawValue.capitalized
+            }
+            
+            let request = UNNotificationRequest(
+                identifier: UUID().uuidString,
+                content: content,
+                trigger: nil
+            )
+            
+            UNUserNotificationCenter.current().add(request) { error in
+                if let error {
+                    PastaLogger.app.warning("Failed to show notification: \(error.localizedDescription)")
+                }
+            }
+        }
     }
     
     private func enforceMaxEntriesLimit() {
@@ -168,17 +302,25 @@ final class BackgroundService: ObservableObject {
     
     private func enrich(_ entry: ClipboardEntry) throws -> [ClipboardEntry] {
         var entry = entry
+        
+        let storeImages = UserDefaults.standard.bool(forKey: Defaults.storeImages)
 
         if entry.contentType == .image || entry.contentType == .screenshot, let data = entry.rawData {
-            do {
-                entry.imagePath = try imageStorage.saveImage(data)
-                entry.rawData = nil
-            } catch let error as PastaError {
-                PastaLogger.logError(error, logger: PastaLogger.storage, context: "Failed to save image, continuing without it")
-                DispatchQueue.main.async {
-                    self.lastError = error
+            if storeImages {
+                do {
+                    entry.imagePath = try imageStorage.saveImage(data)
+                    entry.rawData = nil
+                } catch let error as PastaError {
+                    PastaLogger.logError(error, logger: PastaLogger.storage, context: "Failed to save image, continuing without it")
+                    DispatchQueue.main.async {
+                        self.lastError = error
+                    }
+                    entry.rawData = nil
                 }
+            } else {
+                // Don't store image data, just record that an image was copied
                 entry.rawData = nil
+                PastaLogger.clipboard.debug("Skipped storing image data - disabled in settings")
             }
             return [entry]
         }

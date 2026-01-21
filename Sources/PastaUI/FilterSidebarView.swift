@@ -39,7 +39,7 @@ public struct FilterSidebarView: View {
                     sidebarRow(
                         title: typeTitle(type),
                         systemImageName: type.systemImageName,
-                        count: typeCounts[type, default: 0],
+                        count: effectiveTypeCounts[type, default: 0],
                         tint: type.tint,
                         selectionValue: .type(type)
                     )
@@ -87,6 +87,35 @@ public struct FilterSidebarView: View {
             counts[entry.contentType, default: 0] += 1
         }
         return counts
+    }
+    
+    /// Returns type counts with file path images also counted under .image
+    private var effectiveTypeCounts: [ContentType: Int] {
+        var counts = typeCounts
+        
+        // Count file paths that are images and add to image count
+        let imageFilePathCount = entries.filter { entry in
+            guard entry.contentType == .filePath else { return false }
+            return filePathIsImage(entry)
+        }.count
+        
+        if imageFilePathCount > 0 {
+            counts[.image, default: 0] += imageFilePathCount
+        }
+        
+        return counts
+    }
+    
+    private func filePathIsImage(_ entry: ClipboardEntry) -> Bool {
+        guard let meta = entry.metadata,
+              let data = meta.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+              let paths = dict["filePaths"] as? [[String: Any]],
+              let first = paths.first,
+              let fileType = first["fileType"] as? String
+        else { return false }
+        
+        return fileType == "image"
     }
 
     private var domainCounts: [String: Int] {

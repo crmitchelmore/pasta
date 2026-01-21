@@ -8,6 +8,10 @@ import PastaUI
 
 // (PastaTheme lives in PastaUI)
 
+extension Notification.Name {
+    static let openSettings = Notification.Name("pasta.openSettings")
+}
+
 @main
 struct PastaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -15,6 +19,7 @@ struct PastaApp: App {
     var body: some Scene {
         Settings {
             SettingsView()
+                .frame(minWidth: 450, minHeight: 400)
         }
     }
 }
@@ -25,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyManager: HotkeyManager?
     private var statusItem: NSStatusItem?
     private var defaultsObserver: NSObjectProtocol?
+    private var settingsWindow: NSWindow?
 
     private enum Defaults {
         static let appMode = "pasta.appMode"
@@ -33,9 +39,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         PastaLogger.app.info("Pasta app initializing...")
         
+        // Register default values for settings
+        UserDefaults.standard.register(defaults: [
+            "pasta.storeImages": true,
+            "pasta.deduplicateEntries": true,
+            "pasta.appMode": "both"
+        ])
+        
         configureAppIcon()
         applyAppMode()
         observeDefaults()
+        
+        // Observe settings open notification
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(openSettings),
+            name: .openSettings,
+            object: nil
+        )
         
         // Start background clipboard monitoring (runs even when panel is closed)
         BackgroundService.shared.start()
@@ -45,6 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             size: NSSize(width: 900, height: 640),
             content: { PanelContentView() }
         )
+        
+        // Show the window on launch
+        panelController?.show()
         
         // Setup hotkey to toggle panel
         hotkeyManager = HotkeyManager { [weak self] in
@@ -97,7 +121,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func openSettings() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        PastaLogger.app.info("Opening settings window...")
+        
+        // Create settings window if needed
+        if settingsWindow == nil {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 500, height: 500),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Pasta Settings"
+            window.contentView = NSHostingView(rootView: SettingsView())
+            window.center()
+            window.isReleasedWhenClosed = false
+            settingsWindow = window
+        }
+        
+        // Show and activate
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
     }
     
     @objc private func quitApp() {
@@ -151,69 +194,103 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let rect = NSRect(x: 0, y: 0, width: size, height: size)
         let corner = size * 0.22
+        
+        // Background gradient - modern blue-purple
         let backgroundPath = NSBezierPath(roundedRect: rect, xRadius: corner, yRadius: corner)
         let bgGradient = NSGradient(colors: [
-            NSColor(calibratedRed: 0.98, green: 0.96, blue: 0.90, alpha: 1.0),
-            NSColor(calibratedRed: 0.93, green: 0.89, blue: 0.82, alpha: 1.0)
+            NSColor(calibratedRed: 0.25, green: 0.47, blue: 0.85, alpha: 1.0),  // Blue
+            NSColor(calibratedRed: 0.42, green: 0.35, blue: 0.80, alpha: 1.0)   // Purple
         ])
-        bgGradient?.draw(in: backgroundPath, angle: -90)
-
-        let plateRect = rect.insetBy(dx: size * 0.16, dy: size * 0.16)
-        let platePath = NSBezierPath(ovalIn: plateRect)
-        NSColor.white.setFill()
-        platePath.fill()
-        NSColor(calibratedRed: 0.88, green: 0.86, blue: 0.82, alpha: 1.0).setStroke()
-        platePath.lineWidth = size * 0.03
-        platePath.stroke()
-
-        let innerRect = rect.insetBy(dx: size * 0.25, dy: size * 0.25)
-        let innerPath = NSBezierPath(ovalIn: innerRect)
-        NSColor(calibratedRed: 0.97, green: 0.96, blue: 0.94, alpha: 1.0).setFill()
-        innerPath.fill()
-        NSColor(calibratedRed: 0.90, green: 0.88, blue: 0.84, alpha: 1.0).setStroke()
-        innerPath.lineWidth = size * 0.02
-        innerPath.stroke()
-
-        let center = NSPoint(x: rect.midX, y: rect.midY + size * 0.02)
-        let spiral = NSBezierPath()
-        let turns: CGFloat = 4.2
-        let steps = 260
-        for i in 0..<steps {
-            let t = CGFloat(i) / CGFloat(steps - 1) * .pi * turns
-            let radius = size * 0.03 + t * size * 0.02
-            let x = center.x + radius * cos(t)
-            let y = center.y + radius * sin(t)
-            if i == 0 {
-                spiral.move(to: NSPoint(x: x, y: y))
-            } else {
-                spiral.line(to: NSPoint(x: x, y: y))
-            }
-        }
-        spiral.lineWidth = size * 0.08
-        spiral.lineCapStyle = .round
-        NSColor(calibratedRed: 0.94, green: 0.74, blue: 0.18, alpha: 1.0).setStroke()
-        spiral.stroke()
-
-        let basil = NSBezierPath(ovalIn: NSRect(
-            x: center.x + size * 0.14,
-            y: center.y + size * 0.08,
-            width: size * 0.18,
-            height: size * 0.10
-        ))
-        NSColor(calibratedRed: 0.20, green: 0.55, blue: 0.30, alpha: 1.0).setFill()
-        basil.fill()
-
-        for (dx, dy, r) in [(-0.14, -0.10, 0.035), (-0.05, -0.05, 0.028), (0.12, -0.02, 0.024)] {
-            let dotRect = NSRect(
-                x: center.x + size * dx - size * r,
-                y: center.y + size * dy - size * r,
-                width: size * r * 2,
-                height: size * r * 2
+        bgGradient?.draw(in: backgroundPath, angle: -45)
+        
+        // Draw stacked clipboard pages (history effect)
+        let pageColors = [
+            NSColor(white: 1.0, alpha: 0.3),
+            NSColor(white: 1.0, alpha: 0.5),
+            NSColor(white: 1.0, alpha: 0.85)
+        ]
+        
+        for (index, color) in pageColors.enumerated() {
+            let offset = CGFloat(2 - index) * size * 0.03
+            let pageRect = NSRect(
+                x: size * 0.18 + offset,
+                y: size * 0.15 - offset,
+                width: size * 0.64,
+                height: size * 0.70
             )
-            let dot = NSBezierPath(ovalIn: dotRect)
-            NSColor(calibratedRed: 0.84, green: 0.22, blue: 0.18, alpha: 1.0).setFill()
-            dot.fill()
+            let pagePath = NSBezierPath(roundedRect: pageRect, xRadius: size * 0.06, yRadius: size * 0.06)
+            color.setFill()
+            pagePath.fill()
         }
+        
+        // Main clipboard page
+        let mainPageRect = NSRect(x: size * 0.18, y: size * 0.15, width: size * 0.64, height: size * 0.70)
+        let mainPage = NSBezierPath(roundedRect: mainPageRect, xRadius: size * 0.06, yRadius: size * 0.06)
+        NSColor.white.setFill()
+        mainPage.fill()
+        
+        // Clipboard clip at top
+        let clipWidth = size * 0.28
+        let clipHeight = size * 0.12
+        let clipRect = NSRect(
+            x: rect.midX - clipWidth / 2,
+            y: size * 0.78,
+            width: clipWidth,
+            height: clipHeight
+        )
+        let clipPath = NSBezierPath(roundedRect: clipRect, xRadius: size * 0.03, yRadius: size * 0.03)
+        NSColor(calibratedRed: 0.55, green: 0.55, blue: 0.58, alpha: 1.0).setFill()
+        clipPath.fill()
+        
+        // Inner clip detail
+        let innerClipRect = clipRect.insetBy(dx: size * 0.03, dy: size * 0.025)
+        let innerClipPath = NSBezierPath(roundedRect: innerClipRect, xRadius: size * 0.015, yRadius: size * 0.015)
+        NSColor(calibratedRed: 0.70, green: 0.70, blue: 0.72, alpha: 1.0).setFill()
+        innerClipPath.fill()
+        
+        // Text lines on clipboard (representing content)
+        let lineColor = NSColor(calibratedRed: 0.85, green: 0.85, blue: 0.87, alpha: 1.0)
+        let accentColor = NSColor(calibratedRed: 0.25, green: 0.47, blue: 0.85, alpha: 0.6)
+        
+        let lineY: [CGFloat] = [0.62, 0.52, 0.42, 0.32]
+        let lineWidths: [CGFloat] = [0.42, 0.38, 0.32, 0.25]
+        
+        for (y, width) in zip(lineY, lineWidths) {
+            let lineRect = NSRect(
+                x: size * 0.26,
+                y: size * y,
+                width: size * width,
+                height: size * 0.045
+            )
+            let linePath = NSBezierPath(roundedRect: lineRect, xRadius: size * 0.02, yRadius: size * 0.02)
+            (y == 0.62 ? accentColor : lineColor).setFill()
+            linePath.fill()
+        }
+        
+        // Copy symbol (two overlapping squares) in corner
+        let symbolSize = size * 0.14
+        let symbolX = size * 0.58
+        let symbolY = size * 0.22
+        
+        // Back square
+        let backSquare = NSBezierPath(roundedRect: NSRect(
+            x: symbolX + size * 0.03,
+            y: symbolY + size * 0.03,
+            width: symbolSize,
+            height: symbolSize
+        ), xRadius: size * 0.02, yRadius: size * 0.02)
+        NSColor(calibratedRed: 0.25, green: 0.47, blue: 0.85, alpha: 0.4).setFill()
+        backSquare.fill()
+        
+        // Front square
+        let frontSquare = NSBezierPath(roundedRect: NSRect(
+            x: symbolX,
+            y: symbolY,
+            width: symbolSize,
+            height: symbolSize
+        ), xRadius: size * 0.02, yRadius: size * 0.02)
+        NSColor(calibratedRed: 0.25, green: 0.47, blue: 0.85, alpha: 0.8).setFill()
+        frontSquare.fill()
 
         return image
     }
@@ -230,17 +307,12 @@ struct PanelContentView: View {
     @ObservedObject private var backgroundService = BackgroundService.shared
 
     @State private var searchQuery: String = ""
-    @State private var isFuzzySearch: Bool = false
     @State private var contentTypeFilter: ContentType? = nil
     @State private var urlDomainFilter: String? = nil
     @State private var filterSelection: FilterSelection? = .all
     @State private var sourceAppFilter: String = ""
 
     @State private var selectedEntryID: UUID? = nil
-
-    @State private var isShowingDeleteConfirmation: Bool = false
-    @State private var isShowingBulkDelete: Bool = false
-    @State private var lastBulkDeleteSummary: String? = nil
 
     @State private var isShowingOnboarding: Bool = false
     @State private var isShowingErrorAlert: Bool = false
@@ -281,7 +353,6 @@ struct PanelContentView: View {
         do {
             let matches = try searchService.search(
                 query: trimmed,
-                mode: isFuzzySearch ? .fuzzy : .exact,
                 contentType: contentTypeFilter,
                 limit: 200
             )
@@ -306,11 +377,13 @@ struct PanelContentView: View {
 
             SearchBarView(
                 query: $searchQuery,
-                isFuzzy: $isFuzzySearch,
                 contentType: $contentTypeFilter,
                 resultCount: displayedEntries.count,
                 sourceAppFilter: $sourceAppFilter,
-                onOpenSettings: { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) },
+                onOpenSettings: {
+                    // Post notification to open settings via AppDelegate
+                    NotificationCenter.default.post(name: .openSettings, object: nil)
+                },
                 searchFocused: $searchFocused
             )
 
@@ -322,13 +395,7 @@ struct PanelContentView: View {
 
     @ViewBuilder
     private var headerView: some View {
-        HStack(spacing: 12) {
-            Spacer()
-
-            Button("Close") { closePanel() }
-                .keyboardShortcut("w", modifiers: [.command])
-        }
-        .padding(.vertical, 2)
+        EmptyView()
     }
 
     @ViewBuilder
@@ -348,7 +415,8 @@ struct PanelContentView: View {
                 selectedEntryID: $selectedEntryID,
                 onCopy: { entry in copyEntry(entry) },
                 onPaste: { entry in pasteEntry(entry) },
-                onDelete: { _ in isShowingDeleteConfirmation = true },
+                onDelete: { entry in deleteEntry(entry) },
+                onDeleteMultiple: { ids in deleteEntries(ids) },
                 onReveal: { entry in revealEntry(entry) }
             )
             .frame(width: 320)
@@ -365,30 +433,7 @@ struct PanelContentView: View {
 
     @ViewBuilder
     private var footerView: some View {
-        HStack {
-            Button("Refresh") {
-                refreshEntries()
-            }
-            .keyboardShortcut("r", modifiers: [.command])
-
-            Button("Delete Selected…") {
-                isShowingDeleteConfirmation = true
-            }
-            .disabled(selectedEntryID == nil)
-
-            Button("Delete Recent Items…") {
-                isShowingBulkDelete = true
-            }
-            .disabled(backgroundService.entries.isEmpty)
-
-            if let lastBulkDeleteSummary {
-                Text(lastBulkDeleteSummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-        }
+        EmptyView()
     }
 
     private func applyChrome<V: View>(to view: V) -> some View {
@@ -420,40 +465,17 @@ struct PanelContentView: View {
             .onChange(of: listFocused) { _, newValue in
                 if newValue { searchFocused = false }
             }
-            .modifier(ChromeSheetsModifier(
-                isShowingDeleteConfirmation: $isShowingDeleteConfirmation,
-                isShowingBulkDelete: $isShowingBulkDelete,
-                isShowingOnboarding: $isShowingOnboarding,
-                deleteConfirmationContent: {
-                    DeleteConfirmationView(entry: displayedEntries.first(where: { $0.id == selectedEntryID })) {
-                        deleteSelectedEntry()
-                    }
-                },
-                bulkDeleteContent: {
-                    BulkDeleteView(entries: backgroundService.entries) { minutes in
-                        do {
-                            let imageStorage = try ImageStorageManager()
-                            let deleteService = DeleteService(database: database, imageStorage: imageStorage)
-                            let count = try deleteService.deleteRecent(minutes: minutes)
-                            lastBulkDeleteSummary = "Deleted \(count)"
-                            refreshEntries()
-                        } catch {
-                            lastBulkDeleteSummary = "Delete failed"
-                        }
-                    }
-                },
-                onboardingContent: {
-                    OnboardingView { completion in
-                        switch completion {
-                        case .dismissed:
-                            isShowingOnboarding = false
-                        case .completed:
-                            didCompleteOnboarding = true
-                            isShowingOnboarding = false
-                        }
+            .sheet(isPresented: $isShowingOnboarding) {
+                OnboardingView { completion in
+                    switch completion {
+                    case .dismissed:
+                        isShowingOnboarding = false
+                    case .completed:
+                        didCompleteOnboarding = true
+                        isShowingOnboarding = false
                     }
                 }
-            ))
+            }
             .modifier(ChromeAlertModifier(
                 isShowingErrorAlert: $isShowingErrorAlert,
                 lastError: backgroundService.lastError,
@@ -544,8 +566,9 @@ struct PanelContentView: View {
             return .handled
 
         case .delete:
-            if keyPress.modifiers.contains(.command) {
-                isShowingDeleteConfirmation = true
+            if keyPress.modifiers.contains(.command), let id = selectedEntryID,
+               let entry = displayedEntries.first(where: { $0.id == id }) {
+                deleteEntry(entry)
                 return .handled
             }
             return .ignored
@@ -612,6 +635,32 @@ struct PanelContentView: View {
         }
     }
 
+    private func deleteEntry(_ entry: ClipboardEntry) {
+        PastaLogger.ui.debug("Deleting entry: \(entry.id.uuidString)")
+        do {
+            let imageStorage = try ImageStorageManager()
+            let deleteService = DeleteService(database: database, imageStorage: imageStorage)
+            _ = try deleteService.delete(id: entry.id)
+            refreshEntries()
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.ui, context: "Failed to delete entry")
+        }
+    }
+
+    private func deleteEntries(_ ids: [UUID]) {
+        PastaLogger.ui.debug("Deleting \(ids.count) entries")
+        do {
+            let imageStorage = try ImageStorageManager()
+            let deleteService = DeleteService(database: database, imageStorage: imageStorage)
+            for id in ids {
+                _ = try deleteService.delete(id: id)
+            }
+            refreshEntries()
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.ui, context: "Failed to delete entries")
+        }
+    }
+
     private func copyEntry(_ entry: ClipboardEntry) {
         PastaLogger.ui.debug("Copying entry: \(entry.contentType.rawValue)")
         _ = PasteService().copy(entry)
@@ -631,22 +680,6 @@ struct PanelContentView: View {
             .filter { !$0.isEmpty }
         let urls = paths.map { URL(fileURLWithPath: $0) }
         NSWorkspace.shared.activateFileViewerSelecting(urls)
-    }
-}
-
-private struct ChromeSheetsModifier<DeleteContent: View, BulkDeleteContent: View, OnboardingContent: View>: ViewModifier {
-    @Binding var isShowingDeleteConfirmation: Bool
-    @Binding var isShowingBulkDelete: Bool
-    @Binding var isShowingOnboarding: Bool
-    let deleteConfirmationContent: () -> DeleteContent
-    let bulkDeleteContent: () -> BulkDeleteContent
-    let onboardingContent: () -> OnboardingContent
-
-    func body(content: Content) -> some View {
-        content
-            .sheet(isPresented: $isShowingDeleteConfirmation, content: deleteConfirmationContent)
-            .sheet(isPresented: $isShowingBulkDelete, content: bulkDeleteContent)
-            .sheet(isPresented: $isShowingOnboarding, content: onboardingContent)
     }
 }
 

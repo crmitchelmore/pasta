@@ -3,16 +3,19 @@ import Fuse
 import os.log
 
 public final class SearchService {
-    public enum Mode {
-        case exact
-        case fuzzy
-    }
-
     public struct Match: Sendable {
         public let entry: ClipboardEntry
-        /// Lower is better. For exact search this is the SQLite bm25 rank; for fuzzy search this is Fuse's score.
+        /// Lower is better. Exact matches get score of 0, fuzzy matches use Fuse's score.
         public let score: Double
         public let ranges: [CountableClosedRange<Int>]
+        public let isExactMatch: Bool
+        
+        public init(entry: ClipboardEntry, score: Double, ranges: [CountableClosedRange<Int>], isExactMatch: Bool = false) {
+            self.entry = entry
+            self.score = score
+            self.ranges = ranges
+            self.isExactMatch = isExactMatch
+        }
     }
 
     private let database: DatabaseManager
@@ -23,9 +26,9 @@ public final class SearchService {
         self.fuse = fuse
     }
 
+    /// Unified search that prioritizes exact matches, then fuzzy matches.
     public func search(
         query: String,
-        mode: Mode,
         contentType: ContentType? = nil,
         limit: Int = 50
     ) throws -> [Match] {
@@ -35,48 +38,64 @@ public final class SearchService {
             return []
         }
 
-        PastaLogger.search.debug("Searching for '\(trimmed)' mode=\(String(describing: mode)) contentType=\(String(describing: contentType)) limit=\(limit)")
+        PastaLogger.search.debug("Searching for '\(trimmed)' contentType=\(String(describing: contentType)) limit=\(limit)")
         let startTime = CFAbsoluteTimeGetCurrent()
 
-        switch mode {
-        case .exact:
-            let ranked = try database.searchExact(query: trimmed, contentType: contentType, limit: limit)
-            let results = ranked.map { entry, rank in
-                Match(entry: entry, score: rank, ranges: Self.matchRanges(of: trimmed, in: entry.content))
-            }
-            let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
-            PastaLogger.search.info("Exact search completed: \(results.count) results in \(String(format: "%.1f", elapsed))ms")
-            return results
-        case .fuzzy:
-            let candidates = try database.fetchRecent(contentType: contentType, limit: max(limit, 250))
-            let pattern = fuse.createPattern(from: trimmed)
-
-            let matches: [Match] = candidates.compactMap { entry in
-                guard let result = fuse.search(pattern, in: entry.content) else {
-                    return nil
-                }
-                return Match(entry: entry, score: result.score, ranges: result.ranges)
-            }
-
-            let sorted = matches.sorted { $0.score < $1.score }
-            guard let best = sorted.first else {
-                PastaLogger.search.debug("Fuzzy search found no matches")
-                return []
-            }
-
-            // Fuse can return weak matches for unrelated strings; filter to “close to best”.
-            // Lower scores are better. Keep it conservative but always include the best match.
-            let maxScore = max(best.score, min(0.4, best.score * 1.5))
-
-            let results = sorted
-                .filter { $0.score <= maxScore }
-                .prefix(limit)
-                .map { $0 }
+        // Fetch candidates
+        let candidates = try database.fetchRecent(contentType: contentType, limit: max(limit * 5, 500))
+        
+        let lowerQuery = trimmed.lowercased()
+        var exactMatches: [Match] = []
+        var containsMatches: [Match] = []
+        var fuzzyMatches: [Match] = []
+        
+        let pattern = fuse.createPattern(from: trimmed)
+        
+        for entry in candidates {
+            let lowerContent = entry.content.lowercased()
             
-            let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
-            PastaLogger.search.info("Fuzzy search completed: \(results.count) results in \(String(format: "%.1f", elapsed))ms")
-            return results
+            // Check for exact match (content equals query)
+            if lowerContent == lowerQuery {
+                let ranges = Self.matchRanges(of: trimmed, in: entry.content)
+                exactMatches.append(Match(entry: entry, score: 0.0, ranges: ranges, isExactMatch: true))
+                continue
+            }
+            
+            // Check for contains match (query is substring)
+            if lowerContent.contains(lowerQuery) {
+                let ranges = Self.matchRanges(of: trimmed, in: entry.content)
+                // Score based on how much of the content the match covers
+                let coverage = Double(trimmed.count) / Double(entry.content.count)
+                let score = 0.1 + (1.0 - coverage) * 0.2 // Range: 0.1 to 0.3
+                containsMatches.append(Match(entry: entry, score: score, ranges: ranges, isExactMatch: false))
+                continue
+            }
+            
+            // Try fuzzy match
+            if let result = fuse.search(pattern, in: entry.content) {
+                // Only include reasonably good fuzzy matches
+                if result.score <= 0.6 {
+                    fuzzyMatches.append(Match(entry: entry, score: 0.4 + result.score, ranges: result.ranges, isExactMatch: false))
+                }
+            }
         }
+        
+        // Sort each group and combine
+        exactMatches.sort { $0.entry.timestamp > $1.entry.timestamp }
+        containsMatches.sort { $0.score < $1.score }
+        fuzzyMatches.sort { $0.score < $1.score }
+        
+        var results: [Match] = []
+        results.append(contentsOf: exactMatches)
+        results.append(contentsOf: containsMatches)
+        results.append(contentsOf: fuzzyMatches)
+        
+        let limited = Array(results.prefix(limit))
+        
+        let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+        PastaLogger.search.info("Search completed: \(limited.count) results (\(exactMatches.count) exact, \(containsMatches.count) contains, \(fuzzyMatches.count) fuzzy) in \(String(format: "%.1f", elapsed))ms")
+        
+        return limited
     }
 
     private static func matchRanges(of needle: String, in haystack: String) -> [CountableClosedRange<Int>] {

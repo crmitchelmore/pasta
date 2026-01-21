@@ -14,3 +14,11 @@ Package.resolved
 
 # Copilot CLI prompt/context artifacts
 .ralph-*
+
+# Release artifacts (DMG, certificates)
+*.dmg
+*.p12
+*.cer
+*.mobileprovision
+entitlements.plist
+release_notes.md
