@@ -56,8 +56,13 @@ jobs:
             .build/arm64-apple-macosx/release/PastaApp \
             .build/x86_64-apple-macosx/release/PastaApp \
             -output .build/universal/PastaApp
+          
+          echo "==> Stripping debug symbols"
+          strip -x .build/universal/PastaApp
+          
           echo "==> Created universal binary"
           file .build/universal/PastaApp
+          ls -lh .build/universal/PastaApp
       
       - name: Create app bundle structure
         run: |
@@ -235,8 +240,8 @@ jobs:
       # CREATE DMG
       # ============================================================================
       
-      - name: Install create-dmg
-        run: brew install create-dmg
+      - name: Install create-dmg and pngquant
+        run: brew install create-dmg pngquant
       
       - name: Generate DMG assets
         run: |
@@ -249,6 +254,27 @@ jobs:
           echo "==> Generating background image"
           chmod +x create-background.sh
           ./create-background.sh
+      
+      - name: Optimize icon PNGs for smaller DMG
+        run: |
+          # Optimize the icns by re-creating with compressed PNGs
+          ICONSET_DIR=$(mktemp -d)/AppIcon.iconset
+          mkdir -p "$ICONSET_DIR"
+          
+          # Extract iconset
+          iconutil -c iconset Resources/DMG/AppIcon.icns -o "$ICONSET_DIR"
+          
+          # Compress each PNG with pngquant
+          echo "==> Compressing icon PNGs..."
+          for png in "$ICONSET_DIR"/*.png; do
+            pngquant --force --quality=70-90 --output "$png" "$png" || true
+          done
+          
+          # Recreate icns
+          iconutil -c icns "$ICONSET_DIR" -o Resources/DMG/AppIcon.icns
+          
+          echo "==> Optimized icon size:"
+          ls -lh Resources/DMG/AppIcon.icns
       
       - name: Create fancy DMG
         id: dmg
