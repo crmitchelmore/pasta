@@ -82,7 +82,6 @@ public struct ClipboardListView: View {
 
     @State private var isSelectionMode = false
     @State private var selectedIDs: Set<UUID> = []
-    @State private var hoveredID: UUID? = nil
     @State private var deleteConfirmEntry: ClipboardEntry? = nil
     
     // Cached computed data for performance
@@ -296,51 +295,48 @@ public struct ClipboardListView: View {
     
     @ViewBuilder
     private var listContent: some View {
+        if isSelectionMode {
+            // Use SwiftUI List for selection mode (less performance critical)
+            selectionModeList
+        } else {
+            // Use high-performance NSTableView for normal browsing
+            HighPerformanceListView(
+                rows: entries.map { ClipboardRowData(from: $0) },
+                selectedID: $selectedEntryID,
+                onPaste: { id in
+                    if let entry = entryLookup[id] { onPaste(entry) }
+                },
+                onCopy: { id in
+                    if let entry = entryLookup[id] { onCopy(entry) }
+                },
+                onDelete: { id in
+                    if let entry = entryLookup[id] { deleteConfirmEntry = entry }
+                },
+                onReveal: { id in
+                    if let entry = entryLookup[id] { onReveal(entry) }
+                }
+            )
+        }
+    }
+    
+    @ViewBuilder
+    private var selectionModeList: some View {
         ScrollViewReader { proxy in
-            List(selection: isSelectionMode ? nil : $selectedEntryID) {
+            List(selection: $selectedEntryID) {
                 ForEach(sections) { section in
                     Section {
                         ForEach(section.rows) { row in
-                            OptimizedRowView(
+                            SelectionModeRowView(
                                 row: row,
-                                isHovered: hoveredID == row.id,
-                                isSelected: isSelectionMode && selectedIDs.contains(row.id),
-                                isSelectionMode: isSelectionMode
+                                isSelected: selectedIDs.contains(row.id)
                             )
-                            .equatable()
                             .id(row.id)
                             .tag(row.id)
-                            .onHover { isHovered in
-                                hoveredID = isHovered ? row.id : nil
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) {
-                                    if let entry = entryLookup[row.id] {
-                                        deleteConfirmEntry = entry
-                                    }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                            .contextMenu {
-                                if let entry = entryLookup[row.id] {
-                                    Button("Paste") { onPaste(entry) }
-                                    Button("Copy") { onCopy(entry) }
-                                    Divider()
-                                    Button("Delete", role: .destructive) { deleteConfirmEntry = entry }
-                                    if entry.contentType == .filePath {
-                                        Divider()
-                                        Button("Reveal in Finder") { onReveal(entry) }
-                                    }
-                                }
-                            }
                             .onTapGesture {
-                                if isSelectionMode {
-                                    if selectedIDs.contains(row.id) {
-                                        selectedIDs.remove(row.id)
-                                    } else {
-                                        selectedIDs.insert(row.id)
-                                    }
+                                if selectedIDs.contains(row.id) {
+                                    selectedIDs.remove(row.id)
+                                } else {
+                                    selectedIDs.insert(row.id)
                                 }
                             }
                         }
@@ -356,42 +352,22 @@ public struct ClipboardListView: View {
             }
             .listStyle(.inset)
             .scrollContentBackground(.hidden)
-            .onChange(of: selectedEntryID) { _, newValue in
-                if let id = newValue {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        proxy.scrollTo(id, anchor: .center)
-                    }
-                }
-            }
         }
     }
 }
 
-// MARK: - Optimized Row View (Equatable for minimal re-rendering)
+// MARK: - Selection Mode Row View (simplified)
 
-/// Lightweight, equatable row view that only re-renders when data changes
-private struct OptimizedRowView: View, Equatable {
+private struct SelectionModeRowView: View {
     let row: RowData
-    let isHovered: Bool
     let isSelected: Bool
-    let isSelectionMode: Bool
-    
-    // Equatable: SwiftUI skips body evaluation when this returns true
-    static func == (lhs: OptimizedRowView, rhs: OptimizedRowView) -> Bool {
-        lhs.row == rhs.row &&
-        lhs.isHovered == rhs.isHovered &&
-        lhs.isSelected == rhs.isSelected &&
-        lhs.isSelectionMode == rhs.isSelectionMode
-    }
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             // Selection checkbox
-            if isSelectionMode {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-                    .font(.title3)
-            }
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                .font(.title3)
             
             // Content type icon
             Image(systemName: row.contentType.systemImageName)
@@ -400,19 +376,9 @@ private struct OptimizedRowView: View, Equatable {
 
             // Content
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(row.previewText)
-                        .lineLimit(2)
-                        .font(.body)
-
-                    Spacer(minLength: 0)
-
-                    if row.isLarge {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                            .help("Large entry (>10KB)")
-                    }
-                }
+                Text(row.previewText)
+                    .lineLimit(2)
+                    .font(.body)
 
                 HStack(spacing: 8) {
                     ContentTypeBadge(type: row.contentType)
@@ -435,11 +401,12 @@ private struct OptimizedRowView: View, Equatable {
                 }
             }
             
-            // Delete button (on hover, not in selection mode)
-            if isHovered && !isSelectionMode {
-                Image(systemName: "trash")
-                    .foregroundStyle(.red)
-                    .font(.caption)
+            Spacer(minLength: 0)
+            
+            if row.isLarge {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .help("Large entry (>10KB)")
             }
         }
         .padding(.vertical, 6)
