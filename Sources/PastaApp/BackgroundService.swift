@@ -36,6 +36,7 @@ final class BackgroundService: ObservableObject {
         static let showNotifications = "pasta.showNotifications"
         static let storeImages = "pasta.storeImages"
         static let deduplicateEntries = "pasta.deduplicateEntries"
+        static let skipAPIKeys = "pasta.skipAPIKeys"
     }
     
     private init() {
@@ -189,6 +190,7 @@ final class BackgroundService: ObservableObject {
                 let detector = self.contentTypeDetector
                 let storeImages = UserDefaults.standard.bool(forKey: Defaults.storeImages)
                 let deduplicate = UserDefaults.standard.bool(forKey: Defaults.deduplicateEntries)
+                let skipAPIKeys = UserDefaults.standard.bool(forKey: Defaults.skipAPIKeys)
                 
                 Task.detached {
                     let enriched: [ClipboardEntry]
@@ -200,6 +202,12 @@ final class BackgroundService: ObservableObject {
                     }
 
                     for e in enriched {
+                        // Skip API keys if setting is enabled
+                        if skipAPIKeys && e.contentType == .apiKey {
+                            PastaLogger.clipboard.debug("Skipped API key entry - disabled in settings")
+                            continue
+                        }
+                        
                         do {
                             try db.insert(e, deduplicate: deduplicate)
                             PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)")

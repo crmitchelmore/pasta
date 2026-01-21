@@ -23,6 +23,7 @@ public enum PastaTheme {
         case .uuid: return .gray
         case .hash: return .gray
         case .jwt: return ink
+        case .apiKey: return .orange
         case .envVar, .envVarBlock: return basil
         case .prose: return olive
         case .image: return .pink

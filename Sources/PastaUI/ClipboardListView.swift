@@ -174,6 +174,11 @@ public struct ClipboardListView: View {
             listToolbar
             Divider()
             
+            // Show note when viewing API keys with skip enabled
+            if filterType == .apiKey {
+                apiKeyNotice
+            }
+            
             if entries.isEmpty {
                 ContentUnavailableView(
                     "No clipboard history",
@@ -263,6 +268,31 @@ public struct ClipboardListView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Color(nsColor: .windowBackgroundColor).opacity(0.5))
+    }
+    
+    @ViewBuilder
+    private var apiKeyNotice: some View {
+        let skipEnabled = UserDefaults.standard.bool(forKey: "pasta.skipAPIKeys")
+        
+        HStack(spacing: 8) {
+            Image(systemName: skipEnabled ? "eye.slash" : "eye")
+                .foregroundStyle(skipEnabled ? .orange : .secondary)
+            
+            if skipEnabled {
+                Text("API key capture is disabled in Settings → Security")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("API keys are being captured. Disable in Settings → Security if needed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(skipEnabled ? Color.orange.opacity(0.1) : Color.secondary.opacity(0.1))
     }
     
     @ViewBuilder

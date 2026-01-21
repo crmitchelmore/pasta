@@ -11,6 +11,7 @@ extension ContentType {
         case .uuid: return "number"
         case .hash: return "number"
         case .jwt: return "key"
+        case .apiKey: return "key.fill"
         case .envVar, .envVarBlock: return "terminal"
         case .prose: return "text.book.closed"
         case .image: return "photo"
@@ -36,6 +37,7 @@ extension ContentType {
         case .uuid: return "UUID"
         case .hash: return "Hash"
         case .jwt: return "JWT"
+        case .apiKey: return "API Key"
         case .filePath: return "File Path"
         case .shellCommand: return "Shell Command"
         case .screenshot: return "Screenshot"
@@ -59,6 +61,7 @@ extension ContentType {
         case .ipAddress: return "IP"
         case .uuid: return "UUID"
         case .hash: return "HASH"
+        case .apiKey: return "API KEY"
         default:
             return displayTitle.uppercased()
         }

@@ -17,6 +17,7 @@ public struct SettingsView: View {
         static let showNotifications = "pasta.showNotifications"
         static let storeImages = "pasta.storeImages"
         static let deduplicateEntries = "pasta.deduplicateEntries"
+        static let skipAPIKeys = "pasta.skipAPIKeys"
     }
 
     @AppStorage(Defaults.hotkeyKey) private var hotkeyKey: String = "c"
@@ -32,6 +33,7 @@ public struct SettingsView: View {
     @AppStorage(Defaults.showNotifications) private var showNotifications: Bool = false
     @AppStorage(Defaults.storeImages) private var storeImages: Bool = true
     @AppStorage(Defaults.deduplicateEntries) private var deduplicateEntries: Bool = true
+    @AppStorage(Defaults.skipAPIKeys) private var skipAPIKeys: Bool = false
 
     @State private var selectedTab: SettingsTab = .general
 
@@ -55,6 +57,7 @@ public struct SettingsView: View {
                 pauseMonitoring: $pauseMonitoring,
                 storeImages: $storeImages,
                 deduplicateEntries: $deduplicateEntries,
+                skipAPIKeys: $skipAPIKeys,
                 playSounds: $playSounds,
                 showNotifications: $showNotifications,
                 excludedAppsText: $excludedAppsText
@@ -166,6 +169,7 @@ private struct ClipboardSettingsTab: View {
     @Binding var pauseMonitoring: Bool
     @Binding var storeImages: Bool
     @Binding var deduplicateEntries: Bool
+    @Binding var skipAPIKeys: Bool
     @Binding var playSounds: Bool
     @Binding var showNotifications: Bool
     @Binding var excludedAppsText: String
@@ -178,6 +182,15 @@ private struct ClipboardSettingsTab: View {
                 Toggle("Deduplicate identical entries", isOn: $deduplicateEntries)
             } header: {
                 Label("Capture", systemImage: "rectangle.and.paperclip")
+            }
+
+            Section {
+                Toggle("Skip detected API keys", isOn: $skipAPIKeys)
+                Text("When enabled, clipboard entries that look like API keys (OpenAI, GitHub, Stripe, AWS, etc.) won't be captured for security.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Security", systemImage: "lock.shield")
             }
 
             Section {

@@ -37,6 +37,7 @@ public struct ContentTypeDetector {
     private let uuidDetector: UUIDDetector
     private let hashDetector: HashDetector
     private let jwtDetector: JWTDetector
+    private let apiKeyDetector: APIKeyDetector
     private let envVarDetector: EnvVarDetector
     private let urlDetector: URLDetector
     private let filePathDetector: FilePathDetector
@@ -52,6 +53,7 @@ public struct ContentTypeDetector {
         uuidDetector: UUIDDetector = UUIDDetector(),
         hashDetector: HashDetector = HashDetector(),
         jwtDetector: JWTDetector = JWTDetector(),
+        apiKeyDetector: APIKeyDetector = APIKeyDetector(),
         envVarDetector: EnvVarDetector = EnvVarDetector(),
         urlDetector: URLDetector = URLDetector(),
         filePathDetector: FilePathDetector = FilePathDetector(),
@@ -66,6 +68,7 @@ public struct ContentTypeDetector {
         self.uuidDetector = uuidDetector
         self.hashDetector = hashDetector
         self.jwtDetector = jwtDetector
+        self.apiKeyDetector = apiKeyDetector
         self.envVarDetector = envVarDetector
         self.urlDetector = urlDetector
         self.filePathDetector = filePathDetector
@@ -87,6 +90,7 @@ public struct ContentTypeDetector {
         let analysisText = decodedText ?? trimmed
 
         let jwt = jwtDetector.detect(in: analysisText)
+        let apiKeys = apiKeyDetector.detect(in: analysisText)
         let emails = emailDetector.detect(in: analysisText)
         let phoneNumbers = phoneNumberDetector.detect(in: analysisText)
         let ipAddresses = ipAddressDetector.detect(in: analysisText)
@@ -102,6 +106,7 @@ public struct ContentTypeDetector {
         let (primary, confidence) = selectPrimaryType(
             analysisText: analysisText,
             jwt: jwt,
+            apiKeys: apiKeys,
             emails: emails,
             phoneNumbers: phoneNumbers,
             ipAddresses: ipAddresses,
@@ -121,6 +126,7 @@ public struct ContentTypeDetector {
             analysisText: analysisText,
             encoding: encodingDetections.first,
             jwt: jwt,
+            apiKeys: apiKeys,
             emails: emails,
             phoneNumbers: phoneNumbers,
             ipAddresses: ipAddresses,
@@ -140,6 +146,7 @@ public struct ContentTypeDetector {
     private func selectPrimaryType(
         analysisText: String,
         jwt: [JWTDetector.Detection],
+        apiKeys: [APIKeyDetector.Detection],
         emails: [EmailDetector.Detection],
         phoneNumbers: [PhoneNumberDetector.Detection],
         ipAddresses: [IPAddressDetector.Detection],
@@ -154,8 +161,10 @@ public struct ContentTypeDetector {
     ) -> (ContentType, Double) {
         // Priority order is the stable tiebreaker when confidences match.
         // We keep this order conservative for clipboard use.
+        // API keys are high priority since they're security-sensitive.
         let priorities: [ContentType] = [
             .jwt,
+            .apiKey,
             .email,
             .phoneNumber,
             .ipAddress,
@@ -173,10 +182,13 @@ public struct ContentTypeDetector {
         ]
 
         var candidates: [(ContentType, Double)] = []
-        candidates.reserveCapacity(10)
+        candidates.reserveCapacity(12)
 
         if let best = jwt.map(\.confidence).max() {
             candidates.append((.jwt, best))
+        }
+        if let best = apiKeys.map(\.confidence).max(), best >= 0.70 {
+            candidates.append((.apiKey, best))
         }
         if let best = emails.map(\.confidence).max() {
             candidates.append((.email, best))
@@ -248,6 +260,7 @@ public struct ContentTypeDetector {
         analysisText: String,
         encoding: EncodingDetector.Detection?,
         jwt: [JWTDetector.Detection],
+        apiKeys: [APIKeyDetector.Detection],
         emails: [EmailDetector.Detection],
         phoneNumbers: [PhoneNumberDetector.Detection],
         ipAddresses: [IPAddressDetector.Detection],
@@ -291,6 +304,16 @@ public struct ContentTypeDetector {
                 return obj
             }
             meta["jwt"] = out
+        }
+
+        if !apiKeys.isEmpty {
+            meta["apiKeys"] = apiKeys.map { d in
+                [
+                    "provider": d.provider,
+                    "confidence": d.confidence,
+                    "isLikelyLive": d.isLikelyLive
+                ] as [String: Any]
+            }
         }
 
         if !emails.isEmpty {

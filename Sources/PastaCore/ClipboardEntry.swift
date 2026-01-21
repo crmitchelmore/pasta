@@ -10,6 +10,7 @@ public enum ContentType: String, Codable, CaseIterable, Sendable {
     case uuid
     case hash
     case jwt
+    case apiKey
     case envVar
     case envVarBlock
     case prose
