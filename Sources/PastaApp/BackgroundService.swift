@@ -118,8 +118,9 @@ final class BackgroundService: ObservableObject {
     private func startPruneTimer() {
         // Prune every hour
         pruneTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            guard let self else { return }
             Task { @MainActor in
-                self?.pruneOldEntries()
+                self.pruneOldEntries()
             }
         }
     }

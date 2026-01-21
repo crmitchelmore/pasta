@@ -100,8 +100,9 @@ final class PanelController<Content: View>: ObservableObject {
             object: window,
             queue: .main
         ) { [weak self] _ in
+            guard let self else { return }
             Task { @MainActor in
-                self?.isVisible = false
+                self.isVisible = false
             }
         }
     }
