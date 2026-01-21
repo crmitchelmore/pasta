@@ -92,6 +92,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Check if we're already in Applications
         let applicationsPath = "/Applications"
         if bundlePath.deletingLastPathComponent == applicationsPath {
+            // Running from Applications - check for mounted Pasta DMG to clean up
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                self?.checkForMountedPastaDMG()
+            }
             return
         }
         
@@ -109,6 +113,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Show alert after a short delay to let the app finish launching
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.showMoveToApplicationsAlert(bundlePath: bundlePath as String)
+        }
+    }
+    
+    private func checkForMountedPastaDMG() {
+        let fileManager = FileManager.default
+        
+        do {
+            let volumes = try fileManager.contentsOfDirectory(atPath: "/Volumes")
+            
+            for volume in volumes {
+                let volumePath = "/Volumes/\(volume)"
+                let appPath = "\(volumePath)/Pasta.app"
+                
+                // Check if this looks like our Pasta DMG
+                if volume.lowercased().contains("pasta") || fileManager.fileExists(atPath: appPath) {
+                    showEjectDMGAlert(volumeName: volume)
+                    return
+                }
+            }
+        } catch {
+            PastaLogger.app.debug("Could not check for mounted DMG: \(error.localizedDescription)")
+        }
+    }
+    
+    private func showEjectDMGAlert(volumeName: String) {
+        let alert = NSAlert()
+        alert.messageText = "Eject Installer?"
+        alert.informativeText = "Pasta has been installed. Would you like to eject the installer disk image and move it to Trash?"
+        alert.addButton(withTitle: "Eject & Trash")
+        alert.addButton(withTitle: "Just Eject")
+        alert.addButton(withTitle: "Keep Mounted")
+        alert.alertStyle = .informational
+        
+        let response = alert.runModal()
+        
+        if response == .alertFirstButtonReturn {
+            Task.detached {
+                await self.ejectAndDeleteDMG(volumePath: "/Volumes/\(volumeName)")
+            }
+        } else if response == .alertSecondButtonReturn {
+            NSWorkspace.shared.unmountAndEjectDevice(atPath: "/Volumes/\(volumeName)")
         }
     }
     

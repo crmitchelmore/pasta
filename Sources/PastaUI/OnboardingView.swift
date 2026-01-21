@@ -90,16 +90,18 @@ public struct OnboardingView: View {
             Text("Open System Settings → Privacy & Security → Accessibility, then enable Pasta.")
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 12) {
-                Button("Open Accessibility Settings") {
-                    openAccessibilitySettings()
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    Button("Open Accessibility Settings") {
+                        openAccessibilitySettings()
+                    }
 
-                Button("Show Permission Prompt") {
-                    AccessibilityPermission.requestPrompt()
+                    Button("Show Permission Prompt") {
+                        AccessibilityPermission.requestPrompt()
+                    }
+                    .help("Shows the system prompt (if available).")
                 }
-                .help("Shows the system prompt (if available).")
-
+                
                 Button("Refresh Permission Status") {
                     refreshTrust()
                 }
@@ -144,16 +146,22 @@ public struct OnboardingView: View {
     }
 
     private func refreshTrust() {
-        isTrusted = AccessibilityPermission.isTrusted()
-        if isTrusted {
-            step = .done
+        // Force fresh check - AXIsProcessTrusted() can be cached
+        let trusted = AccessibilityPermission.isTrusted()
+        if trusted != isTrusted {
+            isTrusted = trusted
+            if trusted {
+                step = .done
+            }
         }
     }
 
     private func startPolling() {
         guard pollTimer == nil else { return }
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { _ in
-            refreshTrust()
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            Task { @MainActor [self] in
+                self.refreshTrust()
+            }
         }
     }
 
