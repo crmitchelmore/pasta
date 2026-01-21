@@ -27,6 +27,7 @@ struct PastaApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panelController: PanelController<PanelContentView>?
+    private var quickSearchController: QuickSearchController?
     private var hotkeyManager: HotkeyManager?
     private var statusItem: NSStatusItem?
     private var defaultsObserver: NSObjectProtocol?
@@ -64,24 +65,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start background clipboard monitoring (runs even when panel is closed)
         BackgroundService.shared.start()
         
-        // Create the floating panel controller
+        // Create the floating panel controller (main window)
         panelController = PanelController(
             size: NSSize(width: 900, height: 640),
             content: { PanelContentView() }
         )
         
-        // Show the window on launch
+        // Create quick search controller (Spotlight-like popup)
+        quickSearchController = QuickSearchController()
+        setupQuickSearch()
+        
+        // Show the main window on launch
         panelController?.show()
         
-        // Setup hotkey to toggle panel
+        // Setup hotkey to toggle quick search (Spotlight-like)
         hotkeyManager = HotkeyManager { [weak self] in
-            PastaLogger.app.debug("Hotkey triggered, toggling panel")
+            PastaLogger.app.debug("Hotkey triggered, toggling quick search")
             Task { @MainActor in
-                self?.panelController?.toggle()
+                self?.toggleQuickSearch()
             }
         }
         
         PastaLogger.app.info("Pasta app initialized successfully")
+    }
+    
+    private func setupQuickSearch() {
+        quickSearchController?.setContent { [weak self] in
+            QuickSearchView(
+                database: BackgroundService.shared.database,
+                entries: BackgroundService.shared.entries,
+                onDismiss: { [weak self] in
+                    self?.quickSearchController?.hide()
+                },
+                onPaste: { [weak self] entry in
+                    self?.pasteEntry(entry)
+                }
+            )
+        }
+    }
+    
+    private func toggleQuickSearch() {
+        // Refresh content before showing
+        setupQuickSearch()
+        quickSearchController?.toggle()
+    }
+    
+    private func pasteEntry(_ entry: ClipboardEntry) {
+        // Use PasteService to copy and paste
+        let pasteService = PasteService()
+        _ = pasteService.paste(entry)
     }
     
     // MARK: - DMG Installation Helper
@@ -164,6 +196,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Move to Applications")
         alert.addButton(withTitle: "Not Now")
+        
+        // Set app icon in the alert
+        if let appIcon = NSApplication.shared.applicationIconImage {
+            alert.icon = appIcon
+        }
         
         // Add checkbox for deleting DMG
         let checkbox = NSButton(checkboxWithTitle: "Delete disk image after moving", target: nil, action: nil)

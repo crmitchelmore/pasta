@@ -31,15 +31,18 @@ final class HotkeyManagerTests: XCTestCase {
         let provider = CapturingProvider(hotKey: stubHotKey)
 
         var fired = false
-        _ = HotkeyManager(provider: provider) {
+        let manager = HotkeyManager(provider: provider) {
             fired = true
         }
+        // Keep manager alive
+        _ = manager
 
         XCTAssertEqual(provider.receivedKey, .c)
         XCTAssertEqual(provider.receivedModifiers, [.control, .command])
 
+        // Simulate the HotKey library triggering
         stubHotKey.keyDownHandler?()
-        XCTAssertTrue(fired)
+        XCTAssertTrue(fired, "Handler should be called when HotKey triggers")
     }
 }
 #endif

@@ -60,7 +60,7 @@ public struct OnboardingView: View {
                 .font(.title2.bold())
             Spacer()
             Button("Skip") {
-                onComplete(.dismissed)
+                step = .done
             }
             .keyboardShortcut(.cancelAction)
         }
@@ -115,6 +115,10 @@ public struct OnboardingView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            
+            Text("Note: Permission detection can sometimes be delayed. If you've granted permission but it's not detected, try clicking Refresh or restarting the app.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
     }
 
