@@ -33,11 +33,6 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
       
-      - name: Setup Swift
-        uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: '5.9'
-      
       # ============================================================================
       # BUILD
       # ============================================================================
@@ -45,12 +40,25 @@ jobs:
       - name: Resolve Swift dependencies
         run: swift package resolve
       
-      - name: Build release binary
-        run: swift build -c release --arch arm64 --arch x86_64
+      - name: Build release binary (arm64)
+        run: swift build -c release --arch arm64
+      
+      - name: Build release binary (x86_64)
+        run: swift build -c release --arch x86_64
+      
+      - name: Create universal binary
+        run: |
+          mkdir -p .build/universal
+          lipo -create \
+            .build/arm64-apple-macosx/release/PastaApp \
+            .build/x86_64-apple-macosx/release/PastaApp \
+            -output .build/universal/PastaApp
+          echo "==> Created universal binary"
+          file .build/universal/PastaApp
       
       - name: Create app bundle structure
         run: |
-          BUILD_DIR=".build/apple/Products/Release"
+          BUILD_DIR=".build/universal"
           APP_DIR="${BUILD_DIR}/${APP_NAME}.app"
           
           echo "==> Creating app bundle at $APP_DIR"
