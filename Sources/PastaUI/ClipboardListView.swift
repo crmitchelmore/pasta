@@ -115,7 +115,7 @@ public struct ClipboardListView: View {
     }
 
     /// Compute a stable hash for change detection
-    private func computeDataHash() -> Int {
+    private var dataChangeToken: Int {
         var hasher = Hasher()
         hasher.combine(entries.count)
         hasher.combine(searchQuery)
@@ -127,7 +127,7 @@ public struct ClipboardListView: View {
     
     /// Rebuild cached section data - runs off main thread implicitly via onChange
     private func rebuildSections() {
-        let newHash = computeDataHash()
+        let newHash = dataChangeToken
         guard newHash != lastDataHash else { return }
         lastDataHash = newHash
         
@@ -190,9 +190,8 @@ public struct ClipboardListView: View {
                 listContent
             }
         }
-        .onChange(of: entries.count) { _, _ in rebuildSections() }
-        .onChange(of: searchQuery) { _, _ in rebuildSections() }
-        .onChange(of: entries.first?.id) { _, _ in rebuildSections() }
+        // Use a single change listener on computed hash instead of multiple onChange
+        .onChange(of: dataChangeToken) { _, _ in rebuildSections() }
         .onAppear { rebuildSections() }
         .alert("Delete Entry?", isPresented: .init(
             get: { deleteConfirmEntry != nil },

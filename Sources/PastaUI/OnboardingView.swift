@@ -163,9 +163,10 @@ public struct OnboardingView: View {
     private func startPolling() {
         guard pollTimer == nil else { return }
         // Poll more frequently (every 0.5s) for better responsiveness
+        // Timer is stored in @State and invalidated in onDisappear
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-            Task { @MainActor [self] in
-                self.refreshTrust()
+            Task { @MainActor in
+                refreshTrust()
             }
         }
     }

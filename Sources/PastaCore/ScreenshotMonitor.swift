@@ -6,6 +6,49 @@ import os.log
 import CoreServices
 #endif
 
+/// Thread-safe wrapper for seen paths set with size limit
+private final class SeenPathsStore {
+    private var paths: Set<String> = []
+    private var pathsOrder: [String] = []  // Track insertion order for LRU eviction
+    private let lock = NSLock()
+    private let maxSize = 10_000  // Limit to prevent unbounded growth
+    
+    func contains(_ path: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return paths.contains(path)
+    }
+    
+    func insert(_ path: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        
+        guard !paths.contains(path) else { return }
+        
+        // Evict oldest entries if at capacity
+        while paths.count >= maxSize && !pathsOrder.isEmpty {
+            let oldest = pathsOrder.removeFirst()
+            paths.remove(oldest)
+        }
+        
+        paths.insert(path)
+        pathsOrder.append(path)
+    }
+    
+    func removeAll() {
+        lock.lock()
+        defer { lock.unlock() }
+        paths.removeAll()
+        pathsOrder.removeAll()
+    }
+    
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return paths.count
+    }
+}
+
 public final class ScreenshotMonitor {
     public var publisher: AnyPublisher<ClipboardEntry, Never> {
         subject.eraseToAnyPublisher()
@@ -17,7 +60,7 @@ public final class ScreenshotMonitor {
     private let subject = PassthroughSubject<ClipboardEntry, Never>()
     
     private var currentDirectoryURL: URL?
-    private var seenPaths: Set<String> = []
+    private let seenPaths = SeenPathsStore()
     private var captureStartTime: Date = Date()
     
     // FSEvents stream for efficient file monitoring
@@ -93,9 +136,10 @@ public final class ScreenshotMonitor {
         #if canImport(CoreServices)
         let pathsToWatch = [directoryURL.path] as CFArray
         
+        // Use passRetained to prevent use-after-free - we release in stopFSEventsStream
         var context = FSEventStreamContext(
             version: 0,
-            info: Unmanaged.passUnretained(self).toOpaque(),
+            info: Unmanaged.passRetained(self).toOpaque(),
             retain: nil,
             release: nil,
             copyDescription: nil
@@ -105,6 +149,7 @@ public final class ScreenshotMonitor {
             kCFAllocatorDefault,
             { (_, info, numEvents, eventPaths, _, _) in
                 guard let info = info else { return }
+                // Use takeUnretainedValue since we manage the retain manually
                 let monitor = Unmanaged<ScreenshotMonitor>.fromOpaque(info).takeUnretainedValue()
                 
                 let paths = unsafeBitCast(eventPaths, to: NSArray.self) as? [String] ?? []
@@ -118,6 +163,8 @@ public final class ScreenshotMonitor {
             0.5, // 500ms latency
             UInt32(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagUseCFTypes)
         ) else {
+            // Release the retain we added since stream creation failed
+            Unmanaged.passUnretained(self).release()
             return false
         }
         
@@ -129,6 +176,8 @@ public final class ScreenshotMonitor {
         } else {
             FSEventStreamInvalidate(stream)
             FSEventStreamRelease(stream)
+            // Release the retain we added since stream failed to start
+            Unmanaged.passUnretained(self).release()
             return false
         }
         #else
@@ -143,6 +192,8 @@ public final class ScreenshotMonitor {
             FSEventStreamInvalidate(stream)
             FSEventStreamRelease(stream)
             eventStream = nil
+            // Release the retain we added in startFSEventsStream
+            Unmanaged.passUnretained(self).release()
         }
         #endif
     }

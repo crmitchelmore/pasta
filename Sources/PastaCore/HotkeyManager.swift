@@ -95,22 +95,23 @@ public final class HotkeyManager: ObservableObject {
         // This catches the hotkey when Carbon registration doesn't work
         if let oldMonitor = globalMonitor {
             NSEvent.removeMonitor(oldMonitor)
+            globalMonitor = nil
         }
         
-        // Convert Key to keyCode for reliable matching
+        // Capture values locally to avoid retaining self in the closure
         let targetKeyCode = key.carbonKeyCode
+        let targetModifiers = modifiers
+        let trigger = onTrigger
         
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return }
-            
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
             let eventModifiers = event.modifierFlags.intersection([.control, .option, .shift, .command])
-            guard eventModifiers == self.currentModifiers else { return }
+            guard eventModifiers == targetModifiers else { return }
             
             // Match by keyCode for reliability
             if event.keyCode == targetKeyCode {
                 PastaLogger.hotkey.debug("Global monitor triggered (keyCode: \(event.keyCode))")
                 DispatchQueue.main.async {
-                    self.onTrigger()
+                    trigger()
                 }
             }
         }

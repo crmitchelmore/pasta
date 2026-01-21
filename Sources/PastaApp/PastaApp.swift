@@ -586,6 +586,9 @@ struct PanelContentView: View {
 
     @State private var isShowingOnboarding: Bool = false
     @State private var isShowingErrorAlert: Bool = false
+    
+    // Cache search service to avoid recreation per keystroke
+    @State private var searchService: SearchService? = nil
 
     @FocusState private var searchFocused: Bool
     @FocusState private var listFocused: Bool
@@ -619,9 +622,13 @@ struct PanelContentView: View {
             return applyFilters(backgroundService.entries)
         }
 
-        let searchService = SearchService(database: database)
+        // Use cached search service (initialized in handleOnAppear)
+        guard let service = searchService else {
+            return []
+        }
+        
         do {
-            let matches = try searchService.search(
+            let matches = try service.search(
                 query: trimmed,
                 contentType: contentTypeFilter,
                 limit: 200
@@ -759,6 +766,12 @@ struct PanelContentView: View {
     private func handleOnAppear() {
         PastaLogger.ui.debug("Panel appeared")
         refreshEntries()
+        
+        // Initialize search service if needed
+        if searchService == nil {
+            searchService = SearchService(database: database)
+        }
+        
         if selectedEntryID == nil {
             selectedEntryID = displayedEntries.first?.id
         }

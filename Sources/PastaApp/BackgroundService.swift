@@ -133,26 +133,28 @@ final class BackgroundService: ObservableObject {
         let db = self.database
         let storage = self.imageStorage
         
-        Task.detached {
-            if retentionDays > 0 {
-                do {
-                    let imagePaths = try db.pruneOlderThan(days: retentionDays)
-                    for path in imagePaths {
-                        try? storage.deleteImage(path: path)
+        // Use Task instead of Task.detached to maintain actor isolation
+        Task {
+            // Run database operations on a background thread
+            await Task.detached {
+                if retentionDays > 0 {
+                    do {
+                        let paths = try db.pruneOlderThan(days: retentionDays)
+                        for path in paths {
+                            try? storage.deleteImage(path: path)
+                        }
+                        if !paths.isEmpty {
+                            PastaLogger.database.debug("Pruned \(paths.count) images due to retention policy")
+                        }
+                    } catch {
+                        PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to prune old entries")
                     }
-                    if !imagePaths.isEmpty {
-                        PastaLogger.database.debug("Pruned \(imagePaths.count) images due to retention policy")
-                    }
-                } catch {
-                    PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to prune old entries")
                 }
-            }
+            }.value
             
-            await self.enforceMaxEntriesLimit()
-            
-            await MainActor.run {
-                self.refresh()
-            }
+            // Back on MainActor
+            self.enforceMaxEntriesLimit()
+            self.refresh()
         }
     }
     

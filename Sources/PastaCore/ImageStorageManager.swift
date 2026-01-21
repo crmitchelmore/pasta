@@ -53,7 +53,12 @@ public final class ImageStorageManager {
 
     #if canImport(AppKit)
     public func loadImage(path: String) -> NSImage? {
-        NSImage(contentsOfFile: path)
+        if let image = NSImage(contentsOfFile: path) {
+            return image
+        }
+        // Return placeholder for missing files
+        PastaLogger.storage.debug("Image not found at \(path), returning placeholder")
+        return NSImage(systemSymbolName: "photo", accessibilityDescription: "Missing image")
     }
     #else
     public func loadImage(path: String) -> Any? {

@@ -316,6 +316,8 @@ public final class QuickSearchViewModel: ObservableObject {
     
     private let database: DatabaseManager
     private var allEntries: [ClipboardEntry]
+    // Cache search service to avoid recreation per keystroke
+    private lazy var searchService = SearchService(database: database)
     
     init(database: DatabaseManager, entries: [ClipboardEntry]) {
         self.database = database
@@ -337,8 +339,9 @@ public final class QuickSearchViewModel: ObservableObject {
     }
     
     private func computeAvailableFilters() {
+        // Only count first 1000 entries to avoid O(n) on huge lists
         var counts: [ContentType: Int] = [:]
-        for entry in allEntries {
+        for entry in allEntries.prefix(1000) {
             counts[entry.contentType, default: 0] += 1
         }
         
@@ -356,17 +359,19 @@ public final class QuickSearchViewModel: ObservableObject {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         
         if trimmed.isEmpty {
-            // Show recent entries when no search query
-            var filtered = allEntries
+            // Show recent entries when no search query (already sorted by timestamp)
+            var filtered: [ClipboardEntry]
             if let filter = selectedFilter {
-                filtered = filtered.filter { $0.contentType == filter }
+                // Filter only first 500 entries then take 9
+                filtered = allEntries.lazy.filter { $0.contentType == filter }.prefix(9).map { $0 }
+            } else {
+                filtered = Array(allEntries.prefix(9))
             }
-            results = Array(filtered.prefix(9))
+            results = filtered
             return
         }
         
-        // Use search service for query
-        let searchService = SearchService(database: database)
+        // Use cached search service for query
         do {
             let matches = try searchService.search(
                 query: trimmed,
