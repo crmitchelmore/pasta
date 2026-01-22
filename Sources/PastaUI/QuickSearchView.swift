@@ -20,27 +20,41 @@ public struct QuickSearchView: View {
     }
     
     public var body: some View {
-        VStack(spacing: 0) {
-            // Search field
-            searchField
-            
-            // Quick filters
-            filterBar
-            
-            Divider()
-                .opacity(0.5)
-            
-            // Results
-            if manager.results.isEmpty && !manager.query.isEmpty {
-                emptyState
-            } else {
-                resultsList
+        QuickSearchKeyHandler(
+            onArrowUp: { manager.moveSelection(by: -1) },
+            onArrowDown: { manager.moveSelection(by: 1) },
+            onReturn: { pasteSelectedEntry() },
+            onEscape: { onDismiss() },
+            onCommandNumber: { digit in
+                let index = digit - 1
+                if let entry = manager.results[safe: index] {
+                    onPaste(entry)
+                    onDismiss()
+                }
             }
+        ) {
+            VStack(spacing: 0) {
+                // Search field
+                searchField
+                
+                // Quick filters
+                filterBar
+                
+                Divider()
+                    .opacity(0.5)
+                
+                // Results
+                if manager.results.isEmpty && !manager.query.isEmpty {
+                    emptyState
+                } else {
+                    resultsList
+                }
+            }
+            .frame(width: 680, height: max(400, min(500, CGFloat(100 + manager.results.count * 52))))
+            .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
         }
-        .frame(width: 680, height: max(400, min(500, CGFloat(100 + manager.results.count * 52))))
-        .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
         .onAppear {
             manager.prepareForSearch()
             isSearchFocused = true
@@ -50,6 +64,13 @@ public struct QuickSearchView: View {
         }
         .onChange(of: manager.selectedFilter) { _, _ in
             manager.searchQueryChanged()
+        }
+    }
+    
+    private func pasteSelectedEntry() {
+        if let entry = manager.selectedEntry {
+            onPaste(entry)
+            onDismiss()
         }
     }
     
@@ -64,10 +85,7 @@ public struct QuickSearchView: View {
                 .font(.title3)
                 .focused($isSearchFocused)
                 .onSubmit {
-                    if let entry = manager.selectedEntry {
-                        onPaste(entry)
-                        onDismiss()
-                    }
+                    pasteSelectedEntry()
                 }
             
             if !manager.query.isEmpty {
@@ -158,38 +176,144 @@ public struct QuickSearchView: View {
                 }
             }
         }
-        .onKeyPress(.downArrow) {
-            manager.moveSelection(by: 1)
-            return .handled
-        }
-        .onKeyPress(.upArrow) {
-            manager.moveSelection(by: -1)
-            return .handled
-        }
-        .onKeyPress(.return) {
-            if let entry = manager.selectedEntry {
-                onPaste(entry)
-                onDismiss()
+    }
+}
+
+// MARK: - Key Handler (NSViewRepresentable to capture keys globally)
+
+private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
+    let onArrowUp: () -> Void
+    let onArrowDown: () -> Void
+    let onReturn: () -> Void
+    let onEscape: () -> Void
+    let onCommandNumber: (Int) -> Void
+    let content: () -> Content
+    
+    func makeNSView(context: Context) -> KeyInterceptingView<Content> {
+        let view = KeyInterceptingView(
+            onArrowUp: onArrowUp,
+            onArrowDown: onArrowDown,
+            onReturn: onReturn,
+            onEscape: onEscape,
+            onCommandNumber: onCommandNumber,
+            content: content
+        )
+        return view
+    }
+    
+    func updateNSView(_ nsView: KeyInterceptingView<Content>, context: Context) {
+        nsView.onArrowUp = onArrowUp
+        nsView.onArrowDown = onArrowDown
+        nsView.onReturn = onReturn
+        nsView.onEscape = onEscape
+        nsView.onCommandNumber = onCommandNumber
+    }
+}
+
+private final class KeyInterceptingView<Content: View>: NSView {
+    var onArrowUp: () -> Void
+    var onArrowDown: () -> Void
+    var onReturn: () -> Void
+    var onEscape: () -> Void
+    var onCommandNumber: (Int) -> Void
+    
+    private var hostingView: NSHostingView<Content>?
+    private var localMonitor: Any?
+    
+    init(
+        onArrowUp: @escaping () -> Void,
+        onArrowDown: @escaping () -> Void,
+        onReturn: @escaping () -> Void,
+        onEscape: @escaping () -> Void,
+        onCommandNumber: @escaping (Int) -> Void,
+        content: () -> Content
+    ) {
+        self.onArrowUp = onArrowUp
+        self.onArrowDown = onArrowDown
+        self.onReturn = onReturn
+        self.onEscape = onEscape
+        self.onCommandNumber = onCommandNumber
+        super.init(frame: .zero)
+        
+        let hosting = NSHostingView(rootView: content())
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hosting)
+        NSLayoutConstraint.activate([
+            hosting.topAnchor.constraint(equalTo: topAnchor),
+            hosting.bottomAnchor.constraint(equalTo: bottomAnchor),
+            hosting.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hosting.trailingAnchor.constraint(equalTo: trailingAnchor)
+        ])
+        hostingView = hosting
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        
+        // Install monitor when we have a window, remove when we don't
+        if window != nil && localMonitor == nil {
+            // Use local monitor to intercept keys before TextField consumes them
+            localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, self.window?.isKeyWindow == true else { return event }
+                return self.handleKeyEvent(event) ? nil : event
             }
-            return .handled
+        } else if window == nil, let monitor = localMonitor {
+            NSEvent.removeMonitor(monitor)
+            localMonitor = nil
         }
-        .onKeyPress(.escape) {
-            onDismiss()
-            return .handled
+    }
+    
+    deinit {
+        if let monitor = localMonitor {
+            NSEvent.removeMonitor(monitor)
         }
-        .onKeyPress(characters: .decimalDigits, phases: .down) { press in
-            guard press.modifiers.contains(.command),
-                  let digit = Int(press.characters),
-                  digit >= 1 && digit <= 9 else {
-                return .ignored
+    }
+    
+    private func handleKeyEvent(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        
+        // Handle Cmd+1-9 first (before arrow keys to avoid conflicts)
+        if modifiers == .command {
+            if let chars = event.charactersIgnoringModifiers,
+               let digit = Int(chars),
+               digit >= 1 && digit <= 9 {
+                onCommandNumber(digit)
+                return true
             }
-            let index = digit - 1
-            if let entry = manager.results[safe: index] {
-                onPaste(entry)
-                onDismiss()
-            }
-            return .handled
         }
+        
+        // Handle arrow keys and other keys (only when no command modifier, except for escape)
+        // Allow arrow keys even with no modifiers or just function key modifier
+        let baseModifiers = modifiers.subtracting([.function, .numericPad])
+        
+        switch event.keyCode {
+        case 126: // Up arrow
+            if baseModifiers.isEmpty {
+                onArrowUp()
+                return true
+            }
+        case 125: // Down arrow
+            if baseModifiers.isEmpty {
+                onArrowDown()
+                return true
+            }
+        case 36: // Return
+            if baseModifiers.isEmpty {
+                onReturn()
+                return true
+            }
+        case 53: // Escape
+            onEscape()
+            return true
+        default:
+            break
+        }
+        
+        return false
     }
 }
 

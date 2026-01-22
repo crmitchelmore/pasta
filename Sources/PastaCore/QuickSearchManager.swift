@@ -104,7 +104,7 @@ public final class QuickSearchManager: ObservableObject {
     
     // MARK: - Search
     
-    /// Called when query or filter changes - debounced
+    /// Called when query or filter changes - debounced search with immediate text display
     public func searchQueryChanged() {
         searchDebounceTask?.cancel()
         
@@ -116,11 +116,18 @@ public final class QuickSearchManager: ObservableObject {
             return
         }
         
-        // Debounce actual search by 50ms for typing
-        searchDebounceTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
-            guard !Task.isCancelled else { return }
+        // For short queries (1-2 chars), search immediately to feel responsive
+        // For longer queries (likely still typing), debounce
+        let debounceMs: UInt64 = trimmed.count <= 2 ? 0 : 100_000_000  // 0ms or 100ms
+        
+        if debounceMs == 0 {
             performSearch()
+        } else {
+            searchDebounceTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: debounceMs)
+                guard !Task.isCancelled else { return }
+                performSearch()
+            }
         }
     }
     
