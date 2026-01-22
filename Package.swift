@@ -16,7 +16,8 @@ let package = Package(
         // SQLite database
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.24.0"),
         // Global keyboard shortcuts (modern, App Store compatible)
-        .package(url: "https://github.com/sindresorhus/KeyboardShortcuts.git", from: "2.2.0"),
+        // Pin to 2.0.x - versions 2.1+ require Swift tools 6.1
+        .package(url: "https://github.com/sindresorhus/KeyboardShortcuts.git", from: "2.0.1"),
         // Fuzzy text search
         .package(url: "https://github.com/krisk/fuse-swift.git", from: "1.4.0")
     ],
