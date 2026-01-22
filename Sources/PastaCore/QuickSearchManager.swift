@@ -38,6 +38,8 @@ public final class QuickSearchManager: ObservableObject {
     
     /// Call once at app startup to begin indexing
     public func initialize(entriesPublisher: AnyPublisher<[ClipboardEntry], Never>, initialEntries: [ClipboardEntry] = []) {
+        PastaLogger.search.debug("QuickSearchManager.initialize called: initialEntries=\(initialEntries.count)")
+        
         // Load initial entries immediately (don't wait for publisher)
         if !initialEntries.isEmpty {
             updateEntries(initialEntries)
@@ -46,6 +48,7 @@ public final class QuickSearchManager: ObservableObject {
         entriesSubscription = entriesPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] entries in
+                PastaLogger.search.debug("QuickSearchManager received from publisher: \(entries.count) entries")
                 self?.updateEntries(entries)
             }
     }
@@ -56,6 +59,7 @@ public final class QuickSearchManager: ObservableObject {
         selectedFilter = nil
         selectedIndex = 0
         results = Array(allEntries.prefix(9))
+        PastaLogger.search.debug("prepareForSearch: allEntries=\(allEntries.count), results=\(results.count)")
     }
     
     /// Move selection up or down
