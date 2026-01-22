@@ -187,38 +187,7 @@ private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
     let onReturn: () -> Void
     let onEscape: () -> Void
     let onCommandNumber: (Int) -> Void
-    let content: () -> Content
-    
-    func makeNSView(context: Context) -> KeyInterceptingView<Content> {
-        let view = KeyInterceptingView(
-            onArrowUp: onArrowUp,
-            onArrowDown: onArrowDown,
-            onReturn: onReturn,
-            onEscape: onEscape,
-            onCommandNumber: onCommandNumber,
-            content: content
-        )
-        return view
-    }
-    
-    func updateNSView(_ nsView: KeyInterceptingView<Content>, context: Context) {
-        nsView.onArrowUp = onArrowUp
-        nsView.onArrowDown = onArrowDown
-        nsView.onReturn = onReturn
-        nsView.onEscape = onEscape
-        nsView.onCommandNumber = onCommandNumber
-    }
-}
-
-private final class KeyInterceptingView<Content: View>: NSView {
-    var onArrowUp: () -> Void
-    var onArrowDown: () -> Void
-    var onReturn: () -> Void
-    var onEscape: () -> Void
-    var onCommandNumber: (Int) -> Void
-    
-    private var hostingView: NSHostingView<Content>?
-    private var localMonitor: Any?
+    let content: Content
     
     init(
         onArrowUp: @escaping () -> Void,
@@ -226,7 +195,54 @@ private final class KeyInterceptingView<Content: View>: NSView {
         onReturn: @escaping () -> Void,
         onEscape: @escaping () -> Void,
         onCommandNumber: @escaping (Int) -> Void,
-        content: () -> Content
+        @ViewBuilder content: () -> Content
+    ) {
+        self.onArrowUp = onArrowUp
+        self.onArrowDown = onArrowDown
+        self.onReturn = onReturn
+        self.onEscape = onEscape
+        self.onCommandNumber = onCommandNumber
+        self.content = content()
+    }
+    
+    func makeNSView(context: Context) -> KeyInterceptingView {
+        KeyInterceptingView(
+            onArrowUp: onArrowUp,
+            onArrowDown: onArrowDown,
+            onReturn: onReturn,
+            onEscape: onEscape,
+            onCommandNumber: onCommandNumber,
+            content: content
+        )
+    }
+    
+    func updateNSView(_ nsView: KeyInterceptingView, context: Context) {
+        nsView.onArrowUp = onArrowUp
+        nsView.onArrowDown = onArrowDown
+        nsView.onReturn = onReturn
+        nsView.onEscape = onEscape
+        nsView.onCommandNumber = onCommandNumber
+        nsView.updateContent(content)
+    }
+}
+
+private final class KeyInterceptingView: NSView {
+    var onArrowUp: () -> Void
+    var onArrowDown: () -> Void
+    var onReturn: () -> Void
+    var onEscape: () -> Void
+    var onCommandNumber: (Int) -> Void
+    
+    private var hostingView: NSHostingController<AnyView>?
+    private var localMonitor: Any?
+    
+    init<Content: View>(
+        onArrowUp: @escaping () -> Void,
+        onArrowDown: @escaping () -> Void,
+        onReturn: @escaping () -> Void,
+        onEscape: @escaping () -> Void,
+        onCommandNumber: @escaping (Int) -> Void,
+        content: Content
     ) {
         self.onArrowUp = onArrowUp
         self.onArrowDown = onArrowDown
@@ -235,20 +251,24 @@ private final class KeyInterceptingView<Content: View>: NSView {
         self.onCommandNumber = onCommandNumber
         super.init(frame: .zero)
         
-        let hosting = NSHostingView(rootView: content())
-        hosting.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(hosting)
+        let hosting = NSHostingController(rootView: AnyView(content))
+        hosting.view.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(hosting.view)
         NSLayoutConstraint.activate([
-            hosting.topAnchor.constraint(equalTo: topAnchor),
-            hosting.bottomAnchor.constraint(equalTo: bottomAnchor),
-            hosting.leadingAnchor.constraint(equalTo: leadingAnchor),
-            hosting.trailingAnchor.constraint(equalTo: trailingAnchor)
+            hosting.view.topAnchor.constraint(equalTo: topAnchor),
+            hosting.view.bottomAnchor.constraint(equalTo: bottomAnchor),
+            hosting.view.leadingAnchor.constraint(equalTo: leadingAnchor),
+            hosting.view.trailingAnchor.constraint(equalTo: trailingAnchor)
         ])
         hostingView = hosting
     }
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    func updateContent<Content: View>(_ content: Content) {
+        hostingView?.rootView = AnyView(content)
     }
     
     override func viewDidMoveToWindow() {
@@ -276,8 +296,8 @@ private final class KeyInterceptingView<Content: View>: NSView {
     private func handleKeyEvent(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         
-        // Handle Cmd+1-9 first (before arrow keys to avoid conflicts)
-        if modifiers == .command {
+        // Handle Cmd+1-9 (check if command is the only modifier)
+        if modifiers.contains(.command) && !modifiers.contains(.shift) && !modifiers.contains(.option) && !modifiers.contains(.control) {
             if let chars = event.charactersIgnoringModifiers,
                let digit = Int(chars),
                digit >= 1 && digit <= 9 {
@@ -286,8 +306,7 @@ private final class KeyInterceptingView<Content: View>: NSView {
             }
         }
         
-        // Handle arrow keys and other keys (only when no command modifier, except for escape)
-        // Allow arrow keys even with no modifiers or just function key modifier
+        // Handle arrow keys and other keys (only when no modifiers except function/numericPad)
         let baseModifiers = modifiers.subtracting([.function, .numericPad])
         
         switch event.keyCode {

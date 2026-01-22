@@ -593,55 +593,15 @@ struct PanelContentView: View {
     
     // Cache search service to avoid recreation per keystroke
     @State private var searchService: SearchService? = nil
+    
+    // Cached search results to avoid recomputing on every render
+    @State private var displayedEntries: [ClipboardEntry] = []
+    @State private var searchDebounceTask: Task<Void, Never>? = nil
 
     @FocusState private var searchFocused: Bool
     @FocusState private var listFocused: Bool
 
     private var database: DatabaseManager { backgroundService.database }
-
-    private var displayedEntries: [ClipboardEntry] {
-        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        func applyFilters(_ input: [ClipboardEntry]) -> [ClipboardEntry] {
-            var out = input
-            if let contentTypeFilter {
-                out = out.filter { $0.contentType == contentTypeFilter }
-            }
-            let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            if !sourceFilter.isEmpty {
-                out = out.filter { entry in
-                    entry.sourceApp?.localizedCaseInsensitiveContains(sourceFilter) == true
-                }
-            }
-            if contentTypeFilter == .url, let urlDomainFilter {
-                let detector = URLDetector()
-                out = out.filter { entry in
-                    Set(detector.detect(in: entry.content).map(\.domain)).contains(urlDomainFilter)
-                }
-            }
-            return out
-        }
-
-        if trimmed.isEmpty {
-            return applyFilters(backgroundService.entries)
-        }
-
-        // Use cached search service (initialized in handleOnAppear)
-        guard let service = searchService else {
-            return []
-        }
-        
-        do {
-            let matches = try service.search(
-                query: trimmed,
-                contentType: contentTypeFilter,
-                limit: 200
-            )
-            return applyFilters(matches.map { $0.entry })
-        } catch {
-            return []
-        }
-    }
 
     private var displayedEntryIDs: [UUID] {
         displayedEntries.map(\.id)
@@ -731,10 +691,37 @@ struct PanelContentView: View {
                     isShowingErrorAlert = true
                 }
             }
+            .onReceive(backgroundService.$entries) { entries in
+                // Update displayed entries when source changes (new items, deletions)
+                updateDisplayedEntries()
+            }
+            .onChange(of: searchQuery) { _, _ in
+                // Debounce search to avoid lag
+                searchDebounceTask?.cancel()
+                let query = searchQuery
+                if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    // Empty query - update immediately
+                    updateDisplayedEntries()
+                } else {
+                    // Debounce for typing
+                    searchDebounceTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
+                        guard !Task.isCancelled else { return }
+                        updateDisplayedEntries()
+                    }
+                }
+            }
             .onChange(of: contentTypeFilter) { _, newValue in
                 if newValue != .url {
                     urlDomainFilter = nil
                 }
+                updateDisplayedEntries()
+            }
+            .onChange(of: sourceAppFilter) { _, _ in
+                updateDisplayedEntries()
+            }
+            .onChange(of: urlDomainFilter) { _, _ in
+                updateDisplayedEntries()
             }
             .onChange(of: filterSelection) { _, newValue in
                 // Handle source app filter from sidebar selection
@@ -780,6 +767,52 @@ struct PanelContentView: View {
                 errorMessage: errorMessage
             ))
     }
+    
+    private func updateDisplayedEntries() {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        func applyFilters(_ input: [ClipboardEntry]) -> [ClipboardEntry] {
+            var out = input
+            if let contentTypeFilter {
+                out = out.filter { $0.contentType == contentTypeFilter }
+            }
+            let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !sourceFilter.isEmpty {
+                out = out.filter { entry in
+                    entry.sourceApp?.localizedCaseInsensitiveContains(sourceFilter) == true
+                }
+            }
+            if contentTypeFilter == .url, let urlDomainFilter {
+                let detector = URLDetector()
+                out = out.filter { entry in
+                    Set(detector.detect(in: entry.content).map(\.domain)).contains(urlDomainFilter)
+                }
+            }
+            return out
+        }
+        
+        if trimmed.isEmpty {
+            displayedEntries = applyFilters(backgroundService.entries)
+            return
+        }
+        
+        // Use cached search service
+        guard let service = searchService else {
+            displayedEntries = []
+            return
+        }
+        
+        do {
+            let matches = try service.search(
+                query: trimmed,
+                contentType: contentTypeFilter,
+                limit: 200
+            )
+            displayedEntries = applyFilters(matches.map { $0.entry })
+        } catch {
+            displayedEntries = []
+        }
+    }
 
     private func handleOnAppear() {
         PastaLogger.ui.debug("Panel appeared")
@@ -789,6 +822,9 @@ struct PanelContentView: View {
         if searchService == nil {
             searchService = SearchService(database: database)
         }
+        
+        // Initialize displayed entries
+        updateDisplayedEntries()
         
         if selectedEntryID == nil {
             selectedEntryID = displayedEntries.first?.id
