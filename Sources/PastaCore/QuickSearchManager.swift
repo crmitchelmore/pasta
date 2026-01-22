@@ -127,7 +127,7 @@ public final class QuickSearchManager: ObservableObject {
         
         // For short queries (1-2 chars), search immediately to feel responsive
         // For longer queries (likely still typing), debounce
-        let debounceMs: UInt64 = trimmed.count <= 2 ? 0 : 100_000_000  // 0ms or 100ms
+        let debounceMs: UInt64 = trimmed.count <= 2 ? 0 : 25_000_000  // 0ms or 25ms
         
         if debounceMs == 0 {
             performSearch()

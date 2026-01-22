@@ -723,7 +723,7 @@ struct PanelContentView: View {
                 } else {
                     // Debounce for typing - search runs on main actor after debounce
                     searchDebounceTask = Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 100_000_000) // 100ms debounce
+                        try? await Task.sleep(nanoseconds: 25_000_000) // 25ms debounce
                         guard !Task.isCancelled else { return }
                         performSearch(query: trimmed)
                     }
