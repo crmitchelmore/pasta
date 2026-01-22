@@ -5,9 +5,19 @@ import XCTest
 final class PasteServiceTests: XCTestCase {
     private final class StubPasteboard: PasteboardWriting {
         private(set) var written: PasteService.Contents?
+        var savedContents: PasteService.SavedContents?
+        private(set) var restoredContents: PasteService.SavedContents?
 
         func write(_ contents: PasteService.Contents) {
             written = contents
+        }
+        
+        func saveCurrentContents() -> PasteService.SavedContents? {
+            return savedContents
+        }
+        
+        func restore(_ contents: PasteService.SavedContents) {
+            restoredContents = contents
         }
     }
 
