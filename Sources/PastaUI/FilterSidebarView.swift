@@ -10,6 +10,9 @@ public struct FilterSidebarView: View {
     @Binding private var selection: FilterSelection?
 
     @State private var showDomains: Bool = false
+    @State private var showSourceApps: Bool = true
+    @State private var showAllTypes: Bool = false
+    @State private var showAllApps: Bool = false
 
     public init(
         entries: [ClipboardEntry],
@@ -34,15 +37,67 @@ public struct FilterSidebarView: View {
                 )
             }
 
-            Section("Types") {
-                ForEach(ContentType.allCases, id: \.self) { type in
+            Section {
+                let visibleTypes = showAllTypes ? sortedContentTypes : sortedContentTypes.filter { $0.count > 0 }
+                ForEach(visibleTypes, id: \.type) { item in
                     sidebarRow(
-                        title: typeTitle(type),
-                        systemImageName: type.systemImageName,
-                        count: effectiveTypeCounts[type, default: 0],
-                        tint: type.tint,
-                        selectionValue: .type(type)
+                        title: typeTitle(item.type),
+                        systemImageName: item.type.systemImageName,
+                        count: item.count,
+                        tint: item.type.tint,
+                        selectionValue: .type(item.type)
                     )
+                }
+                
+                if !showAllTypes && hasHiddenTypes {
+                    Button {
+                        withAnimation { showAllTypes = true }
+                    } label: {
+                        Label("Show All Types", systemImage: "ellipsis")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            } header: {
+                HStack {
+                    Text("Types")
+                    Spacer()
+                    if showAllTypes {
+                        Button("Hide Empty") {
+                            withAnimation { showAllTypes = false }
+                        }
+                        .font(.caption2)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            
+            if !sourceAppCounts.isEmpty {
+                Section {
+                    DisclosureGroup("Source Apps", isExpanded: $showSourceApps) {
+                        let visibleApps = showAllApps ? sortedSourceApps : sortedSourceApps.filter { $0.count > 0 }
+                        ForEach(visibleApps, id: \.app) { item in
+                            sidebarRow(
+                                title: item.displayName,
+                                systemImageName: "app",
+                                count: item.count,
+                                selectionValue: .sourceApp(item.app)
+                            )
+                        }
+                        
+                        if !showAllApps && hasHiddenApps {
+                            Button {
+                                withAnimation { showAllApps = true }
+                            } label: {
+                                Label("Show All Apps", systemImage: "ellipsis")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
             }
 
@@ -106,6 +161,19 @@ public struct FilterSidebarView: View {
         return counts
     }
     
+    private var sortedContentTypes: [(type: ContentType, count: Int)] {
+        ContentType.allCases.map { type in
+            (type, effectiveTypeCounts[type, default: 0])
+        }.sorted { a, b in
+            if a.count == b.count { return a.type.displayTitle < b.type.displayTitle }
+            return a.count > b.count
+        }
+    }
+    
+    private var hasHiddenTypes: Bool {
+        sortedContentTypes.contains { $0.count == 0 }
+    }
+    
     private func filePathIsImage(_ entry: ClipboardEntry) -> Bool {
         guard let meta = entry.metadata,
               let data = meta.data(using: .utf8),
@@ -116,6 +184,45 @@ public struct FilterSidebarView: View {
         else { return false }
         
         return fileType == "image"
+    }
+    
+    // MARK: - Source App Counts
+    
+    private var sourceAppCounts: [String: Int] {
+        var counts: [String: Int] = [:]
+        for entry in entries {
+            let app = entry.sourceApp ?? "Unknown"
+            counts[app, default: 0] += 1
+        }
+        return counts
+    }
+    
+    private var sortedSourceApps: [(app: String, displayName: String, count: Int)] {
+        sourceAppCounts
+            .sorted { a, b in
+                if a.value == b.value { return a.key < b.key }
+                return a.value > b.value
+            }
+            .map { (app: $0.key, displayName: appDisplayName($0.key), count: $0.value) }
+    }
+    
+    private var hasHiddenApps: Bool {
+        sortedSourceApps.contains { $0.count == 0 }
+    }
+    
+    private func appDisplayName(_ bundleId: String) -> String {
+        if bundleId == "Unknown" || bundleId.isEmpty {
+            return "Unknown"
+        }
+        if bundleId == "Continuity" {
+            return "📱 Continuity"
+        }
+        // Extract app name from bundle identifier
+        let parts = bundleId.split(separator: ".")
+        if let last = parts.last {
+            return String(last).capitalized
+        }
+        return bundleId
     }
 
     private var domainCounts: [String: Int] {
@@ -182,6 +289,10 @@ public struct FilterSidebarView: View {
         case .domain(let domain):
             selectedContentType = .url
             selectedURLDomain = domain.isEmpty ? nil : domain
+        case .sourceApp:
+            // Source app filter is handled separately via FilterSelection
+            selectedContentType = nil
+            selectedURLDomain = nil
         }
     }
 

@@ -735,6 +735,20 @@ struct PanelContentView: View {
                     urlDomainFilter = nil
                 }
             }
+            .onChange(of: filterSelection) { _, newValue in
+                // Handle source app filter from sidebar selection
+                if case .sourceApp(let app) = newValue {
+                    sourceAppFilter = app
+                    contentTypeFilter = nil
+                    urlDomainFilter = nil
+                } else if case .type = newValue {
+                    sourceAppFilter = ""
+                } else if case .domain = newValue {
+                    sourceAppFilter = ""
+                } else if newValue == .all || newValue == nil {
+                    sourceAppFilter = ""
+                }
+            }
             .onChange(of: displayedEntryIDs) { oldValue, newValue in
                 handleDisplayedEntriesChange(oldValue, newValue)
             }
