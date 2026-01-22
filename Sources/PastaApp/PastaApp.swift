@@ -721,18 +721,11 @@ struct PanelContentView: View {
                     // Empty query - update immediately with all entries
                     displayedEntries = applyFiltersToEntries(backgroundService.entries)
                 } else {
-                    // Debounce for typing - run search in background
-                    searchDebounceTask = Task {
+                    // Debounce for typing - search runs on main actor after debounce
+                    searchDebounceTask = Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 100_000_000) // 100ms debounce
                         guard !Task.isCancelled else { return }
-                        
-                        // Run search off main thread
-                        let results = await performSearchAsync(query: trimmed)
-                        
-                        guard !Task.isCancelled else { return }
-                        await MainActor.run {
-                            displayedEntries = results
-                        }
+                        performSearch(query: trimmed)
                     }
                 }
             }
@@ -819,53 +812,26 @@ struct PanelContentView: View {
         if trimmed.isEmpty {
             displayedEntries = applyFiltersToEntries(backgroundService.entries)
         } else {
-            searchDebounceTask = Task {
-                let results = await performSearchAsync(query: trimmed)
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    displayedEntries = results
-                }
-            }
+            performSearch(query: trimmed)
         }
     }
     
-    private func performSearchAsync(query: String) async -> [ClipboardEntry] {
-        // Capture values needed for background search
-        let service = searchService
-        let contentType = contentTypeFilter
-        let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let domainFilter = urlDomainFilter
+    private func performSearch(query: String) {
+        guard let service = searchService else {
+            displayedEntries = []
+            return
+        }
         
-        return await Task.detached(priority: .userInitiated) {
-            guard let service else { return [] }
-            
-            do {
-                let matches = try service.search(
-                    query: query,
-                    contentType: contentType,
-                    limit: 200
-                )
-                
-                var results = matches.map { $0.entry }
-                
-                // Apply additional filters
-                if !sourceFilter.isEmpty {
-                    results = results.filter { entry in
-                        entry.sourceApp?.localizedCaseInsensitiveContains(sourceFilter) == true
-                    }
-                }
-                if contentType == .url, let domainFilter {
-                    let detector = URLDetector()
-                    results = results.filter { entry in
-                        Set(detector.detect(in: entry.content).map(\.domain)).contains(domainFilter)
-                    }
-                }
-                
-                return results
-            } catch {
-                return []
-            }
-        }.value
+        do {
+            let matches = try service.search(
+                query: query,
+                contentType: contentTypeFilter,
+                limit: 200
+            )
+            displayedEntries = applyFiltersToEntries(matches.map { $0.entry })
+        } catch {
+            displayedEntries = []
+        }
     }
 
     private func handleOnAppear() {
