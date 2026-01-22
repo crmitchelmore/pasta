@@ -37,7 +37,12 @@ public final class QuickSearchManager: ObservableObject {
     // MARK: - Public API
     
     /// Call once at app startup to begin indexing
-    public func initialize(entriesPublisher: AnyPublisher<[ClipboardEntry], Never>) {
+    public func initialize(entriesPublisher: AnyPublisher<[ClipboardEntry], Never>, initialEntries: [ClipboardEntry] = []) {
+        // Load initial entries immediately (don't wait for publisher)
+        if !initialEntries.isEmpty {
+            updateEntries(initialEntries)
+        }
+        
         entriesSubscription = entriesPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] entries in

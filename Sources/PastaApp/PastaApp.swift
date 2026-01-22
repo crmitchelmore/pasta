@@ -67,7 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Initialize quick search manager with entries publisher (pre-warms index)
         QuickSearchManager.shared.initialize(
-            entriesPublisher: BackgroundService.shared.$entries.eraseToAnyPublisher()
+            entriesPublisher: BackgroundService.shared.$entries.eraseToAnyPublisher(),
+            initialEntries: BackgroundService.shared.entries
         )
         
         // Create the floating panel controller (main window)
