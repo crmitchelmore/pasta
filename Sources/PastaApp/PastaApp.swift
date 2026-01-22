@@ -133,9 +133,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func pasteEntry(_ entry: ClipboardEntry) {
-        // Use PasteService to copy and paste
+        // Hide quick search first if visible
+        quickSearchController?.hide()
+        
+        // Copy content to clipboard
         let pasteService = PasteService()
-        _ = pasteService.paste(entry)
+        _ = pasteService.copy(entry)
+        
+        // Deactivate our app and return focus to previous app, then paste
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            NSApp.hide(nil)
+            
+            // Small delay to ensure previous app has focus before pasting
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                SystemPasteEventSimulator().simulateCommandV()
+            }
+        }
     }
     
     // MARK: - DMG Installation Helper
@@ -693,21 +706,33 @@ struct PanelContentView: View {
             }
             .onReceive(backgroundService.$entries) { entries in
                 // Update displayed entries when source changes (new items, deletions)
-                updateDisplayedEntries()
+                let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty {
+                    displayedEntries = applyFiltersToEntries(entries)
+                } else {
+                    triggerSearchUpdate()
+                }
             }
-            .onChange(of: searchQuery) { _, _ in
+            .onChange(of: searchQuery) { _, newQuery in
                 // Debounce search to avoid lag
                 searchDebounceTask?.cancel()
-                let query = searchQuery
-                if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    // Empty query - update immediately
-                    updateDisplayedEntries()
+                let trimmed = newQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty {
+                    // Empty query - update immediately with all entries
+                    displayedEntries = applyFiltersToEntries(backgroundService.entries)
                 } else {
-                    // Debounce for typing
-                    searchDebounceTask = Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
+                    // Debounce for typing - run search in background
+                    searchDebounceTask = Task {
+                        try? await Task.sleep(nanoseconds: 100_000_000) // 100ms debounce
                         guard !Task.isCancelled else { return }
-                        updateDisplayedEntries()
+                        
+                        // Run search off main thread
+                        let results = await performSearchAsync(query: trimmed)
+                        
+                        guard !Task.isCancelled else { return }
+                        await MainActor.run {
+                            displayedEntries = results
+                        }
                     }
                 }
             }
@@ -715,13 +740,13 @@ struct PanelContentView: View {
                 if newValue != .url {
                     urlDomainFilter = nil
                 }
-                updateDisplayedEntries()
+                triggerSearchUpdate()
             }
             .onChange(of: sourceAppFilter) { _, _ in
-                updateDisplayedEntries()
+                triggerSearchUpdate()
             }
             .onChange(of: urlDomainFilter) { _, _ in
-                updateDisplayedEntries()
+                triggerSearchUpdate()
             }
             .onChange(of: filterSelection) { _, newValue in
                 // Handle source app filter from sidebar selection
@@ -768,50 +793,79 @@ struct PanelContentView: View {
             ))
     }
     
-    private func updateDisplayedEntries() {
+    private func applyFiltersToEntries(_ input: [ClipboardEntry]) -> [ClipboardEntry] {
+        var out = input
+        if let contentTypeFilter {
+            out = out.filter { $0.contentType == contentTypeFilter }
+        }
+        let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !sourceFilter.isEmpty {
+            out = out.filter { entry in
+                entry.sourceApp?.localizedCaseInsensitiveContains(sourceFilter) == true
+            }
+        }
+        if contentTypeFilter == .url, let urlDomainFilter {
+            let detector = URLDetector()
+            out = out.filter { entry in
+                Set(detector.detect(in: entry.content).map(\.domain)).contains(urlDomainFilter)
+            }
+        }
+        return out
+    }
+    
+    private func triggerSearchUpdate() {
+        searchDebounceTask?.cancel()
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        
-        func applyFilters(_ input: [ClipboardEntry]) -> [ClipboardEntry] {
-            var out = input
-            if let contentTypeFilter {
-                out = out.filter { $0.contentType == contentTypeFilter }
-            }
-            let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            if !sourceFilter.isEmpty {
-                out = out.filter { entry in
-                    entry.sourceApp?.localizedCaseInsensitiveContains(sourceFilter) == true
-                }
-            }
-            if contentTypeFilter == .url, let urlDomainFilter {
-                let detector = URLDetector()
-                out = out.filter { entry in
-                    Set(detector.detect(in: entry.content).map(\.domain)).contains(urlDomainFilter)
-                }
-            }
-            return out
-        }
-        
         if trimmed.isEmpty {
-            displayedEntries = applyFilters(backgroundService.entries)
-            return
+            displayedEntries = applyFiltersToEntries(backgroundService.entries)
+        } else {
+            searchDebounceTask = Task {
+                let results = await performSearchAsync(query: trimmed)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    displayedEntries = results
+                }
+            }
         }
+    }
+    
+    private func performSearchAsync(query: String) async -> [ClipboardEntry] {
+        // Capture values needed for background search
+        let service = searchService
+        let contentType = contentTypeFilter
+        let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let domainFilter = urlDomainFilter
         
-        // Use cached search service
-        guard let service = searchService else {
-            displayedEntries = []
-            return
-        }
-        
-        do {
-            let matches = try service.search(
-                query: trimmed,
-                contentType: contentTypeFilter,
-                limit: 200
-            )
-            displayedEntries = applyFilters(matches.map { $0.entry })
-        } catch {
-            displayedEntries = []
-        }
+        return await Task.detached(priority: .userInitiated) {
+            guard let service else { return [] }
+            
+            do {
+                let matches = try service.search(
+                    query: query,
+                    contentType: contentType,
+                    limit: 200
+                )
+                
+                var results = matches.map { $0.entry }
+                
+                // Apply additional filters
+                if !sourceFilter.isEmpty {
+                    results = results.filter { entry in
+                        entry.sourceApp?.localizedCaseInsensitiveContains(sourceFilter) == true
+                    }
+                }
+                if contentType == .url, let domainFilter {
+                    let detector = URLDetector()
+                    results = results.filter { entry in
+                        Set(detector.detect(in: entry.content).map(\.domain)).contains(domainFilter)
+                    }
+                }
+                
+                return results
+            } catch {
+                return []
+            }
+        }.value
     }
 
     private func handleOnAppear() {
@@ -824,7 +878,7 @@ struct PanelContentView: View {
         }
         
         // Initialize displayed entries
-        updateDisplayedEntries()
+        displayedEntries = applyFiltersToEntries(backgroundService.entries)
         
         if selectedEntryID == nil {
             selectedEntryID = displayedEntries.first?.id
