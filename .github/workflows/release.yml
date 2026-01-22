@@ -86,6 +86,15 @@ jobs:
           # Copy app icon to Resources
           cp "Resources/DMG/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
           
+          # Copy Swift Package resource bundles (from arm64 build - they're arch-independent)
+          echo "==> Copying resource bundles from dependencies"
+          for bundle in .build/arm64-apple-macosx/release/*.bundle; do
+            if [ -d "$bundle" ]; then
+              echo "    Copying $(basename "$bundle")"
+              cp -R "$bundle" "$APP_DIR/Contents/Resources/"
+            fi
+          done
+          
           # Make executable
           chmod +x "$APP_DIR/Contents/MacOS/${APP_NAME}"
           
