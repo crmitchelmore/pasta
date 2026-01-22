@@ -8,15 +8,21 @@ public struct QuickSearchView: View {
     @ObservedObject private var manager = QuickSearchManager.shared
     private let onDismiss: () -> Void
     private let onPaste: (ClipboardEntry) -> Void
+    private let onOpenFullApp: (() -> Void)?
+    private let showOpenFullAppButton: Bool
     
     @FocusState private var isSearchFocused: Bool
     
     public init(
         onDismiss: @escaping () -> Void,
-        onPaste: @escaping (ClipboardEntry) -> Void
+        onPaste: @escaping (ClipboardEntry) -> Void,
+        onOpenFullApp: (() -> Void)? = nil,
+        showOpenFullAppButton: Bool = false
     ) {
         self.onDismiss = onDismiss
         self.onPaste = onPaste
+        self.onOpenFullApp = onOpenFullApp
+        self.showOpenFullAppButton = showOpenFullAppButton
     }
     
     public var body: some View {
@@ -104,6 +110,19 @@ public struct QuickSearchView: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
+            
+            if showOpenFullAppButton, let onOpenFullApp {
+                Button {
+                    onDismiss()
+                    onOpenFullApp()
+                } label: {
+                    Image(systemName: "macwindow")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Open full app")
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

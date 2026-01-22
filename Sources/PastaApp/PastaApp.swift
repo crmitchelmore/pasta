@@ -115,16 +115,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func setupQuickSearch() {
-        quickSearchController?.setContent {
-            QuickSearchView(
-                onDismiss: { [weak self] in
+        quickSearchController?.setContent { [weak self] in
+            let isDockOnly = UserDefaults.standard.string(forKey: "pasta.appMode") == "dock"
+            return QuickSearchView(
+                onDismiss: {
                     self?.quickSearchController?.hide()
                 },
-                onPaste: { [weak self] entry in
+                onPaste: { entry in
                     self?.pasteEntry(entry)
-                }
+                },
+                onOpenFullApp: {
+                    self?.showMainWindow()
+                },
+                showOpenFullAppButton: isDockOnly
             )
         }
+    }
+    
+    private func showMainWindow() {
+        panelController?.show()
+        NSApp.activate(ignoringOtherApps: true)
     }
     
     private func toggleQuickSearch() {
