@@ -1,10 +1,11 @@
 import AppKit
-import KeyboardShortcuts
 import PastaCore
 import SwiftUI
 
 public struct SettingsView: View {
     private enum Defaults {
+        static let hotkeyKey = "pasta.hotkey.key"
+        static let hotkeyModifiers = "pasta.hotkey.modifiers"
         static let launchAtLogin = "pasta.launchAtLogin"
         static let maxEntries = "pasta.maxEntries"
         static let excludedApps = "pasta.excludedApps"
@@ -19,6 +20,8 @@ public struct SettingsView: View {
         static let skipAPIKeys = "pasta.skipAPIKeys"
     }
 
+    @AppStorage(Defaults.hotkeyKey) private var hotkeyKey: String = "c"
+    @AppStorage(Defaults.hotkeyModifiers) private var hotkeyModifiersRaw: Int = Int(NSEvent.ModifierFlags([.control, .command]).rawValue)
     @AppStorage(Defaults.launchAtLogin) private var launchAtLogin: Bool = false
     @AppStorage(Defaults.maxEntries) private var maxEntries: Int = 0
     @AppStorage(Defaults.excludedApps) private var excludedAppsText: String = ""
@@ -39,6 +42,8 @@ public struct SettingsView: View {
     public var body: some View {
         TabView(selection: $selectedTab) {
             GeneralSettingsTab(
+                hotkeyKey: $hotkeyKey,
+                hotkeyModifiersRaw: $hotkeyModifiersRaw,
                 launchAtLogin: $launchAtLogin,
                 appMode: $appMode,
                 appearance: $appearance
@@ -77,8 +82,7 @@ public struct SettingsView: View {
             }
             .tag(SettingsTab.import)
         }
-        .frame(minWidth: 520, minHeight: 480)
-        .frame(idealWidth: 600, idealHeight: 550)
+        .frame(width: 500, height: 420)
         .withAppearance()
         .tint(PastaTheme.accent)
     }
@@ -91,6 +95,8 @@ public struct SettingsView: View {
 // MARK: - General Settings Tab
 
 private struct GeneralSettingsTab: View {
+    @Binding var hotkeyKey: String
+    @Binding var hotkeyModifiersRaw: Int
     @Binding var launchAtLogin: Bool
     @Binding var appMode: String
     @Binding var appearance: String
@@ -98,11 +104,10 @@ private struct GeneralSettingsTab: View {
     var body: some View {
         Form {
             Section {
-                HStack {
-                    Text("Open Pasta")
-                    Spacer()
-                    KeyboardShortcuts.Recorder(for: .openPasta)
-                }
+                HotkeyRecorderRow(
+                    hotkeyKey: $hotkeyKey,
+                    hotkeyModifiersRaw: $hotkeyModifiersRaw
+                )
             } header: {
                 Label("Keyboard Shortcut", systemImage: "keyboard")
             }
@@ -363,22 +368,223 @@ private struct StorageSettingsTab: View {
     }
 }
 
-// MARK: - Import Settings Tab
+// MARK: - Hotkey Recorder
 
-private struct ImportSettingsTab: View {
-    private enum ImportDefaults {
-        static func lastImportKey(for app: ClipboardApp) -> String {
-            "pasta.import.lastDate.\(app.rawValue)"
+private struct HotkeyRecorderRow: View {
+    @Binding var hotkeyKey: String
+    @Binding var hotkeyModifiersRaw: Int
+
+    @State private var isRecording = false
+    @State private var pendingKey: String? = nil
+    @State private var pendingModifiers: Int? = nil
+
+    private var displayString: String {
+        let modifiers = NSEvent.ModifierFlags(rawValue: UInt(hotkeyModifiersRaw))
+        var parts: [String] = []
+        if modifiers.contains(.control) { parts.append("⌃") }
+        if modifiers.contains(.option) { parts.append("⌥") }
+        if modifiers.contains(.shift) { parts.append("⇧") }
+        if modifiers.contains(.command) { parts.append("⌘") }
+        parts.append(hotkeyKey.uppercased())
+        return parts.joined()
+    }
+
+    private var pendingDisplayString: String {
+        guard let key = pendingKey, let mods = pendingModifiers else { return "" }
+        let modifiers = NSEvent.ModifierFlags(rawValue: UInt(mods))
+        var parts: [String] = []
+        if modifiers.contains(.control) { parts.append("⌃") }
+        if modifiers.contains(.option) { parts.append("⌥") }
+        if modifiers.contains(.shift) { parts.append("⇧") }
+        if modifiers.contains(.command) { parts.append("⌘") }
+        parts.append(key.uppercased())
+        return parts.joined()
+    }
+
+    var body: some View {
+        HStack {
+            Text("Open Pasta")
+            
+            Spacer()
+
+            if isRecording {
+                HStack(spacing: 8) {
+                    HotkeyRecorderField(
+                        pendingKey: $pendingKey,
+                        pendingModifiers: $pendingModifiers
+                    )
+                    .frame(width: 120, height: 28)
+                    
+                    if pendingKey != nil {
+                        Button("Save") {
+                            if let key = pendingKey, let mods = pendingModifiers {
+                                hotkeyKey = key
+                                hotkeyModifiersRaw = mods
+                            }
+                            isRecording = false
+                            pendingKey = nil
+                            pendingModifiers = nil
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                    
+                    Button("Cancel") {
+                        isRecording = false
+                        pendingKey = nil
+                        pendingModifiers = nil
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            } else {
+                Button {
+                    isRecording = true
+                    pendingKey = nil
+                    pendingModifiers = nil
+                } label: {
+                    Text(displayString)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minWidth: 80)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+}
+
+// NSViewRepresentable for capturing key events
+private struct HotkeyRecorderField: NSViewRepresentable {
+    @Binding var pendingKey: String?
+    @Binding var pendingModifiers: Int?
+
+    func makeNSView(context: Context) -> HotkeyTextField {
+        let field = HotkeyTextField()
+        field.onKeyRecorded = { key, modifiers in
+            pendingKey = key
+            pendingModifiers = modifiers
+        }
+        return field
+    }
+
+    func updateNSView(_ nsView: HotkeyTextField, context: Context) {
+        if let key = pendingKey, let mods = pendingModifiers {
+            nsView.updateDisplay(key: key, modifiers: mods)
+        }
+    }
+}
+
+private class HotkeyTextField: NSTextField {
+    var onKeyRecorded: ((String, Int) -> Void)?
+    private var localMonitor: Any?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        isEditable = false
+        isSelectable = false
+        isBezeled = true
+        bezelStyle = .roundedBezel
+        alignment = .center
+        font = .monospacedSystemFont(ofSize: 13, weight: .medium)
+        placeholderString = "Click, then press keys..."
+        stringValue = ""
+        
+        // Make it focusable
+        focusRingType = .exterior
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func becomeFirstResponder() -> Bool {
+        let result = super.becomeFirstResponder()
+        if result {
+            stringValue = ""
+            placeholderString = "Press keys..."
+            startMonitoring()
+        }
+        return result
+    }
+    
+    override func resignFirstResponder() -> Bool {
+        stopMonitoring()
+        if stringValue.isEmpty {
+            placeholderString = "Click, then press keys..."
+        }
+        return super.resignFirstResponder()
+    }
+    
+    private func startMonitoring() {
+        stopMonitoring()
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.window?.firstResponder == self.currentEditor() || self.window?.firstResponder == self else {
+                return event
+            }
+            self.handleKeyEvent(event)
+            return nil // Consume the event
         }
     }
     
+    private func stopMonitoring() {
+        if let monitor = localMonitor {
+            NSEvent.removeMonitor(monitor)
+            localMonitor = nil
+        }
+    }
+    
+    private func handleKeyEvent(_ event: NSEvent) {
+        guard let characters = event.charactersIgnoringModifiers?.lowercased(),
+              !characters.isEmpty else { return }
+
+        let key = characters
+        let modifiers = event.modifierFlags.intersection([.control, .option, .shift, .command])
+
+        // Require at least one modifier
+        guard !modifiers.isEmpty else {
+            placeholderString = "Add ⌘, ⌃, ⌥, or ⇧"
+            stringValue = ""
+            return
+        }
+
+        updateDisplay(key: key, modifiers: Int(modifiers.rawValue))
+        onKeyRecorded?(key, Int(modifiers.rawValue))
+        
+        // Resign first responder after successful capture
+        window?.makeFirstResponder(nil)
+    }
+
+    func updateDisplay(key: String, modifiers: Int) {
+        let flags = NSEvent.ModifierFlags(rawValue: UInt(modifiers))
+        var parts: [String] = []
+        if flags.contains(.control) { parts.append("⌃") }
+        if flags.contains(.option) { parts.append("⌥") }
+        if flags.contains(.shift) { parts.append("⇧") }
+        if flags.contains(.command) { parts.append("⌘") }
+        parts.append(key.uppercased())
+        stringValue = parts.joined()
+    }
+    
+    deinit {
+        stopMonitoring()
+    }
+}
+
+// MARK: - Import Settings Tab
+
+private struct ImportSettingsTab: View {
     @State private var importResults: [ClipboardApp: ImportResult] = [:]
     @State private var isImporting: ClipboardApp? = nil
     @State private var importProgress: ImportProgress? = nil
     @State private var showError: Bool = false
     @State private var errorMessage: String = ""
-    @State private var showReimportConfirmation: Bool = false
-    @State private var pendingImportApp: ClipboardApp? = nil
     
     var body: some View {
         Form {
@@ -395,8 +601,7 @@ private struct ImportSettingsTab: View {
                         result: importResults[app],
                         isImporting: isImporting == app,
                         progress: isImporting == app ? importProgress : nil,
-                        lastImportDate: lastImportDate(for: app),
-                        onImport: { handleImportRequest(app) }
+                        onImport: { importFrom(app) }
                     )
                 }
             } header: {
@@ -408,45 +613,6 @@ private struct ImportSettingsTab: View {
             Button("OK") { }
         } message: {
             Text(errorMessage)
-        }
-        .confirmationDialog(
-            "Reimport from \(pendingImportApp?.rawValue ?? "")?",
-            isPresented: $showReimportConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Reimport") {
-                if let app = pendingImportApp {
-                    importFrom(app)
-                }
-            }
-            Button("Cancel", role: .cancel) {
-                pendingImportApp = nil
-            }
-        } message: {
-            if let app = pendingImportApp, let lastDate = lastImportDate(for: app) {
-                Text("You last imported from \(app.rawValue) on \(lastDate.formatted(date: .abbreviated, time: .shortened)). Duplicates will be skipped.")
-            } else {
-                Text("This will import all clipboard history from the selected app. Duplicates will be skipped.")
-            }
-        }
-    }
-    
-    private func lastImportDate(for app: ClipboardApp) -> Date? {
-        UserDefaults.standard.object(forKey: ImportDefaults.lastImportKey(for: app)) as? Date
-    }
-    
-    private func setLastImportDate(for app: ClipboardApp) {
-        UserDefaults.standard.set(Date(), forKey: ImportDefaults.lastImportKey(for: app))
-    }
-    
-    private func handleImportRequest(_ app: ClipboardApp) {
-        if lastImportDate(for: app) != nil {
-            // Show confirmation for reimport
-            pendingImportApp = app
-            showReimportConfirmation = true
-        } else {
-            // First time import, proceed directly
-            importFrom(app)
         }
     }
     
@@ -469,7 +635,6 @@ private struct ImportSettingsTab: View {
                     importResults[app] = result
                     isImporting = nil
                     importProgress = nil
-                    setLastImportDate(for: app)
                     
                     // Post notification to refresh main view
                     NotificationCenter.default.post(name: .entriesDidChange, object: nil)
@@ -491,7 +656,6 @@ private struct ImportAppRow: View {
     let result: ImportResult?
     let isImporting: Bool
     let progress: ImportProgress?
-    let lastImportDate: Date?
     let onImport: () -> Void
     
     var body: some View {
@@ -515,10 +679,6 @@ private struct ImportAppRow: View {
                         Text(result.summary)
                             .font(.caption)
                             .foregroundStyle(.green)
-                    } else if let lastImportDate, !isImporting {
-                        Text("Last imported: \(lastImportDate.formatted(date: .abbreviated, time: .shortened))")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
                     }
                 }
                 
@@ -530,7 +690,7 @@ private struct ImportAppRow: View {
                             .controlSize(.small)
                     }
                 } else if app.isAvailable {
-                    Button(lastImportDate != nil ? "Reimport" : "Import") {
+                    Button("Import") {
                         onImport()
                     }
                     .buttonStyle(.borderedProminent)

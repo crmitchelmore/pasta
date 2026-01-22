@@ -86,16 +86,6 @@ jobs:
           # Copy app icon to Resources
           cp "Resources/DMG/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
           
-          # Copy Swift Package resource bundles to app root (SPM's Bundle.module looks here)
-          # Bundle.main.bundleURL for apps is the .app directory itself
-          echo "==> Copying resource bundles from dependencies"
-          for bundle in .build/arm64-apple-macosx/release/*.bundle; do
-            if [ -d "$bundle" ]; then
-              echo "    Copying $(basename "$bundle") to app root"
-              cp -R "$bundle" "$APP_DIR/"
-            fi
-          done
-          
           # Make executable
           chmod +x "$APP_DIR/Contents/MacOS/${APP_NAME}"
           

@@ -1,34 +1,48 @@
 import XCTest
 @testable import PastaCore
 
-#if canImport(AppKit)
+#if canImport(AppKit) && canImport(HotKey)
 import AppKit
-import KeyboardShortcuts
+import HotKey
 
 final class HotkeyManagerTests: XCTestCase {
-    func testHotkeyManagerInitializesSuccessfully() {
+    private final class StubHotKey: HotKeyProtocol {
+        var keyDownHandler: (() -> Void)?
+    }
+
+    private final class CapturingProvider: HotKeyProviding {
+        let hotKey: StubHotKey
+        private(set) var receivedKey: Key?
+        private(set) var receivedModifiers: NSEvent.ModifierFlags?
+
+        init(hotKey: StubHotKey) {
+            self.hotKey = hotKey
+        }
+
+        func makeHotKey(key: Key, modifiers: NSEvent.ModifierFlags) -> HotKeyProtocol {
+            receivedKey = key
+            receivedModifiers = modifiers
+            return hotKey
+        }
+    }
+
+    func testRegistersControlCommandCAndFiresHandler() {
+        let stubHotKey = StubHotKey()
+        let provider = CapturingProvider(hotKey: stubHotKey)
+
         var fired = false
-        let manager = HotkeyManager {
+        let manager = HotkeyManager(provider: provider) {
             fired = true
         }
         // Keep manager alive
         _ = manager
-        
-        // Verify the shortcut name is registered
-        XCTAssertNotNil(KeyboardShortcuts.Name.openPasta)
-        
-        // Note: We can't easily simulate KeyboardShortcuts triggering in tests
-        // The library handles global key registration internally
-        XCTAssertFalse(fired, "Handler should not fire without actual key press")
-    }
-    
-    func testReloadFromUserDefaultsDoesNotCrash() {
-        let manager = HotkeyManager {
-            // Empty handler
-        }
-        
-        // Should not throw
-        manager.reloadFromUserDefaults()
+
+        XCTAssertEqual(provider.receivedKey, .c)
+        XCTAssertEqual(provider.receivedModifiers, [.control, .command])
+
+        // Simulate the HotKey library triggering
+        stubHotKey.keyDownHandler?()
+        XCTAssertTrue(fired, "Handler should be called when HotKey triggers")
     }
 }
 #endif

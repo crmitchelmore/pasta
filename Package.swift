@@ -15,9 +15,8 @@ let package = Package(
     dependencies: [
         // SQLite database
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.24.0"),
-        // Global keyboard shortcuts (modern, App Store compatible)
-        // Pin to 2.0.x - versions 2.1+ require Swift tools 6.1
-        .package(url: "https://github.com/sindresorhus/KeyboardShortcuts.git", from: "2.0.1"),
+        // Global keyboard shortcuts
+        .package(url: "https://github.com/soffes/HotKey.git", from: "0.2.0"),
         // Fuzzy text search
         .package(url: "https://github.com/krisk/fuse-swift.git", from: "1.4.0")
     ],
@@ -29,7 +28,7 @@ let package = Package(
                 "PastaCore",
                 "PastaUI",
                 "PastaDetectors",
-                "KeyboardShortcuts"
+                "HotKey"
             ],
             resources: [
                 .process("Resources")
@@ -42,7 +41,7 @@ let package = Package(
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Fuse", package: "fuse-swift"),
-                "KeyboardShortcuts"
+                .product(name: "HotKey", package: "HotKey")
             ]
         ),
         
@@ -51,8 +50,7 @@ let package = Package(
             name: "PastaUI",
             dependencies: [
                 "PastaCore",
-                "PastaDetectors",
-                "KeyboardShortcuts"
+                "PastaDetectors"
             ]
         ),
         
@@ -70,7 +68,7 @@ let package = Package(
             name: "PastaCoreTests",
             dependencies: [
                 "PastaCore",
-                "KeyboardShortcuts"
+                .product(name: "HotKey", package: "HotKey")
             ]
         ),
         .testTarget(
