@@ -92,6 +92,8 @@ jobs:
           echo "APP_DIR=$APP_DIR" >> $GITHUB_ENV
       
       - name: Generate Info.plist with version
+        env:
+          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
         run: |
           cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
@@ -130,6 +132,15 @@ jobs:
               <string>AppIcon</string>
               <key>LSUIElement</key>
               <true/>
+              <!-- Sparkle Auto-Update Configuration -->
+              <key>SUFeedURL</key>
+              <string>https://github.com/crmitchelmore/pasta/releases/latest/download/appcast.xml</string>
+              <key>SUPublicEDKey</key>
+              <string>${SPARKLE_PUBLIC_KEY}</string>
+              <key>SUEnableAutomaticChecks</key>
+              <true/>
+              <key>SUScheduledCheckInterval</key>
+              <integer>86400</integer>
           </dict>
           </plist>
           PLIST
@@ -428,6 +439,20 @@ jobs:
           echo "Release notes generated"
           cat release_notes.md
       
+      - name: Generate Appcast for Sparkle Updates
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          DMG_PATH="${{ steps.dmg.outputs.dmg_file }}"
+          
+          chmod +x scripts/generate-appcast.sh
+          ./scripts/generate-appcast.sh "$VERSION" "$DMG_PATH" "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/appcast.xml"
+          
+          echo "APPCAST_PATH=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_ENV"
+          echo "Generated appcast.xml:"
+          cat "$RUNNER_TEMP/appcast.xml"
+      
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
@@ -435,6 +460,7 @@ jobs:
           body_path: release_notes.md
           files: |
             ${{ steps.dmg.outputs.dmg_file }}
+            ${{ env.APPCAST_PATH }}
           draft: false
           prerelease: false
         env:

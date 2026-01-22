@@ -18,7 +18,9 @@ let package = Package(
         // Global keyboard shortcuts
         .package(url: "https://github.com/soffes/HotKey.git", from: "0.2.0"),
         // Fuzzy text search
-        .package(url: "https://github.com/krisk/fuse-swift.git", from: "1.4.0")
+        .package(url: "https://github.com/krisk/fuse-swift.git", from: "1.4.0"),
+        // Auto-updates
+        .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0")
     ],
     targets: [
         // Main application
@@ -28,7 +30,8 @@ let package = Package(
                 "PastaCore",
                 "PastaUI",
                 "PastaDetectors",
-                "HotKey"
+                "HotKey",
+                .product(name: "Sparkle", package: "Sparkle")
             ],
             resources: [
                 .process("Resources")
