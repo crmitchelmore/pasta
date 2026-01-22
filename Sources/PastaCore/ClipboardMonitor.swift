@@ -13,9 +13,22 @@ public enum PasteboardContents: Equatable {
     case filePaths([String])
 }
 
+public struct PasteboardMetadata: Equatable {
+    /// Whether the clipboard contents came from another device via Universal Clipboard/Handoff
+    public let isContinuitySync: Bool
+    /// The origin device name if available
+    public let originDeviceName: String?
+    
+    public init(isContinuitySync: Bool = false, originDeviceName: String? = nil) {
+        self.isContinuitySync = isContinuitySync
+        self.originDeviceName = originDeviceName
+    }
+}
+
 public protocol PasteboardProviding {
     var changeCount: Int { get }
     func readContents() -> PasteboardContents?
+    func readMetadata() -> PasteboardMetadata
 }
 
 public protocol WorkspaceProviding {
@@ -25,6 +38,13 @@ public protocol WorkspaceProviding {
 #if canImport(AppKit)
 public struct SystemPasteboard: PasteboardProviding {
     private let pasteboard: NSPasteboard
+    
+    // Pasteboard types that indicate Universal Clipboard / Handoff
+    private static let handoffTypes: Set<String> = [
+        "com.apple.is-remote-clipboard",
+        "com.apple.remote-clipboard.data",
+        "dyn.age8u"  // Dynamic type used for Handoff
+    ]
 
     public init(pasteboard: NSPasteboard = .general) {
         self.pasteboard = pasteboard
@@ -51,6 +71,24 @@ public struct SystemPasteboard: PasteboardProviding {
         }
 
         return nil
+    }
+    
+    public func readMetadata() -> PasteboardMetadata {
+        // Check if clipboard contains markers indicating it came from another device
+        let types = pasteboard.types ?? []
+        let typeStrings = Set(types.map { $0.rawValue })
+        
+        let isContinuity = !typeStrings.isDisjoint(with: Self.handoffTypes) ||
+            typeStrings.contains(where: { $0.contains("remote") || $0.contains("handoff") })
+        
+        // Try to get origin device name from pasteboard data
+        var deviceName: String? = nil
+        if isContinuity {
+            // Apple doesn't expose device name directly, but we can mark it as synced
+            deviceName = "Another device"
+        }
+        
+        return PasteboardMetadata(isContinuitySync: isContinuity, originDeviceName: deviceName)
     }
 }
 
@@ -148,13 +186,30 @@ public final class ClipboardMonitor {
             PastaLogger.clipboard.debug("Skipped entry from excluded app: \(sourceApp ?? "unknown")")
             return
         }
+        
+        // Check for Continuity clipboard
+        let metadata = pasteboard.readMetadata()
+        var entryMetadata: String? = nil
+        if metadata.isContinuitySync {
+            // Encode metadata as JSON
+            let metaDict: [String: Any] = [
+                "continuitySync": true,
+                "originDevice": metadata.originDeviceName ?? "Unknown device"
+            ]
+            if let jsonData = try? JSONSerialization.data(withJSONObject: metaDict),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                entryMetadata = jsonString
+            }
+            PastaLogger.clipboard.info("Detected Continuity clipboard sync from \(metadata.originDeviceName ?? "another device")")
+        }
 
         let entry = ClipboardEntry(
             content: contentString(for: contents),
             contentType: contentType(for: contents, sourceApp: sourceApp),
             rawData: rawData(for: contents),
             timestamp: now(),
-            sourceApp: sourceApp
+            sourceApp: metadata.isContinuitySync ? "Continuity" : sourceApp,
+            metadata: entryMetadata
         )
 
         PastaLogger.clipboard.debug("Captured clipboard entry of type \(entry.contentType.rawValue)")

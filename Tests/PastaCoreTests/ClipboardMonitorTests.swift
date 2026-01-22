@@ -7,8 +7,10 @@ final class ClipboardMonitorTests: XCTestCase {
     private final class MockPasteboard: PasteboardProviding {
         var changeCount: Int = 0
         var contents: PasteboardContents?
+        var metadata: PasteboardMetadata = PasteboardMetadata()
 
         func readContents() -> PasteboardContents? { contents }
+        func readMetadata() -> PasteboardMetadata { metadata }
     }
 
     private struct MockWorkspace: WorkspaceProviding {
@@ -84,5 +86,41 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertEqual(receivedCount, 1)
 
         cancellable.cancel()
+    }
+    
+    func testContinuitySyncDetection() throws {
+        let pasteboard = MockPasteboard()
+        pasteboard.changeCount = 1
+        pasteboard.contents = .text("synced text")
+        pasteboard.metadata = PasteboardMetadata(isContinuitySync: true, originDeviceName: "iPhone")
+
+        let ticks = PassthroughSubject<Void, Never>()
+        let monitor = ClipboardMonitor(
+            pasteboard: pasteboard,
+            workspace: MockWorkspace(identifier: nil),
+            exclusionManager: ExclusionManager(userDefaults: UserDefaults(suiteName: "ClipboardMonitorTests.continuity")!),
+            tickPublisher: ticks.eraseToAnyPublisher()
+        )
+
+        var received: [ClipboardEntry] = []
+        let expectation = XCTestExpectation(description: "receives continuity entry")
+
+        let cancellable = monitor.publisher.sink { entry in
+            received.append(entry)
+            expectation.fulfill()
+        }
+
+        monitor.start()
+
+        pasteboard.changeCount = 2
+        ticks.send(())
+
+        wait(for: [expectation], timeout: 1.0)
+        cancellable.cancel()
+
+        XCTAssertEqual(received.count, 1)
+        XCTAssertEqual(received[0].sourceApp, "Continuity")
+        XCTAssertNotNil(received[0].metadata)
+        XCTAssertTrue(received[0].metadata?.contains("continuitySync") == true)
     }
 }

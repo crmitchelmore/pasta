@@ -7,6 +7,7 @@ final class ClipboardMonitorExclusionTests: XCTestCase {
         var changeCount: Int = 0
         var contents: PasteboardContents?
         func readContents() -> PasteboardContents? { contents }
+        func readMetadata() -> PasteboardMetadata { PasteboardMetadata() }
     }
 
     private struct MockWorkspace: WorkspaceProviding {
