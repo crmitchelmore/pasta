@@ -98,8 +98,9 @@ jobs:
           fi
           
           # Copy resource bundles (KeyboardShortcuts has localized strings)
-          # SPM's resource_bundle_accessor looks for bundles at Bundle.main.bundleURL
-          # which is the .app directory (e.g., Pasta.app/), NOT Contents/MacOS/ or Contents/Resources/
+          # SPM's resource_bundle_accessor looks for bundles at Bundle.main.bundleURL (app root)
+          # But code signing requires all content in Contents/
+          # Solution: Put bundles in Contents/Resources/ and symlink from app root
           echo "==> Copying resource bundles"
           for bundle in $(find .build -name "*.bundle" -type d); do
             bundle_name=$(basename "$bundle")
@@ -108,14 +109,16 @@ jobs:
               echo "Skipping Sparkle test bundle: $bundle_name"
               continue
             fi
-            # Skip if already copied (check if destination exists)
-            if [ -d "$APP_DIR/$bundle_name" ]; then
+            # Skip if already copied
+            if [ -d "$APP_DIR/Contents/Resources/$bundle_name" ]; then
               echo "Skipping (already exists): $bundle_name"
               continue
             fi
-            echo "Copying bundle: $bundle_name to app root"
-            # Copy to app bundle root (where SPM's Bundle.main.bundleURL points)
-            cp -R "$bundle" "$APP_DIR/"
+            echo "Copying bundle: $bundle_name"
+            # Copy to Contents/Resources (for proper code signing)
+            cp -R "$bundle" "$APP_DIR/Contents/Resources/"
+            # Create symlink at app root (where SPM looks)
+            ln -sf "Contents/Resources/$bundle_name" "$APP_DIR/$bundle_name"
           done
           
           # Fix rpath to find frameworks in Contents/Frameworks

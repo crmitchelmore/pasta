@@ -52,7 +52,8 @@ jobs:
           echo "==> Copied Sparkle from $SPARKLE_PATH"
           
           # Copy ALL resource bundles (same as release.yml)
-          # SPM's resource_bundle_accessor looks for bundles at Bundle.main.bundleURL (app root)
+          # SPM looks at app root, but code signing requires Contents/
+          # Solution: copy to Resources, symlink from app root
           echo "==> Copying resource bundles"
           for bundle in $(find .build -name "*.bundle" -type d); do
             bundle_name=$(basename "$bundle")
@@ -62,12 +63,13 @@ jobs:
               continue
             fi
             # Skip if already copied
-            if [ -d "$APP_DIR/$bundle_name" ]; then
+            if [ -d "$APP_DIR/Contents/Resources/$bundle_name" ]; then
               echo "Skipping (already exists): $bundle_name"
               continue
             fi
-            echo "Copying bundle: $bundle_name to app root"
-            cp -R "$bundle" "$APP_DIR/"
+            echo "Copying bundle: $bundle_name"
+            cp -R "$bundle" "$APP_DIR/Contents/Resources/"
+            ln -sf "Contents/Resources/$bundle_name" "$APP_DIR/$bundle_name"
           done
           
           # Fix rpath (same as release.yml)
@@ -121,19 +123,27 @@ jobs:
           fi
           echo "✓ Sparkle.framework exists"
           
-          # Check resource bundles
-          BUNDLE_COUNT=$(find "$APP_DIR" -maxdepth 1 -name "*.bundle" -type d | wc -l | tr -d ' ')
-          echo "Found $BUNDLE_COUNT resource bundle(s) at app root"
-          find "$APP_DIR" -maxdepth 1 -name "*.bundle" -type d
+          # Check resource bundles (in Resources/ with symlinks at app root)
+          BUNDLE_COUNT=$(find "$APP_DIR/Contents/Resources" -maxdepth 1 -name "*.bundle" -type d | wc -l | tr -d ' ')
+          echo "Found $BUNDLE_COUNT resource bundle(s) in Contents/Resources"
+          find "$APP_DIR/Contents/Resources" -maxdepth 1 -name "*.bundle" -type d
           
-          # KeyboardShortcuts bundle is required (at app root for SPM resource accessor)
-          if [ ! -d "$APP_DIR/KeyboardShortcuts_KeyboardShortcuts.bundle" ]; then
-            echo "ERROR: KeyboardShortcuts resource bundle not found at app root!"
-            echo "Available at app root:"
+          # KeyboardShortcuts bundle is required
+          if [ ! -d "$APP_DIR/Contents/Resources/KeyboardShortcuts_KeyboardShortcuts.bundle" ]; then
+            echo "ERROR: KeyboardShortcuts resource bundle not found!"
+            echo "Available in Resources:"
+            ls -la "$APP_DIR/Contents/Resources/"
+            exit 1
+          fi
+          echo "✓ KeyboardShortcuts bundle exists in Resources"
+          
+          # Check symlink at app root
+          if [ ! -L "$APP_DIR/KeyboardShortcuts_KeyboardShortcuts.bundle" ]; then
+            echo "ERROR: Symlink not found at app root!"
             ls -la "$APP_DIR/"
             exit 1
           fi
-          echo "✓ KeyboardShortcuts bundle exists at app root"
+          echo "✓ Symlink exists at app root"
           
           # Check rpath
           echo "==> Verifying rpath:"
