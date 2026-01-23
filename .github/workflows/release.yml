@@ -469,10 +469,11 @@ jobs:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
           DMG_PATH="${{ steps.dmg.outputs.dmg_file }}"
           
           chmod +x scripts/generate-appcast.sh
-          ./scripts/generate-appcast.sh "$VERSION" "$DMG_PATH" "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/appcast.xml"
+          ./scripts/generate-appcast.sh "$VERSION" "$BUILD_NUMBER" "$DMG_PATH" "$SPARKLE_PRIVATE_KEY" > "$RUNNER_TEMP/appcast.xml"
           
           echo "APPCAST_PATH=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_ENV"
           echo "Generated appcast.xml:"
