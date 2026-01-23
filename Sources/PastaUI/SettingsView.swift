@@ -103,7 +103,8 @@ public struct SettingsView: View {
             }
             .tag(SettingsTab.about)
         }
-        .frame(width: 520, height: 480)
+        .frame(width: 520, height: 500)
+        .padding(.top, 8)
         .withAppearance()
         .tint(PastaTheme.accent)
     }
