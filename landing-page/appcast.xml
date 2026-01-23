@@ -1,10 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
   <channel>
     <title>Pasta Updates</title>
-    <link>https://pasta-app.com/appcast.xml</link>
+    <link>https://github.com/crmitchelmore/pasta/releases/latest/download/appcast.xml</link>
     <description>Most recent updates to Pasta</description>
     <language>en</language>
-    <!-- Items will be added automatically by the release workflow -->
+    <item>
+      <title>Version 0.6.42</title>
+      <sparkle:version>52</sparkle:version>
+      <sparkle:shortVersionString>0.6.42</sparkle:shortVersionString>
+      <pubDate>Fri, 23 Jan 2026 18:40:12 +0000</pubDate>
+      <enclosure
+        url="https://github.com/crmitchelmore/pasta/releases/download/v0.6.42/Pasta-0.6.42.dmg"
+        sparkle:edSignature="IzeA5CXD3Gx42LtswoxHE0m5azgRVxtWe1SwgNKc+owsy34ENFE56HibaGSNuSydowI3nwT/8izJWbET2fBdBw=="
+        length="14170914"
+        type="application/octet-stream"/>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+    </item>
   </channel>
 </rss>
