@@ -97,6 +97,14 @@ jobs:
             exit 1
           fi
           
+          # Fix rpath to find frameworks in Contents/Frameworks
+          echo "==> Fixing rpath for Sparkle framework"
+          install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/${APP_NAME}"
+          
+          # Verify rpath
+          echo "==> Verifying rpath:"
+          otool -l "$APP_DIR/Contents/MacOS/${APP_NAME}" | grep -A2 LC_RPATH
+          
           # Make executable
           chmod +x "$APP_DIR/Contents/MacOS/${APP_NAME}"
           
