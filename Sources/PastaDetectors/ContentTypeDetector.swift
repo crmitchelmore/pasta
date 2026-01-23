@@ -158,7 +158,8 @@ public struct ContentTypeDetector {
             apiKeys: apiKeys,
             phoneNumbers: phoneNumbers,
             ipAddresses: ipAddresses,
-            uuids: uuids
+            uuids: uuids,
+            paths: paths
         )
 
         return Output(
@@ -180,7 +181,8 @@ public struct ContentTypeDetector {
         apiKeys: [APIKeyDetector.Detection],
         phoneNumbers: [PhoneNumberDetector.Detection],
         ipAddresses: [IPAddressDetector.Detection],
-        uuids: [UUIDDetector.Detection]
+        uuids: [UUIDDetector.Detection],
+        paths: [FilePathDetector.Detection]
     ) -> [SplitEntry] {
         // Only extract from prose or text content
         guard primaryType == .prose || primaryType == .text else {
@@ -193,7 +195,7 @@ public struct ContentTypeDetector {
         }
 
         // Count total extractable items
-        let totalItems = emails.count + urls.count + apiKeys.count + phoneNumbers.count + ipAddresses.count + uuids.count
+        let totalItems = emails.count + urls.count + apiKeys.count + phoneNumbers.count + ipAddresses.count + uuids.count + paths.count
 
         // Only extract if there are items to extract (and content isn't just one item)
         guard totalItems > 0 else {
@@ -218,6 +220,8 @@ public struct ContentTypeDetector {
                 singleItemLength = ip.address.count
             } else if let uuid = uuids.first {
                 singleItemLength = uuid.uuid.count
+            } else if let path = paths.first {
+                singleItemLength = path.path.count
             } else {
                 singleItemLength = 0
             }
@@ -266,6 +270,19 @@ public struct ContentTypeDetector {
             let meta = jsonString(["uuid": uuid.uuid, "variant": uuid.variant, "confidence": uuid.confidence])
             items.append(SplitEntry(content: uuid.uuid, contentType: .uuid, metadataJSON: meta))
         }
+        
+        // Extract file paths
+        for path in paths.prefix(maxItems - items.count) {
+            let meta = jsonString([
+                "path": path.path,
+                "exists": path.exists,
+                "filename": path.filename,
+                "fileExtension": path.fileExtension ?? "",
+                "fileType": path.fileType.rawValue,
+                "confidence": path.confidence
+            ])
+            items.append(SplitEntry(content: path.path, contentType: .filePath, metadataJSON: meta))
+        }
 
         return items
     }
@@ -286,6 +303,17 @@ public struct ContentTypeDetector {
         shellCommands: [ShellCommandDetector.Detection],
         prose: ProseDetector.Detection?
     ) -> (ContentType, Double) {
+        let trimmed = analysisText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let totalLength = trimmed.count
+        
+        // Helper to check if detected content covers most of the text (>= 80%)
+        // This prevents labeling "Check out /path/to/file.txt for details" as .filePath
+        func coversMostOfText(_ detectedContent: String) -> Bool {
+            guard totalLength > 0 else { return false }
+            let coverage = Double(detectedContent.count) / Double(totalLength)
+            return coverage >= 0.80
+        }
+        
         // Priority order is the stable tiebreaker when confidences match.
         // We keep this order conservative for clipboard use.
         // API keys are high priority since they're security-sensitive.
@@ -311,43 +339,89 @@ public struct ContentTypeDetector {
         var candidates: [(ContentType, Double)] = []
         candidates.reserveCapacity(12)
 
+        // JWT - typically the entire content
         if let best = jwt.map(\.confidence).max() {
             candidates.append((.jwt, best))
         }
+        
+        // API Keys - typically the entire content
         if let best = apiKeys.map(\.confidence).max(), best >= 0.70 {
             candidates.append((.apiKey, best))
         }
-        if let best = emails.map(\.confidence).max() {
-            candidates.append((.email, best))
+        
+        // Email - only if it covers most of the text (e.g., just "user@example.com")
+        if let bestEmail = emails.max(by: { $0.confidence < $1.confidence }) {
+            if coversMostOfText(bestEmail.email) {
+                candidates.append((.email, bestEmail.confidence))
+            }
         }
-        if let best = phoneNumbers.map(\.confidence).max() {
-            candidates.append((.phoneNumber, best))
+        
+        // Phone number - only if it covers most of the text
+        if let bestPhone = phoneNumbers.max(by: { $0.confidence < $1.confidence }) {
+            if coversMostOfText(bestPhone.phoneNumber) {
+                candidates.append((.phoneNumber, bestPhone.confidence))
+            }
         }
-        if let best = ipAddresses.map(\.confidence).max() {
-            candidates.append((.ipAddress, best))
+        
+        // IP Address - only if it covers most of the text
+        if let bestIP = ipAddresses.max(by: { $0.confidence < $1.confidence }) {
+            if coversMostOfText(bestIP.address) {
+                candidates.append((.ipAddress, bestIP.confidence))
+            }
         }
-        if let best = uuids.map(\.confidence).max() {
-            candidates.append((.uuid, best))
+        
+        // UUID - only if it covers most of the text
+        if let bestUUID = uuids.max(by: { $0.confidence < $1.confidence }) {
+            if coversMostOfText(bestUUID.uuid) {
+                candidates.append((.uuid, bestUUID.confidence))
+            }
         }
-        if let best = hashes.map(\.confidence).max() {
-            candidates.append((.hash, best))
+        
+        // Hash - only if it covers most of the text
+        if let bestHash = hashes.max(by: { $0.confidence < $1.confidence }) {
+            if coversMostOfText(bestHash.hash) {
+                candidates.append((.hash, bestHash.confidence))
+            }
         }
+        
+        // Env vars - blocks are inherently multi-line, single vars should cover most
         if let env {
             let best = env.detections.map(\.confidence).max() ?? 0.0
-            candidates.append((env.isBlock ? .envVarBlock : .envVar, best))
+            if env.isBlock {
+                candidates.append((.envVarBlock, best))
+            } else if let firstVar = env.detections.first {
+                let varContent = firstVar.isExported ? "export \(firstVar.key)=\(firstVar.value)" : "\(firstVar.key)=\(firstVar.value)"
+                if coversMostOfText(varContent) {
+                    candidates.append((.envVar, best))
+                }
+            }
         }
+        
+        // Shell commands - typically cover significant portion
         if let best = shellCommands.map(\.confidence).max() {
             candidates.append((.shellCommand, best))
         }
-        if let best = urls.map(\.confidence).max() {
-            candidates.append((.url, best))
+        
+        // URL - only if it covers most of the text (e.g., just "https://example.com")
+        if let bestURL = urls.max(by: { $0.confidence < $1.confidence }) {
+            if coversMostOfText(bestURL.url) {
+                candidates.append((.url, bestURL.confidence))
+            }
         }
-        if let best = paths.map(\.confidence).max() {
-            candidates.append((.filePath, best))
+        
+        // File path - only if it covers most of the text (e.g., just "/path/to/file.txt")
+        if let bestPath = paths.max(by: { $0.confidence < $1.confidence }) {
+            if coversMostOfText(bestPath.path) {
+                candidates.append((.filePath, bestPath.confidence))
+            }
         }
+        
+        // Code detection - covers the whole content by design
         if let best = code.map(\.confidence).max() {
             candidates.append((.code, best))
         }
+        
+        // Prose detection - covers the whole content by design
         if let prose {
             candidates.append((.prose, prose.confidence))
         }
