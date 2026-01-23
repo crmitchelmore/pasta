@@ -47,7 +47,7 @@ public struct OnboardingView: View {
         FeatureTip(
             icon: "keyboard",
             title: "Quick Paste",
-            description: "Press ⌃⌘C, pick a clip, hit Return. Pasted instantly.",
+            description: "Press ⌃⌘V, pick a clip, hit Return. Pasted instantly.",
             accent: Color(red: 0.55, green: 0.78, blue: 0.25)
         ),
         FeatureTip(
@@ -100,7 +100,7 @@ public struct OnboardingView: View {
                     .padding(.bottom, 24)
             }
         }
-        .frame(width: 540, height: 420)
+        .frame(width: 540, height: 450)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onAppear {
             withAnimation(.easeOut(duration: 0.5)) {
@@ -434,14 +434,14 @@ public struct OnboardingView: View {
                 Text("You're Ready!")
                     .font(.system(size: 24, weight: .semibold, design: .rounded))
                 
-                Text("Press **⌃⌘C** anytime to open Pasta")
+                Text("Press **⌃⌘V** anytime to open Pasta")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
             }
             
             // Quick reference card
             VStack(spacing: 12) {
-                quickRefRow(keys: "⌃⌘C", action: "Open Pasta")
+                quickRefRow(keys: "⌃⌘V", action: "Open Pasta")
                 quickRefRow(keys: "↩︎", action: "Paste selected")
                 quickRefRow(keys: "⌘⌫", action: "Delete clip")
                 quickRefRow(keys: "esc", action: "Close")

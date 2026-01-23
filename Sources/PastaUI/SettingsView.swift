@@ -5,7 +5,7 @@ import SwiftUI
 
 // Define the keyboard shortcut name
 public extension KeyboardShortcuts.Name {
-    static let openPasta = Self("openPasta", default: .init(.c, modifiers: [.control, .command]))
+    static let openPasta = Self("openPasta", default: .init(.v, modifiers: [.control, .command]))
 }
 
 public struct SettingsView: View {

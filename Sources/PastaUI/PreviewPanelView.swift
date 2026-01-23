@@ -349,6 +349,7 @@ private struct ImagePreview: View {
     let path: String
 
     @State private var image: NSImage?
+    @State private var loadedPath: String = ""
 
     var body: some View {
         Group {
@@ -364,14 +365,10 @@ private struct ImagePreview: View {
             }
         }
         .onAppear {
-            guard image == nil else { return }
-            let path = self.path
-            DispatchQueue.global(qos: .userInitiated).async {
-                let loaded = NSImage(contentsOfFile: path)
-                DispatchQueue.main.async {
-                    self.image = loaded
-                }
-            }
+            loadImageIfNeeded()
+        }
+        .onChange(of: path) { _, newPath in
+            loadImage(from: newPath)
         }
         .overlay {
             if image == nil {
@@ -381,6 +378,25 @@ private struct ImagePreview: View {
                     description: Text(path)
                 )
                 .opacity(0) // keeps layout stable while loading
+            }
+        }
+    }
+    
+    private func loadImageIfNeeded() {
+        guard loadedPath != path else { return }
+        loadImage(from: path)
+    }
+    
+    private func loadImage(from imagePath: String) {
+        loadedPath = imagePath
+        image = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loaded = NSImage(contentsOfFile: imagePath)
+            DispatchQueue.main.async {
+                // Only update if path hasn't changed
+                if loadedPath == imagePath {
+                    self.image = loaded
+                }
             }
         }
     }
