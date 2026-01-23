@@ -18,8 +18,14 @@ struct PastaApp: App {
 
     var body: some Scene {
         Settings {
-            SettingsView()
-                .frame(minWidth: 450, minHeight: 400)
+            SettingsView(
+                checkForUpdates: { UpdaterManager.shared.checkForUpdates() },
+                automaticallyChecksForUpdates: Binding(
+                    get: { UpdaterManager.shared.automaticallyChecksForUpdates },
+                    set: { UpdaterManager.shared.automaticallyChecksForUpdates = $0 }
+                )
+            )
+            .frame(minWidth: 450, minHeight: 400)
         }
     }
 }
@@ -427,7 +433,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 defer: false
             )
             window.title = "Pasta Settings"
-            window.contentView = NSHostingView(rootView: SettingsView())
+            window.contentView = NSHostingView(rootView: SettingsView(
+                checkForUpdates: { UpdaterManager.shared.checkForUpdates() },
+                automaticallyChecksForUpdates: Binding(
+                    get: { UpdaterManager.shared.automaticallyChecksForUpdates },
+                    set: { UpdaterManager.shared.automaticallyChecksForUpdates = $0 }
+                )
+            ))
             window.center()
             window.isReleasedWhenClosed = false
             settingsWindow = window
