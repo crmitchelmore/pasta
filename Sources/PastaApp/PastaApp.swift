@@ -72,10 +72,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start background clipboard monitoring (runs even when panel is closed)
         BackgroundService.shared.start()
         
-        // Initialize quick search manager with entries publisher (pre-warms index)
+        // Initialize quick search manager with entries publisher and database for FTS5 search
         QuickSearchManager.shared.initialize(
             entriesPublisher: BackgroundService.shared.$entries.eraseToAnyPublisher(),
-            initialEntries: BackgroundService.shared.entries
+            initialEntries: BackgroundService.shared.entries,
+            database: BackgroundService.shared.database
         )
         
         // Create the floating panel controller (main window)

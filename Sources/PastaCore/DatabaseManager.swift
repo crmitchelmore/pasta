@@ -328,6 +328,82 @@ public final class DatabaseManager {
             }
         }
     }
+    
+    /// Fast full-text search using FTS5 with prefix matching support.
+    /// This is the primary search method - uses SQLite's optimized FTS5 engine.
+    ///
+    /// - Parameters:
+    ///   - query: Search query (supports multiple words, each gets prefix matching)
+    ///   - contentType: Optional filter by content type
+    ///   - limit: Maximum results to return
+    /// - Returns: Matching entries ordered by relevance then recency
+    public func searchFTS(query: String, contentType: ContentType?, limit: Int = 50) throws -> [ClipboardEntry] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        
+        // Build FTS5 query with prefix matching for each word
+        // "hello world" → "hello* world*" (matches "helloworld", "worldwide", etc.)
+        let ftsQuery = buildFTSQuery(from: trimmed)
+        
+        return try dbQueue.read { db in
+            var sql = """
+            SELECT e.*, bm25(clipboard_entries_fts) AS rank
+            FROM clipboard_entries_fts
+            JOIN clipboard_entries e ON e.rowid = clipboard_entries_fts.rowid
+            WHERE clipboard_entries_fts MATCH ?
+            """
+            
+            var args: [DatabaseValueConvertible] = [ftsQuery]
+            
+            if let contentType {
+                sql += " AND e.contentType = ?"
+                args.append(contentType.rawValue)
+            }
+            
+            sql += " ORDER BY rank ASC, e.timestamp DESC LIMIT ?"
+            args.append(limit)
+            
+            let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+            return rows.compactMap { row in
+                try? ClipboardEntry(row: row)
+            }
+        }
+    }
+    
+    /// Builds an FTS5 query string with prefix matching.
+    /// Each word gets a * suffix for prefix matching.
+    /// Special characters are escaped to prevent FTS5 syntax errors.
+    private func buildFTSQuery(from input: String) -> String {
+        // Split into words and clean each
+        let words = input.components(separatedBy: .whitespaces)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        
+        guard !words.isEmpty else { return "" }
+        
+        // Escape special FTS5 characters and add prefix matching
+        let escapedWords = words.map { word -> String in
+            // Remove/escape FTS5 special chars: " * - + ( ) : ^
+            let escaped = word
+                .replacingOccurrences(of: "\"", with: "")
+                .replacingOccurrences(of: "*", with: "")
+                .replacingOccurrences(of: "-", with: "")
+                .replacingOccurrences(of: "+", with: "")
+                .replacingOccurrences(of: "(", with: "")
+                .replacingOccurrences(of: ")", with: "")
+                .replacingOccurrences(of: ":", with: "")
+                .replacingOccurrences(of: "^", with: "")
+            
+            // If word is empty after escaping, skip it
+            guard !escaped.isEmpty else { return "" }
+            
+            // Add prefix matching
+            return escaped + "*"
+        }.filter { !$0.isEmpty }
+        
+        // Join with spaces (implicit AND in FTS5)
+        return escapedWords.joined(separator: " ")
+    }
 
     /// Deletes entries older than the newest `maxEntries` and returns any associated image paths.
     public func pruneToMaxEntries(_ maxEntries: Int) throws -> [String] {

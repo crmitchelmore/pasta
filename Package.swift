@@ -17,8 +17,6 @@ let package = Package(
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.24.0"),
         // Global keyboard shortcuts (Carbon-based, no resource bundle)
         .package(url: "https://github.com/soffes/HotKey.git", from: "0.2.0"),
-        // Fuzzy text search
-        .package(url: "https://github.com/krisk/fuse-swift.git", from: "1.4.0"),
         // Auto-updates
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0")
     ],
@@ -42,8 +40,7 @@ let package = Package(
         .target(
             name: "PastaCore",
             dependencies: [
-                .product(name: "GRDB", package: "GRDB.swift"),
-                .product(name: "Fuse", package: "fuse-swift")
+                .product(name: "GRDB", package: "GRDB.swift")
             ]
         ),
         
@@ -60,8 +57,7 @@ let package = Package(
         .target(
             name: "PastaDetectors",
             dependencies: [
-                "PastaCore",
-                .product(name: "Fuse", package: "fuse-swift")
+                "PastaCore"
             ]
         ),
         
