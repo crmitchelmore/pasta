@@ -9,7 +9,7 @@ A blazing-fast, local-first clipboard history manager for macOS with intelligent
 - **Unlimited History** — Never lose a copied item again
 - **Smart Detection** — Auto-categorizes emails, JWTs, code, URLs, env vars, and more
 - **Ultra-Fast Search** — Full-text search with fuzzy matching
-- **Keyboard-First** — Global hotkey (`⌃⌘C`) and full keyboard navigation
+- **Keyboard-First** — Global hotkey (`⌃⌘V`) and full keyboard navigation
 - **Preview Everything** — Images, decoded base64, syntax-highlighted code
 - **Privacy-First** — 100% local storage, no cloud sync
 
@@ -31,7 +31,7 @@ swift run PastaApp
 ## Usage
 
 1. Copy anything (text, URLs, images, files, etc.).
-2. Press **`⌃⌘C`** to show Pasta.
+2. Press **`⌃⌘V`** to show Pasta.
 3. Search, navigate with **↑/↓**, then press **Enter** to paste.
 
 > Note: Pasting via simulated **⌘V** requires Accessibility permission.
@@ -40,10 +40,10 @@ swift run PastaApp
 
 | Shortcut | Action |
 |----------|--------|
-| `⌃⌘C` | Show/hide Pasta |
+| `⌃⌘V` | Show/hide Pasta |
 | `↑` `↓` | Navigate history |
 | `Enter` | Paste selected item |
-| `1-9` | Quick-paste by position |
+| `⌘1-9` | Quick-paste by position |
 | `⌘⌫` | Delete selected item |
 | `Esc` | Close window |
 

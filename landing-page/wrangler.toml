@@ -1,0 +1,8 @@
+# Cloudflare Pages Configuration
+
+[build]
+command = "echo 'Static site - no build needed'"
+output = "."
+
+[build.environment]
+NODE_VERSION = "18"

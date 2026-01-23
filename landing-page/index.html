@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pasta — Your Clipboard, Al Dente</title>
+  <meta name="description" content="A blazing-fast, local-first clipboard history manager for macOS with intelligent content detection. Never lose a copied item again.">
+  <meta property="og:title" content="Pasta — Clipboard History for macOS">
+  <meta property="og:description" content="Blazing-fast clipboard history with smart content detection. 100% local, privacy-first.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://pasta-app.com">
+  <meta property="og:image" content="https://pasta-app.com/images/og-image.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍝</text></svg>">
+  
+  <!-- Fonts: Satoshi for headings, General Sans for body -->
+  <link rel="preconnect" href="https://api.fontshare.com">
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@700,900&f[]=general-sans@400,500,600&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --color-bg: #0a0c10;
+      --color-bg-elevated: #12161f;
+      --color-bg-card: #1a1f2e;
+      --color-text: #f8fafc;
+      --color-text-muted: #8b95a8;
+      --color-accent: #f59e0b;
+      --color-accent-warm: #fbbf24;
+      --color-accent-deep: #d97706;
+      --color-accent-glow: rgba(245, 158, 11, 0.25);
+      --color-secondary: #10b981;
+      --color-tertiary: #8b5cf6;
+      --color-border: rgba(255, 255, 255, 0.06);
+      --font-display: 'Satoshi', -apple-system, sans-serif;
+      --font-body: 'General Sans', -apple-system, sans-serif;
+      --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
+      --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--color-bg);
+      color: var(--color-text);
+      line-height: 1.6;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Animated background grain texture */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+      opacity: 0.03;
+      pointer-events: none;
+      z-index: 1000;
+    }
+
+    /* Gradient orbs in background */
+    .bg-orb {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(120px);
+      pointer-events: none;
+      z-index: -1;
+    }
+    .bg-orb--1 {
+      width: 700px;
+      height: 700px;
+      background: radial-gradient(circle, var(--color-accent-glow) 0%, transparent 70%);
+      top: -250px;
+      right: -150px;
+      animation: float 20s ease-in-out infinite;
+    }
+    .bg-orb--2 {
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, transparent 70%);
+      bottom: 20%;
+      left: -200px;
+      animation: float 25s ease-in-out infinite reverse;
+    }
+    .bg-orb--3 {
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, transparent 70%);
+      top: 50%;
+      right: -100px;
+      animation: float 30s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      33% { transform: translate(30px, -30px) scale(1.05); }
+      66% { transform: translate(-20px, 20px) scale(0.95); }
+    }
+
+    /* Navigation */
+    .nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      padding: 1.25rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(to bottom, var(--color-bg) 0%, transparent 100%);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    .nav__logo {
+      font-family: var(--font-display);
+      font-weight: 900;
+      font-size: 1.5rem;
+      color: var(--color-text);
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .nav__logo-icon {
+      width: 38px;
+      height: 38px;
+      background: linear-gradient(135deg, var(--color-accent-deep) 0%, var(--color-accent-warm) 100%);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      box-shadow: 0 4px 12px var(--color-accent-glow);
+    }
+
+    .nav__links {
+      display: flex;
+      gap: 2rem;
+      list-style: none;
+    }
+
+    .nav__link {
+      color: var(--color-text-muted);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 0.95rem;
+      transition: color 0.2s ease;
+    }
+
+    .nav__link:hover {
+      color: var(--color-text);
+    }
+
+    .nav__cta {
+      background: linear-gradient(135deg, var(--color-accent-deep) 0%, var(--color-accent) 100%);
+      color: var(--color-bg);
+      padding: 0.65rem 1.4rem;
+      border-radius: 10px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.3s var(--ease-spring);
+      box-shadow: 0 4px 16px var(--color-accent-glow);
+    }
+
+    .nav__cta:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 24px var(--color-accent-glow);
+    }
+
+    /* Hero Section */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      padding: 8rem 2rem 4rem;
+      position: relative;
+    }
+
+    .hero__badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border);
+      padding: 0.5rem 1rem;
+      border-radius: 100px;
+      font-size: 0.85rem;
+      color: var(--color-text-muted);
+      margin-bottom: 2rem;
+    }
+
+    .hero__badge-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--color-secondary);
+      border-radius: 50%;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    .hero__title {
+      font-family: var(--font-display);
+      font-size: clamp(3rem, 8vw, 5.5rem);
+      font-weight: 900;
+      line-height: 1.05;
+      margin-bottom: 1.5rem;
+      letter-spacing: -0.03em;
+    }
+
+    .hero__title-gradient {
+      background: linear-gradient(135deg, var(--color-accent-warm) 0%, var(--color-accent) 50%, var(--color-accent-deep) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero__subtitle {
+      font-size: clamp(1.1rem, 2.5vw, 1.4rem);
+      color: var(--color-text-muted);
+      max-width: 600px;
+      margin-bottom: 2.5rem;
+      line-height: 1.7;
+    }
+
+    .hero__actions {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 3rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 1rem 2rem;
+      border-radius: 14px;
+      font-weight: 600;
+      font-size: 1.05rem;
+      text-decoration: none;
+      transition: all 0.3s var(--ease-spring);
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn--primary {
+      background: linear-gradient(135deg, var(--color-accent-deep) 0%, var(--color-accent) 100%);
+      color: var(--color-bg);
+      box-shadow: 0 8px 32px var(--color-accent-glow);
+    }
+
+    .btn--primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 40px var(--color-accent-glow);
+    }
+
+    .btn--secondary {
+      background: var(--color-bg-card);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
+    }
+
+    .btn--secondary:hover {
+      background: var(--color-bg-elevated);
+      border-color: rgba(255, 255, 255, 0.12);
+      transform: translateY(-2px);
+    }
+
+    .hero__meta {
+      display: flex;
+      gap: 2rem;
+      color: var(--color-text-muted);
+      font-size: 0.9rem;
+    }
+
+    .hero__meta-item {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    /* App Screenshot */
+    .hero__screenshot {
+      margin-top: 4rem;
+      max-width: 1000px;
+      width: 100%;
+      position: relative;
+    }
+
+    .hero__screenshot-wrapper {
+      position: relative;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 
+        0 0 0 1px var(--color-border),
+        0 20px 80px rgba(0, 0, 0, 0.5),
+        0 0 120px var(--color-accent-glow);
+    }
+
+    .hero__screenshot img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    /* Features Section */
+    .features {
+      padding: 8rem 2rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 4rem;
+    }
+
+    .section-label {
+      display: inline-block;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--color-accent);
+      margin-bottom: 1rem;
+    }
+
+    .section-title {
+      font-family: var(--font-display);
+      font-size: clamp(2rem, 5vw, 3rem);
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+
+    .features__grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .feature-card {
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border);
+      border-radius: 20px;
+      padding: 2rem;
+      transition: all 0.4s var(--ease-out-expo);
+    }
+
+    .feature-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(255, 255, 255, 0.1);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+
+    .feature-card__icon {
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .feature-card__icon--amber {
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(217, 119, 6, 0.2) 100%);
+    }
+    .feature-card__icon--emerald {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.2) 100%);
+    }
+    .feature-card__icon--violet {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.2) 0%, rgba(109, 40, 217, 0.2) 100%);
+    }
+    .feature-card__icon--sky {
+      background: linear-gradient(135deg, rgba(14, 165, 233, 0.2) 0%, rgba(2, 132, 199, 0.2) 100%);
+    }
+    .feature-card__icon--rose {
+      background: linear-gradient(135deg, rgba(244, 63, 94, 0.2) 0%, rgba(225, 29, 72, 0.2) 100%);
+    }
+    .feature-card__icon--slate {
+      background: linear-gradient(135deg, rgba(148, 163, 184, 0.2) 0%, rgba(100, 116, 139, 0.2) 100%);
+    }
+
+    .feature-card__title {
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+    }
+
+    .feature-card__description {
+      color: var(--color-text-muted);
+      line-height: 1.7;
+    }
+
+    /* Content Types Section */
+    .content-types {
+      padding: 6rem 2rem;
+      background: var(--color-bg-elevated);
+    }
+
+    .content-types__inner {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .content-types__grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-top: 3rem;
+    }
+
+    .content-type {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1.25rem 1.5rem;
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border);
+      border-radius: 14px;
+      transition: all 0.3s var(--ease-out-expo);
+    }
+
+    .content-type:hover {
+      transform: translateX(4px);
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .content-type__icon {
+      font-size: 1.5rem;
+    }
+
+    .content-type__label {
+      font-weight: 600;
+    }
+
+    .content-type__example {
+      font-size: 0.8rem;
+      color: var(--color-text-muted);
+      font-family: 'SF Mono', 'Monaco', monospace;
+    }
+
+    /* Keyboard Shortcuts Section */
+    .shortcuts {
+      padding: 8rem 2rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .shortcuts__list {
+      display: grid;
+      gap: 1rem;
+      margin-top: 3rem;
+    }
+
+    .shortcut {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1.25rem 1.75rem;
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border);
+      border-radius: 14px;
+    }
+
+    .shortcut__action {
+      font-weight: 500;
+    }
+
+    .shortcut__keys {
+      display: flex;
+      gap: 0.4rem;
+    }
+
+    .key {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 36px;
+      height: 36px;
+      padding: 0 0.75rem;
+      background: var(--color-bg-elevated);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      font-family: 'SF Mono', 'Monaco', monospace;
+      color: var(--color-text-muted);
+    }
+
+    /* Privacy Section */
+    .privacy {
+      padding: 6rem 2rem;
+      background: linear-gradient(180deg, transparent 0%, var(--color-bg-elevated) 100%);
+    }
+
+    .privacy__inner {
+      max-width: 800px;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .privacy__icon {
+      font-size: 4rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .privacy__title {
+      font-family: var(--font-display);
+      font-size: 2.5rem;
+      font-weight: 900;
+      margin-bottom: 1rem;
+    }
+
+    .privacy__description {
+      color: var(--color-text-muted);
+      font-size: 1.15rem;
+      line-height: 1.8;
+      margin-bottom: 2rem;
+    }
+
+    .privacy__badges {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .privacy__badge {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.25rem;
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border);
+      border-radius: 100px;
+      font-size: 0.9rem;
+    }
+
+    .privacy__badge-icon {
+      color: var(--color-secondary);
+    }
+
+    /* Download CTA Section */
+    .download {
+      padding: 8rem 2rem;
+      text-align: center;
+    }
+
+    .download__inner {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    .download__title {
+      font-family: var(--font-display);
+      font-size: clamp(2.5rem, 6vw, 3.5rem);
+      font-weight: 900;
+      margin-bottom: 1.5rem;
+      letter-spacing: -0.02em;
+    }
+
+    .download__subtitle {
+      color: var(--color-text-muted);
+      font-size: 1.2rem;
+      margin-bottom: 2.5rem;
+    }
+
+    .download__buttons {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 2rem;
+    }
+
+    .download__requirements {
+      color: var(--color-text-muted);
+      font-size: 0.9rem;
+    }
+
+    /* Footer */
+    .footer {
+      padding: 3rem 2rem;
+      border-top: 1px solid var(--color-border);
+    }
+
+    .footer__inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .footer__copyright {
+      color: var(--color-text-muted);
+      font-size: 0.9rem;
+    }
+
+    .footer__links {
+      display: flex;
+      gap: 2rem;
+      list-style: none;
+    }
+
+    .footer__link {
+      color: var(--color-text-muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: color 0.2s ease;
+    }
+
+    .footer__link:hover {
+      color: var(--color-text);
+    }
+
+    /* Mobile Styles */
+    @media (max-width: 768px) {
+      .nav {
+        padding: 1rem;
+      }
+
+      .nav__links {
+        display: none;
+      }
+
+      .hero {
+        padding: 6rem 1.5rem 3rem;
+      }
+
+      .hero__meta {
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .features {
+        padding: 4rem 1.5rem;
+      }
+
+      .features__grid {
+        grid-template-columns: 1fr;
+      }
+
+      .shortcuts {
+        padding: 4rem 1.5rem;
+      }
+
+      .footer__inner {
+        flex-direction: column;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Background orbs -->
+  <div class="bg-orb bg-orb--1"></div>
+  <div class="bg-orb bg-orb--2"></div>
+  <div class="bg-orb bg-orb--3"></div>
+
+  <!-- Navigation -->
+  <nav class="nav">
+    <a href="/" class="nav__logo">
+      <span class="nav__logo-icon">🍝</span>
+      Pasta
+    </a>
+    <ul class="nav__links">
+      <li><a href="#features" class="nav__link">Features</a></li>
+      <li><a href="#shortcuts" class="nav__link">Shortcuts</a></li>
+      <li><a href="https://github.com/crmitchelmore/pasta" class="nav__link" target="_blank">GitHub</a></li>
+    </ul>
+    <a href="https://github.com/crmitchelmore/pasta/releases/latest" class="nav__cta">
+      Download
+    </a>
+  </nav>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="hero__badge">
+      <span class="hero__badge-dot"></span>
+      Free & Open Source
+    </div>
+    
+    <h1 class="hero__title">
+      Your clipboard,<br>
+      <span class="hero__title-gradient">al dente.</span>
+    </h1>
+    
+    <p class="hero__subtitle">
+      A blazing-fast, local-first clipboard history manager for macOS with intelligent content detection. Never lose a copied item again.
+    </p>
+    
+    <div class="hero__actions">
+      <a href="https://github.com/crmitchelmore/pasta/releases/latest" class="btn btn--primary">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Download for Mac
+      </a>
+      <a href="https://github.com/crmitchelmore/pasta" class="btn btn--secondary" target="_blank">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+        </svg>
+        View on GitHub
+      </a>
+    </div>
+    
+    <div class="hero__meta">
+      <span class="hero__meta-item">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        100% Local
+      </span>
+      <span class="hero__meta-item">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+        Blazing Fast
+      </span>
+      <span class="hero__meta-item">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        Privacy-First
+      </span>
+    </div>
+
+    <div class="hero__screenshot">
+      <div class="hero__screenshot-wrapper">
+        <img src="images/screenshot-main.png" alt="Pasta app showing clipboard history with smart content detection" />
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section -->
+  <section class="features" id="features">
+    <div class="section-header">
+      <span class="section-label">Features</span>
+      <h2 class="section-title">Everything you need,<br>nothing you don't.</h2>
+    </div>
+    
+    <div class="features__grid">
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--amber">📋</div>
+        <h3 class="feature-card__title">Unlimited History</h3>
+        <p class="feature-card__description">
+          Every copy is saved automatically. Search through weeks of clipboard history instantly.
+        </p>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--emerald">🧠</div>
+        <h3 class="feature-card__title">Smart Detection</h3>
+        <p class="feature-card__description">
+          Auto-categorizes emails, JWTs, code snippets, URLs, env vars, file paths, and more.
+        </p>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--violet">⚡</div>
+        <h3 class="feature-card__title">Ultra-Fast Search</h3>
+        <p class="feature-card__description">
+          Full-text search with fuzzy matching. Find anything in milliseconds, even with thousands of items.
+        </p>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--sky">⌨️</div>
+        <h3 class="feature-card__title">Keyboard-First</h3>
+        <p class="feature-card__description">
+          Global hotkey, full keyboard navigation, and quick-paste shortcuts. Your hands never leave the keyboard.
+        </p>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--rose">👁️</div>
+        <h3 class="feature-card__title">Preview Everything</h3>
+        <p class="feature-card__description">
+          Images, syntax-highlighted code, decoded base64, and formatted JSON. See exactly what you copied.
+        </p>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--slate">🔒</div>
+        <h3 class="feature-card__title">Privacy-First</h3>
+        <p class="feature-card__description">
+          100% local storage. No cloud sync, no telemetry, no accounts. Your data stays on your Mac.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Content Types Section -->
+  <section class="content-types">
+    <div class="content-types__inner">
+      <div class="section-header">
+        <span class="section-label">Smart Detection</span>
+        <h2 class="section-title">Knows what you copied.</h2>
+      </div>
+      
+      <div class="content-types__grid">
+        <div class="content-type">
+          <span class="content-type__icon">📧</span>
+          <div>
+            <div class="content-type__label">Emails</div>
+            <div class="content-type__example">user@example.com</div>
+          </div>
+        </div>
+        
+        <div class="content-type">
+          <span class="content-type__icon">🔐</span>
+          <div>
+            <div class="content-type__label">JWTs</div>
+            <div class="content-type__example">eyJhbGciOiJIUzI1...</div>
+          </div>
+        </div>
+        
+        <div class="content-type">
+          <span class="content-type__icon">🔧</span>
+          <div>
+            <div class="content-type__label">Env Variables</div>
+            <div class="content-type__example">API_KEY=abc123</div>
+          </div>
+        </div>
+        
+        <div class="content-type">
+          <span class="content-type__icon">🔗</span>
+          <div>
+            <div class="content-type__label">URLs</div>
+            <div class="content-type__example">https://github.com/...</div>
+          </div>
+        </div>
+        
+        <div class="content-type">
+          <span class="content-type__icon">📁</span>
+          <div>
+            <div class="content-type__label">File Paths</div>
+            <div class="content-type__example">/Users/dev/project/</div>
+          </div>
+        </div>
+        
+        <div class="content-type">
+          <span class="content-type__icon">💻</span>
+          <div>
+            <div class="content-type__label">Code</div>
+            <div class="content-type__example">Swift, Python, JS...</div>
+          </div>
+        </div>
+        
+        <div class="content-type">
+          <span class="content-type__icon">🖼️</span>
+          <div>
+            <div class="content-type__label">Images</div>
+            <div class="content-type__example">Screenshots, photos</div>
+          </div>
+        </div>
+        
+        <div class="content-type">
+          <span class="content-type__icon">📄</span>
+          <div>
+            <div class="content-type__label">Text</div>
+            <div class="content-type__example">Everything else</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Keyboard Shortcuts Section -->
+  <section class="shortcuts" id="shortcuts">
+    <div class="section-header">
+      <span class="section-label">Keyboard Shortcuts</span>
+      <h2 class="section-title">Fast by design.</h2>
+    </div>
+    
+    <div class="shortcuts__list">
+      <div class="shortcut">
+        <span class="shortcut__action">Show / Hide Pasta</span>
+        <div class="shortcut__keys">
+          <span class="key">⌃</span>
+          <span class="key">⌘</span>
+          <span class="key">V</span>
+        </div>
+      </div>
+      
+      <div class="shortcut">
+        <span class="shortcut__action">Navigate History</span>
+        <div class="shortcut__keys">
+          <span class="key">↑</span>
+          <span class="key">↓</span>
+        </div>
+      </div>
+      
+      <div class="shortcut">
+        <span class="shortcut__action">Paste Selected Item</span>
+        <div class="shortcut__keys">
+          <span class="key">↵</span>
+        </div>
+      </div>
+      
+      <div class="shortcut">
+        <span class="shortcut__action">Quick-Paste by Position</span>
+        <div class="shortcut__keys">
+          <span class="key">⌘</span>
+          <span class="key">1-9</span>
+        </div>
+      </div>
+      
+      <div class="shortcut">
+        <span class="shortcut__action">Delete Selected Item</span>
+        <div class="shortcut__keys">
+          <span class="key">⌘</span>
+          <span class="key">⌫</span>
+        </div>
+      </div>
+      
+      <div class="shortcut">
+        <span class="shortcut__action">Close Window</span>
+        <div class="shortcut__keys">
+          <span class="key">Esc</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Privacy Section -->
+  <section class="privacy">
+    <div class="privacy__inner">
+      <div class="privacy__icon">🔒</div>
+      <h2 class="privacy__title">Your data, your Mac.</h2>
+      <p class="privacy__description">
+        Pasta stores everything locally in a SQLite database on your Mac. No cloud sync, no telemetry, no user accounts. Your clipboard history is yours alone.
+      </p>
+      <div class="privacy__badges">
+        <div class="privacy__badge">
+          <span class="privacy__badge-icon">✓</span>
+          No cloud sync
+        </div>
+        <div class="privacy__badge">
+          <span class="privacy__badge-icon">✓</span>
+          No telemetry
+        </div>
+        <div class="privacy__badge">
+          <span class="privacy__badge-icon">✓</span>
+          No accounts
+        </div>
+        <div class="privacy__badge">
+          <span class="privacy__badge-icon">✓</span>
+          Open source
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Download CTA Section -->
+  <section class="download" id="download">
+    <div class="download__inner">
+      <h2 class="download__title">Ready to never lose<br>a copy again?</h2>
+      <p class="download__subtitle">
+        Download Pasta for free. Open source, always.
+      </p>
+      <div class="download__buttons">
+        <a href="https://github.com/crmitchelmore/pasta/releases/latest" class="btn btn--primary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Download for Mac
+        </a>
+        <a href="https://github.com/crmitchelmore/pasta" class="btn btn--secondary" target="_blank">
+          View Source
+        </a>
+      </div>
+      <p class="download__requirements">Requires macOS 14.0 (Sonoma) or later</p>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer__inner">
+      <p class="footer__copyright">© 2024-2026 Chris Mitchelmore. MIT License.</p>
+      <ul class="footer__links">
+        <li><a href="https://github.com/crmitchelmore/pasta" class="footer__link">GitHub</a></li>
+        <li><a href="https://github.com/crmitchelmore/pasta/releases" class="footer__link">Releases</a></li>
+        <li><a href="https://github.com/crmitchelmore/pasta/issues" class="footer__link">Issues</a></li>
+      </ul>
+    </div>
+  </footer>
+</body>
+</html>

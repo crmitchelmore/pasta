@@ -1,0 +1,15 @@
+# Security headers for Cloudflare Pages
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  X-XSS-Protection: 1; mode=block
+
+# Cache static assets
+/images/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Cache appcast for Sparkle (1 hour)
+/appcast.xml
+  Cache-Control: public, max-age=3600

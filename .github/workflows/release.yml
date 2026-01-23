@@ -159,7 +159,7 @@ jobs:
               <string>${COMMIT_SHA}</string>
               <!-- Sparkle Auto-Update Configuration -->
               <key>SUFeedURL</key>
-              <string>https://github.com/crmitchelmore/pasta/releases/latest/download/appcast.xml</string>
+              <string>https://pasta-app.com/appcast.xml</string>
               <key>SUPublicEDKey</key>
               <string>${SPARKLE_PUBLIC_KEY}</string>
               <key>SUEnableAutomaticChecks</key>
@@ -427,14 +427,14 @@ jobs:
           - ✨ **Unlimited clipboard history** — Never lose a copied item
           - 🧠 **Smart content detection** — Auto-categorizes emails, JWTs, code, URLs, and more
           - ⚡ **Ultra-fast search** — Full-text search with fuzzy matching
-          - ⌨️  **Keyboard-first** — Global hotkey (\`⌃⌘C\`) and full navigation
+          - ⌨️  **Keyboard-first** — Global hotkey (\`⌃⌘V\`) and full navigation
           - 👁️  **Rich previews** — Images, decoded base64, syntax-highlighted code
           - 🔒 **Privacy-first** — 100% local storage, no cloud sync
           
           ### Usage
           
           1. Copy anything (text, URLs, images, etc.)
-          2. Press **\`⌃⌘C\`** to show Pasta
+          2. Press **\`⌃⌘V\`** to show Pasta
           3. Search, navigate with **↑/↓**, press **Enter** to paste
           
           ### Verification
@@ -491,6 +491,29 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Update landing page appcast.xml
+        run: |
+          # Copy the generated appcast to the landing-page directory
+          cp "$APPCAST_PATH" landing-page/appcast.xml
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Commit and push the updated appcast
+          git add landing-page/appcast.xml
+          git commit -m "Update appcast.xml for v${{ steps.version.outputs.version }}"
+          git push origin HEAD:main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Deploy landing page with updated appcast
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy landing-page --project-name=pasta-app
       
       # ============================================================================
       # CLEANUP
