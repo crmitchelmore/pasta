@@ -13,6 +13,8 @@ public struct ClipboardRowData: Equatable {
     public let timestamp: Date
     public let copyCount: Int
     public let isLarge: Bool
+    public let isExtracted: Bool
+    public let parentEntryId: UUID?
     
     public init(from entry: ClipboardEntry) {
         self.id = entry.id
@@ -23,6 +25,8 @@ public struct ClipboardRowData: Equatable {
         self.timestamp = entry.timestamp
         self.copyCount = entry.copyCount
         self.isLarge = entry.content.utf8.count > 10 * 1024
+        self.isExtracted = entry.isExtracted
+        self.parentEntryId = entry.parentEntryId
     }
 }
 
@@ -285,6 +289,7 @@ private final class ClipboardCellView: NSTableCellView {
     private let metadataLabel = NSTextField(labelWithString: "")
     private let badgeView = NSTextField(labelWithString: "")
     private let largeIndicator = NSImageView()
+    private let extractedIndicator = NSImageView()
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -332,6 +337,14 @@ private final class ClipboardCellView: NSTableCellView {
         badgeView.setContentHuggingPriority(.required, for: .horizontal)
         addSubview(badgeView)
         
+        // Extracted indicator (link icon)
+        extractedIndicator.translatesAutoresizingMaskIntoConstraints = false
+        extractedIndicator.image = NSImage(systemSymbolName: "link", accessibilityDescription: "Extracted from another entry")
+        extractedIndicator.contentTintColor = .systemBlue
+        extractedIndicator.setContentHuggingPriority(.required, for: .horizontal)
+        extractedIndicator.toolTip = "Extracted from copied text"
+        addSubview(extractedIndicator)
+        
         // Large indicator
         largeIndicator.translatesAutoresizingMaskIntoConstraints = false
         largeIndicator.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Large entry")
@@ -348,7 +361,12 @@ private final class ClipboardCellView: NSTableCellView {
             
             titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
             titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: largeIndicator.leadingAnchor, constant: -8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: extractedIndicator.leadingAnchor, constant: -8),
+            
+            extractedIndicator.trailingAnchor.constraint(equalTo: largeIndicator.leadingAnchor, constant: -6),
+            extractedIndicator.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            extractedIndicator.widthAnchor.constraint(equalToConstant: 14),
+            extractedIndicator.heightAnchor.constraint(equalToConstant: 14),
             
             largeIndicator.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             largeIndicator.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
@@ -389,6 +407,9 @@ private final class ClipboardCellView: NSTableCellView {
             meta.append("×\(row.copyCount)")
         }
         metadataLabel.stringValue = meta.joined(separator: " • ")
+        
+        // Extracted indicator
+        extractedIndicator.isHidden = !row.isExtracted
         
         // Large indicator
         largeIndicator.isHidden = !row.isLarge

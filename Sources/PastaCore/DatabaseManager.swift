@@ -139,6 +139,15 @@ public final class DatabaseManager {
             try db.execute(sql: "INSERT INTO clipboard_entries_fts(clipboard_entries_fts) VALUES('rebuild');")
         }
 
+        migrator.registerMigration("addParentEntryId") { db in
+            // Add parentEntryId column for extracted entries to reference their source
+            try db.alter(table: ClipboardEntry.databaseTableName) { t in
+                t.add(column: "parentEntryId", .text)
+            }
+            // Index for efficient lookups of children by parent
+            try db.create(index: "idx_clipboard_entries_parentEntryId", on: ClipboardEntry.databaseTableName, columns: ["parentEntryId"])
+        }
+
         return migrator
     }
 
@@ -174,8 +183,8 @@ public final class DatabaseManager {
                 try db.execute(
                     sql: """
                     INSERT INTO \(ClipboardEntry.databaseTableName)
-                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     arguments: [
                         entry.id.uuidString,
@@ -188,6 +197,7 @@ public final class DatabaseManager {
                         entry.sourceApp,
                         entry.metadata,
                         contentHash,
+                        entry.parentEntryId?.uuidString,
                     ]
                 )
                 PastaLogger.database.debug("Inserted new entry with type \(entry.contentType.rawValue)")
@@ -411,8 +421,8 @@ public final class DatabaseManager {
                 try db.execute(
                     sql: """
                     INSERT INTO \(ClipboardEntry.databaseTableName)
-                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     arguments: [
                         entry.id.uuidString,
@@ -425,6 +435,7 @@ public final class DatabaseManager {
                         entry.sourceApp,
                         entry.metadata,
                         contentHash,
+                        entry.parentEntryId?.uuidString,
                     ]
                 )
                 PastaLogger.database.debug("Inserted new entry with type \(entry.contentType.rawValue)")
@@ -432,6 +443,25 @@ public final class DatabaseManager {
         } catch {
             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert entry")
             throw error
+        }
+    }
+
+    /// Fetches an entry by its ID.
+    public func fetchEntry(id: UUID) throws -> ClipboardEntry? {
+        try dbQueue.read { db in
+            try ClipboardEntry
+                .filter(Column("id") == id.uuidString)
+                .fetchOne(db)
+        }
+    }
+
+    /// Fetches all extracted entries for a given parent entry.
+    public func fetchExtractedEntries(parentId: UUID) throws -> [ClipboardEntry] {
+        try dbQueue.read { db in
+            try ClipboardEntry
+                .filter(Column("parentEntryId") == parentId.uuidString)
+                .order(Column("contentType"))
+                .fetchAll(db)
         }
     }
 

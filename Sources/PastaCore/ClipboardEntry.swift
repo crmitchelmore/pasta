@@ -55,6 +55,11 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
     public var sourceApp: String?
     /// JSON-encoded metadata (arbitrary shape) stored as a string.
     public var metadata: String?
+    /// ID of the parent entry if this was extracted from another entry.
+    public var parentEntryId: UUID?
+
+    /// Whether this entry was extracted from a parent entry.
+    public var isExtracted: Bool { parentEntryId != nil }
 
     public var contentHash: String {
         if (contentType == .image || contentType == .screenshot), let data = rawData {
@@ -72,7 +77,8 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
         timestamp: Date = Date(),
         copyCount: Int = 1,
         sourceApp: String? = nil,
-        metadata: String? = nil
+        metadata: String? = nil,
+        parentEntryId: UUID? = nil
     ) {
         self.id = id
         self.content = content
@@ -83,6 +89,7 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
         self.copyCount = copyCount
         self.sourceApp = sourceApp
         self.metadata = metadata
+        self.parentEntryId = parentEntryId
     }
 
     public func encode(to container: inout PersistenceContainer) {
@@ -95,6 +102,7 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
         container["copyCount"] = copyCount
         container["sourceApp"] = sourceApp
         container["metadata"] = metadata
+        container["parentEntryId"] = parentEntryId?.uuidString
     }
 
     static func sha256Hex(_ string: String) -> String {

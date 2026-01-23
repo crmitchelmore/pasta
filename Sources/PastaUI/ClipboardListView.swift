@@ -44,6 +44,8 @@ private struct RowData: Equatable, Identifiable {
     let copyCount: Int
     let isLarge: Bool
     let hasFilePath: Bool
+    let isExtracted: Bool
+    let parentEntryId: UUID?
     
     init(from entry: ClipboardEntry) {
         self.id = entry.id
@@ -55,6 +57,8 @@ private struct RowData: Equatable, Identifiable {
         self.copyCount = entry.copyCount
         self.isLarge = entry.content.utf8.count > 10 * 1024
         self.hasFilePath = entry.contentType == .filePath
+        self.isExtracted = entry.isExtracted
+        self.parentEntryId = entry.parentEntryId
     }
 }
 

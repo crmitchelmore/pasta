@@ -18,6 +18,7 @@ public struct SettingsView: View {
         static let storeImages = "pasta.storeImages"
         static let deduplicateEntries = "pasta.deduplicateEntries"
         static let skipAPIKeys = "pasta.skipAPIKeys"
+        static let extractContent = "pasta.extractContent"
     }
 
     @AppStorage(Defaults.hotkeyKey) private var hotkeyKey: String = "c"
@@ -34,6 +35,7 @@ public struct SettingsView: View {
     @AppStorage(Defaults.storeImages) private var storeImages: Bool = true
     @AppStorage(Defaults.deduplicateEntries) private var deduplicateEntries: Bool = true
     @AppStorage(Defaults.skipAPIKeys) private var skipAPIKeys: Bool = false
+    @AppStorage(Defaults.extractContent) private var extractContent: Bool = true
 
     @State private var selectedTab: SettingsTab = .general
 
@@ -58,6 +60,7 @@ public struct SettingsView: View {
                 storeImages: $storeImages,
                 deduplicateEntries: $deduplicateEntries,
                 skipAPIKeys: $skipAPIKeys,
+                extractContent: $extractContent,
                 playSounds: $playSounds,
                 showNotifications: $showNotifications,
                 excludedAppsText: $excludedAppsText
@@ -170,6 +173,7 @@ private struct ClipboardSettingsTab: View {
     @Binding var storeImages: Bool
     @Binding var deduplicateEntries: Bool
     @Binding var skipAPIKeys: Bool
+    @Binding var extractContent: Bool
     @Binding var playSounds: Bool
     @Binding var showNotifications: Bool
     @Binding var excludedAppsText: String
@@ -182,6 +186,15 @@ private struct ClipboardSettingsTab: View {
                 Toggle("Deduplicate identical entries", isOn: $deduplicateEntries)
             } header: {
                 Label("Capture", systemImage: "rectangle.and.paperclip")
+            }
+
+            Section {
+                Toggle("Extract emails, URLs, and more", isOn: $extractContent)
+                Text("When enabled, emails, URLs, API keys, and other items found within copied text are also saved as separate entries for easy searching.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Content Extraction", systemImage: "text.magnifyingglass")
             }
 
             Section {

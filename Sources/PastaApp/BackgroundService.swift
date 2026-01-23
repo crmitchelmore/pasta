@@ -37,6 +37,7 @@ final class BackgroundService: ObservableObject {
         static let storeImages = "pasta.storeImages"
         static let deduplicateEntries = "pasta.deduplicateEntries"
         static let skipAPIKeys = "pasta.skipAPIKeys"
+        static let extractContent = "pasta.extractContent"
     }
     
     private init() {
@@ -193,17 +194,25 @@ final class BackgroundService: ObservableObject {
                 let storeImages = UserDefaults.standard.bool(forKey: Defaults.storeImages)
                 let deduplicate = UserDefaults.standard.bool(forKey: Defaults.deduplicateEntries)
                 let skipAPIKeys = UserDefaults.standard.bool(forKey: Defaults.skipAPIKeys)
+                let extractContent = UserDefaults.standard.bool(forKey: Defaults.extractContent)
                 
                 Task.detached {
-                    let enriched: [ClipboardEntry]
+                    let result: EnrichResult
                     do {
-                        enriched = try Self.enrich(entry, detector: detector, imageStorage: storage, storeImages: storeImages)
+                        result = try Self.enrich(
+                            entry,
+                            detector: detector,
+                            imageStorage: storage,
+                            storeImages: storeImages,
+                            extractContent: extractContent
+                        )
                     } catch {
                         PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Failed to enrich entry")
-                        enriched = [entry]
+                        result = EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: [])
                     }
 
-                    for e in enriched {
+                    // Insert all entries
+                    for e in result.allEntries {
                         // Skip API keys if setting is enabled
                         if skipAPIKeys && e.contentType == .apiKey {
                             PastaLogger.clipboard.debug("Skipped API key entry - disabled in settings")
@@ -212,7 +221,7 @@ final class BackgroundService: ObservableObject {
                         
                         do {
                             try db.insert(e, deduplicate: deduplicate)
-                            PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)")
+                            PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)\(e.isExtracted ? " (extracted)" : "")")
                         } catch {
                             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert entry")
                         }
@@ -221,7 +230,7 @@ final class BackgroundService: ObservableObject {
                     await self.enforceMaxEntriesLimit()
                     await MainActor.run {
                         self.refresh()
-                        self.provideFeedback(for: enriched.first)
+                        self.provideFeedback(for: result.primaryEntry)
                     }
                 }
             }
@@ -251,15 +260,22 @@ final class BackgroundService: ObservableObject {
                 let deduplicate = UserDefaults.standard.bool(forKey: Defaults.deduplicateEntries)
                 
                 Task.detached {
-                    let enriched: [ClipboardEntry]
+                    let result: EnrichResult
                     do {
-                        enriched = try Self.enrich(entry, detector: detector, imageStorage: storage, storeImages: storeImages)
+                        // Screenshots don't need content extraction
+                        result = try Self.enrich(
+                            entry,
+                            detector: detector,
+                            imageStorage: storage,
+                            storeImages: storeImages,
+                            extractContent: false
+                        )
                     } catch {
                         PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Failed to enrich screenshot entry")
-                        enriched = [entry]
+                        result = EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: [])
                     }
 
-                    for e in enriched {
+                    for e in result.allEntries {
                         do {
                             try db.insert(e, deduplicate: deduplicate)
                             PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)")
@@ -271,7 +287,7 @@ final class BackgroundService: ObservableObject {
                     await self.enforceMaxEntriesLimit()
                     await MainActor.run {
                         self.refresh()
-                        self.provideFeedback(for: enriched.first)
+                        self.provideFeedback(for: result.primaryEntry)
                     }
                 }
             }
@@ -324,12 +340,31 @@ final class BackgroundService: ObservableObject {
         }
     }
     
+    /// Result of enriching a clipboard entry with detected content types.
+    struct EnrichResult {
+        /// The primary entry (enriched with detected type and metadata).
+        var primaryEntry: ClipboardEntry
+        /// Entries extracted from the primary (emails, URLs, etc. found within).
+        var extractedEntries: [ClipboardEntry]
+        /// Whether this was an env var block that should be split (legacy behavior).
+        var envVarSplitEntries: [ClipboardEntry]
+
+        /// All entries to insert: either the split entries OR (primary + extracted).
+        var allEntries: [ClipboardEntry] {
+            if !envVarSplitEntries.isEmpty {
+                return envVarSplitEntries
+            }
+            return [primaryEntry] + extractedEntries
+        }
+    }
+
     private nonisolated static func enrich(
         _ entry: ClipboardEntry,
         detector: ContentTypeDetector,
         imageStorage: ImageStorageManager,
-        storeImages: Bool
-    ) throws -> [ClipboardEntry] {
+        storeImages: Bool,
+        extractContent: Bool
+    ) throws -> EnrichResult {
         var entry = entry
 
         if entry.contentType == .image || entry.contentType == .screenshot, let data = entry.rawData {
@@ -346,13 +381,14 @@ final class BackgroundService: ObservableObject {
                 entry.rawData = nil
                 PastaLogger.clipboard.debug("Skipped storing image data - disabled in settings")
             }
-            return [entry]
+            return EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: [])
         }
 
         let output = detector.detect(in: entry.content)
 
+        // Handle env var block splitting (legacy behavior - these don't have parent links)
         if output.primaryType == .envVarBlock, !output.splitEntries.isEmpty {
-            return output.splitEntries.map { split in
+            let splitEntries = output.splitEntries.map { split in
                 ClipboardEntry(
                     content: split.content,
                     contentType: split.contentType,
@@ -361,11 +397,28 @@ final class BackgroundService: ObservableObject {
                     metadata: split.metadataJSON
                 )
             }
+            return EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: splitEntries)
         }
 
         entry.contentType = output.primaryType
         entry.metadata = output.metadataJSON
 
-        return [entry]
+        // Create extracted entries with parentEntryId set to the primary entry's ID
+        var extractedEntries: [ClipboardEntry] = []
+        if extractContent && !output.extractedItems.isEmpty {
+            extractedEntries = output.extractedItems.map { item in
+                ClipboardEntry(
+                    content: item.content,
+                    contentType: item.contentType,
+                    timestamp: entry.timestamp,
+                    sourceApp: entry.sourceApp,
+                    metadata: item.metadataJSON,
+                    parentEntryId: entry.id // Link to parent
+                )
+            }
+            PastaLogger.clipboard.debug("Extracted \(extractedEntries.count) items from entry")
+        }
+
+        return EnrichResult(primaryEntry: entry, extractedEntries: extractedEntries, envVarSplitEntries: [])
     }
 }
