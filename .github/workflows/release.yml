@@ -97,6 +97,14 @@ jobs:
             exit 1
           fi
           
+          # Copy resource bundles (KeyboardShortcuts has localized strings)
+          echo "==> Copying resource bundles"
+          find .build -name "*.bundle" -type d | while read bundle; do
+            bundle_name=$(basename "$bundle")
+            echo "Copying bundle: $bundle_name"
+            cp -R "$bundle" "$APP_DIR/Contents/Resources/"
+          done
+          
           # Fix rpath to find frameworks in Contents/Frameworks
           echo "==> Fixing rpath for Sparkle framework"
           install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/${APP_NAME}"

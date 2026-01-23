@@ -27,10 +27,11 @@ jobs:
       - name: Build release
         run: swift build -c release
       
-      - name: Create test app bundle and verify launch
+      - name: Create test app bundle (mirrors release workflow)
+        id: bundle
         run: |
           set -e
-          echo "==> Creating test app bundle..."
+          echo "==> Creating test app bundle (same as release workflow)..."
           
           APP_DIR=".build/test-bundle/Pasta.app"
           mkdir -p "$APP_DIR/Contents/MacOS"
@@ -39,8 +40,9 @@ jobs:
           
           # Copy binary
           cp .build/release/PastaApp "$APP_DIR/Contents/MacOS/PastaApp"
+          echo "==> Copied binary"
           
-          # Copy Sparkle framework
+          # Copy Sparkle framework (same as release.yml)
           SPARKLE_PATH=$(find .build -name "Sparkle.framework" -type d | head -1)
           if [ -z "$SPARKLE_PATH" ]; then
             echo "ERROR: Sparkle.framework not found!"
@@ -49,7 +51,15 @@ jobs:
           cp -R "$SPARKLE_PATH" "$APP_DIR/Contents/Frameworks/"
           echo "==> Copied Sparkle from $SPARKLE_PATH"
           
-          # Fix rpath
+          # Copy ALL resource bundles (same as release.yml)
+          echo "==> Copying resource bundles"
+          find .build -name "*.bundle" -type d | while read bundle; do
+            bundle_name=$(basename "$bundle")
+            echo "Copying bundle: $bundle_name"
+            cp -R "$bundle" "$APP_DIR/Contents/Resources/"
+          done
+          
+          # Fix rpath (same as release.yml)
           install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/PastaApp"
           
           # Create minimal Info.plist
@@ -76,34 +86,87 @@ jobs:
           </plist>
           PLIST
           
-          # Verify rpath is set correctly
+          echo "APP_DIR=$APP_DIR" >> $GITHUB_OUTPUT
+          echo "==> Test bundle created"
+      
+      - name: Verify bundle structure
+        run: |
+          set -e
+          APP_DIR="${{ steps.bundle.outputs.APP_DIR }}"
+          
+          echo "==> Verifying bundle structure..."
+          
+          # Check binary exists
+          if [ ! -f "$APP_DIR/Contents/MacOS/PastaApp" ]; then
+            echo "ERROR: Binary not found!"
+            exit 1
+          fi
+          echo "✓ Binary exists"
+          
+          # Check Sparkle framework
+          if [ ! -d "$APP_DIR/Contents/Frameworks/Sparkle.framework" ]; then
+            echo "ERROR: Sparkle.framework not found!"
+            exit 1
+          fi
+          echo "✓ Sparkle.framework exists"
+          
+          # Check resource bundles
+          BUNDLE_COUNT=$(find "$APP_DIR/Contents/Resources" -name "*.bundle" -type d | wc -l | tr -d ' ')
+          echo "Found $BUNDLE_COUNT resource bundle(s)"
+          find "$APP_DIR/Contents/Resources" -name "*.bundle" -type d
+          
+          # KeyboardShortcuts bundle is required
+          if [ ! -d "$APP_DIR/Contents/Resources/KeyboardShortcuts_KeyboardShortcuts.bundle" ]; then
+            echo "ERROR: KeyboardShortcuts resource bundle not found!"
+            echo "Available in Resources:"
+            ls -la "$APP_DIR/Contents/Resources/"
+            exit 1
+          fi
+          echo "✓ KeyboardShortcuts bundle exists"
+          
+          # Check rpath
           echo "==> Verifying rpath:"
-          otool -l "$APP_DIR/Contents/MacOS/PastaApp" | grep -A2 LC_RPATH | grep -q "@executable_path/../Frameworks" || {
+          if ! otool -l "$APP_DIR/Contents/MacOS/PastaApp" | grep -A2 LC_RPATH | grep -q "@executable_path/../Frameworks"; then
             echo "ERROR: rpath not set correctly!"
             otool -l "$APP_DIR/Contents/MacOS/PastaApp" | grep -A2 LC_RPATH
             exit 1
-          }
-          echo "rpath OK"
+          fi
+          echo "✓ rpath OK"
+      
+      - name: Launch smoke test
+        run: |
+          set -e
+          APP_DIR="${{ steps.bundle.outputs.APP_DIR }}"
           
-          # Verify Sparkle framework loads (this catches missing framework/rpath issues)
-          echo "==> Verifying dynamic libraries load..."
-          if ! dyld_info -dependents "$APP_DIR/Contents/MacOS/PastaApp" 2>/dev/null; then
-            # Fallback: try to run the binary briefly
-            echo "==> Smoke test: launching app for 3 seconds..."
-            timeout 3 "$APP_DIR/Contents/MacOS/PastaApp" &
-            APP_PID=$!
-            sleep 2
-            if kill -0 $APP_PID 2>/dev/null; then
-              echo "==> App launched successfully!"
-              kill $APP_PID 2>/dev/null || true
-            else
-              echo "ERROR: App failed to launch!"
-              wait $APP_PID 2>/dev/null || true
-              exit 1
-            fi
+          echo "==> Smoke test: attempting to launch app..."
+          
+          # Try to launch the app - this will catch:
+          # - Missing frameworks (dyld errors)
+          # - Missing resource bundles (Swift resource errors)
+          # - Other immediate crash issues
+          
+          # Launch in background, capture any stderr
+          "$APP_DIR/Contents/MacOS/PastaApp" 2> /tmp/launch_error.log &
+          APP_PID=$!
+          
+          # Wait a moment for app to either crash or start
+          sleep 3
+          
+          # Check if still running
+          if kill -0 $APP_PID 2>/dev/null; then
+            echo "✓ App launched successfully and is running!"
+            kill $APP_PID 2>/dev/null || true
+          else
+            echo "ERROR: App crashed or failed to launch!"
+            echo "==> Error log:"
+            cat /tmp/launch_error.log || true
+            echo "==> Exit code:"
+            wait $APP_PID 2>/dev/null
+            echo $?
+            exit 1
           fi
           
-          echo "==> Smoke test passed!"
+          echo "==> Smoke test PASSED!"
 
   auto-release:
     name: Auto Version & Release
