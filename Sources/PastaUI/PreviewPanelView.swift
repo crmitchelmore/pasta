@@ -30,6 +30,11 @@ public struct PreviewPanelView: View {
                                 MonospaceText(decoded)
                             }
                         }
+                        
+                        // Show extracted items (emails, URLs, etc.) if present
+                        if let extractedItems = extractedItems(from: entry), !extractedItems.isEmpty {
+                            ExtractedItemsSection(items: extractedItems)
+                        }
 
                         SectionBox(title: "Content") {
                             if (entry.contentType == .image || entry.contentType == .screenshot), let imagePath = entry.imagePath {
@@ -301,6 +306,64 @@ public struct PreviewPanelView: View {
         guard let obj = try? JSONSerialization.jsonObject(with: data, options: []) else { return nil }
         return obj as? [String: Any]
     }
+    
+    // MARK: - Extracted Items
+    
+    fileprivate func extractedItems(from entry: ClipboardEntry) -> [ExtractedItem]? {
+        guard let meta = entry.metadata else { return nil }
+        guard let dict = parseJSONDictionary(meta) else { return nil }
+        
+        var items: [ExtractedItem] = []
+        
+        // Extract emails
+        if let emails = dict["emails"] as? [[String: Any]] {
+            for email in emails {
+                if let value = email["email"] as? String {
+                    items.append(ExtractedItem(type: .email, value: value, displayValue: value))
+                }
+            }
+        }
+        
+        // Extract URLs
+        if let urls = dict["urls"] as? [[String: Any]] {
+            for url in urls {
+                if let value = url["url"] as? String {
+                    let domain = url["domain"] as? String ?? value
+                    items.append(ExtractedItem(type: .url, value: value, displayValue: domain))
+                }
+            }
+        }
+        
+        // Extract phone numbers
+        if let phones = dict["phoneNumbers"] as? [[String: Any]] {
+            for phone in phones {
+                if let value = phone["number"] as? String {
+                    items.append(ExtractedItem(type: .phoneNumber, value: value, displayValue: value))
+                }
+            }
+        }
+        
+        // Extract IP addresses
+        if let ips = dict["ipAddresses"] as? [[String: Any]] {
+            for ip in ips {
+                if let value = ip["address"] as? String {
+                    let version = ip["version"] as? String ?? ""
+                    items.append(ExtractedItem(type: .ipAddress, value: value, displayValue: "\(value) (\(version.uppercased()))"))
+                }
+            }
+        }
+        
+        // Extract UUIDs
+        if let uuids = dict["uuids"] as? [[String: Any]] {
+            for uuid in uuids {
+                if let value = uuid["uuid"] as? String {
+                    items.append(ExtractedItem(type: .uuid, value: value, displayValue: value))
+                }
+            }
+        }
+        
+        return items.isEmpty ? nil : items
+    }
 
     private func prettyPrintedJSON(_ json: String?) -> String? {
         guard let json else { return nil }
@@ -309,6 +372,120 @@ public struct PreviewPanelView: View {
         guard JSONSerialization.isValidJSONObject(obj) else { return nil }
         guard let pretty = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) else { return nil }
         return String(data: pretty, encoding: .utf8)
+    }
+}
+
+// MARK: - Extracted Items Section
+
+private struct ExtractedItemsSection: View {
+    let items: [PreviewPanelView.ExtractedItem]
+    
+    var body: some View {
+        SectionBox(title: "Detected Items") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(items) { item in
+                    ExtractedItemRow(item: item)
+                }
+            }
+        }
+    }
+}
+
+private struct ExtractedItemRow: View {
+    let item: PreviewPanelView.ExtractedItem
+    @State private var copied = false
+    
+    var body: some View {
+        Button {
+            copyToClipboard()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: item.type.icon)
+                    .font(.caption)
+                    .foregroundStyle(item.type.tint)
+                    .frame(width: 16)
+                
+                Text(item.displayValue)
+                    .font(.system(.caption, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                
+                Spacer(minLength: 4)
+                
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.caption2)
+                    .foregroundStyle(copied ? .green : .secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(item.type.tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Click to copy: \(item.value)")
+    }
+    
+    private func copyToClipboard() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(item.value, forType: .string)
+        
+        withAnimation(.easeInOut(duration: 0.2)) {
+            copied = true
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                copied = false
+            }
+        }
+    }
+}
+
+// Make ExtractedItem and ExtractedItemType accessible to private structs
+extension PreviewPanelView {
+    struct ExtractedItem: Identifiable {
+        let id = UUID()
+        let type: ExtractedItemType
+        let value: String
+        let displayValue: String
+    }
+    
+    enum ExtractedItemType {
+        case email
+        case url
+        case phoneNumber
+        case ipAddress
+        case uuid
+        
+        var icon: String {
+            switch self {
+            case .email: return "envelope"
+            case .url: return "link"
+            case .phoneNumber: return "phone"
+            case .ipAddress: return "network"
+            case .uuid: return "number"
+            }
+        }
+        
+        var label: String {
+            switch self {
+            case .email: return "Email"
+            case .url: return "URL"
+            case .phoneNumber: return "Phone"
+            case .ipAddress: return "IP"
+            case .uuid: return "UUID"
+            }
+        }
+        
+        var tint: Color {
+            switch self {
+            case .email: return .red
+            case .url: return .blue
+            case .phoneNumber: return .green
+            case .ipAddress: return .purple
+            case .uuid: return .orange
+            }
+        }
     }
 }
 

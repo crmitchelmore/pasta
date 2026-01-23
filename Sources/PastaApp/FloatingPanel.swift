@@ -1,4 +1,5 @@
 import AppKit
+import PastaCore
 import SwiftUI
 
 /// A standard resizable window that appears in app switcher.
@@ -170,6 +171,9 @@ final class QuickSearchController: ObservableObject {
     
     func show() {
         guard let contentBuilder else { return }
+        
+        // Always clear search state when showing
+        QuickSearchManager.shared.prepareForSearch()
         
         if window == nil {
             createWindow()

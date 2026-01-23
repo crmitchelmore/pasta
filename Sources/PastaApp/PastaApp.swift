@@ -817,25 +817,29 @@ struct PanelContentView: View {
     }
     
     private func applyFiltersToEntries(_ input: [ClipboardEntry]) -> [ClipboardEntry] {
-        // Limit input to avoid processing thousands of entries on main thread
-        let limited = Array(input.prefix(200))
-        var out = limited
+        var out = input
+        
+        // Apply type filter first (before limiting) so we get all matching entries
         if let contentTypeFilter {
             out = out.filter { $0.contentType == contentTypeFilter }
         }
+        
         let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if !sourceFilter.isEmpty {
             out = out.filter { entry in
                 entry.sourceApp?.localizedCaseInsensitiveContains(sourceFilter) == true
             }
         }
+        
         if contentTypeFilter == .url, let urlDomainFilter {
             let detector = URLDetector()
             out = out.filter { entry in
                 Set(detector.detect(in: entry.content).map(\.domain)).contains(urlDomainFilter)
             }
         }
-        return out
+        
+        // Limit AFTER filtering to avoid processing thousands on main thread
+        return Array(out.prefix(200))
     }
     
     private func triggerSearchUpdate() {
