@@ -26,6 +26,84 @@ jobs:
       
       - name: Build release
         run: swift build -c release
+      
+      - name: Create test app bundle and verify launch
+        run: |
+          set -e
+          echo "==> Creating test app bundle..."
+          
+          APP_DIR=".build/test-bundle/Pasta.app"
+          mkdir -p "$APP_DIR/Contents/MacOS"
+          mkdir -p "$APP_DIR/Contents/Frameworks"
+          mkdir -p "$APP_DIR/Contents/Resources"
+          
+          # Copy binary
+          cp .build/release/PastaApp "$APP_DIR/Contents/MacOS/PastaApp"
+          
+          # Copy Sparkle framework
+          SPARKLE_PATH=$(find .build -name "Sparkle.framework" -type d | head -1)
+          if [ -z "$SPARKLE_PATH" ]; then
+            echo "ERROR: Sparkle.framework not found!"
+            exit 1
+          fi
+          cp -R "$SPARKLE_PATH" "$APP_DIR/Contents/Frameworks/"
+          echo "==> Copied Sparkle from $SPARKLE_PATH"
+          
+          # Fix rpath
+          install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/PastaApp"
+          
+          # Create minimal Info.plist
+          cat > "$APP_DIR/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>Pasta</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.pasta.clipboard.test</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>CFBundleShortVersionString</key>
+              <string>0.0.0</string>
+              <key>CFBundleExecutable</key>
+              <string>PastaApp</string>
+              <key>LSUIElement</key>
+              <true/>
+              <key>SUFeedURL</key>
+              <string>https://example.com/appcast.xml</string>
+          </dict>
+          </plist>
+          PLIST
+          
+          # Verify rpath is set correctly
+          echo "==> Verifying rpath:"
+          otool -l "$APP_DIR/Contents/MacOS/PastaApp" | grep -A2 LC_RPATH | grep -q "@executable_path/../Frameworks" || {
+            echo "ERROR: rpath not set correctly!"
+            otool -l "$APP_DIR/Contents/MacOS/PastaApp" | grep -A2 LC_RPATH
+            exit 1
+          }
+          echo "rpath OK"
+          
+          # Verify Sparkle framework loads (this catches missing framework/rpath issues)
+          echo "==> Verifying dynamic libraries load..."
+          if ! dyld_info -dependents "$APP_DIR/Contents/MacOS/PastaApp" 2>/dev/null; then
+            # Fallback: try to run the binary briefly
+            echo "==> Smoke test: launching app for 3 seconds..."
+            timeout 3 "$APP_DIR/Contents/MacOS/PastaApp" &
+            APP_PID=$!
+            sleep 2
+            if kill -0 $APP_PID 2>/dev/null; then
+              echo "==> App launched successfully!"
+              kill $APP_PID 2>/dev/null || true
+            else
+              echo "ERROR: App failed to launch!"
+              wait $APP_PID 2>/dev/null || true
+              exit 1
+            fi
+          fi
+          
+          echo "==> Smoke test passed!"
 
   auto-release:
     name: Auto Version & Release

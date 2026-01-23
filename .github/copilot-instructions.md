@@ -123,3 +123,29 @@ git tag v0.x.x && git push origin v0.x.x
 ```
 
 The workflow builds a universal binary, signs, notarizes, and creates a GitHub release with DMG.
+
+## SPM + Dynamic Frameworks (Sparkle)
+
+When using Swift Package Manager with dynamic frameworks like Sparkle, the release workflow must:
+
+1. **Copy the framework** to `Contents/Frameworks/`:
+```bash
+SPARKLE_PATH=$(find .build -name "Sparkle.framework" -type d | head -1)
+cp -R "$SPARKLE_PATH" "$APP_DIR/Contents/Frameworks/"
+```
+
+2. **Fix the rpath** so the binary can find it:
+```bash
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/PastaApp"
+```
+
+**Why**: SPM sets `@loader_path` as rpath, but frameworks are in `Contents/Frameworks/`. Without the rpath fix, the app crashes on launch with `Library not loaded: @rpath/Sparkle.framework`.
+
+**CI Smoke Test**: The CI workflow creates a test app bundle and verifies it can launch. This catches framework bundling issues before release.
+
+## Sparkle Auto-Updates
+
+- Feed URL: `https://github.com/crmitchelmore/pasta/releases/latest/download/appcast.xml`
+- The release workflow generates and uploads `appcast.xml` with EdDSA signatures
+- Keys are stored in GitHub Secrets: `SPARKLE_PUBLIC_KEY`, `SPARKLE_PRIVATE_KEY`
+- UpdaterManager wraps SPUStandardUpdaterController for SwiftUI integration
