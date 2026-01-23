@@ -52,17 +52,22 @@ jobs:
           echo "==> Copied Sparkle from $SPARKLE_PATH"
           
           # Copy ALL resource bundles (same as release.yml)
-          # Only copy unique bundles (avoid duplicates from builds)
+          # SPM's resource_bundle_accessor looks for bundles at Bundle.main.bundleURL (app root)
           echo "==> Copying resource bundles"
           for bundle in $(find .build -name "*.bundle" -type d); do
             bundle_name=$(basename "$bundle")
+            # Skip Sparkle test bundles
+            if [[ "$bundle" == *"SUUpdateValidatorTest"* ]]; then
+              echo "Skipping Sparkle test bundle: $bundle_name"
+              continue
+            fi
             # Skip if already copied
-            if [ -d "$APP_DIR/Contents/Resources/$bundle_name" ]; then
+            if [ -d "$APP_DIR/$bundle_name" ]; then
               echo "Skipping (already exists): $bundle_name"
               continue
             fi
-            echo "Copying bundle: $bundle_name"
-            cp -R "$bundle" "$APP_DIR/Contents/Resources/"
+            echo "Copying bundle: $bundle_name to app root"
+            cp -R "$bundle" "$APP_DIR/"
           done
           
           # Fix rpath (same as release.yml)
@@ -117,18 +122,18 @@ jobs:
           echo "✓ Sparkle.framework exists"
           
           # Check resource bundles
-          BUNDLE_COUNT=$(find "$APP_DIR/Contents/Resources" -name "*.bundle" -type d | wc -l | tr -d ' ')
-          echo "Found $BUNDLE_COUNT resource bundle(s)"
-          find "$APP_DIR/Contents/Resources" -name "*.bundle" -type d
+          BUNDLE_COUNT=$(find "$APP_DIR" -maxdepth 1 -name "*.bundle" -type d | wc -l | tr -d ' ')
+          echo "Found $BUNDLE_COUNT resource bundle(s) at app root"
+          find "$APP_DIR" -maxdepth 1 -name "*.bundle" -type d
           
-          # KeyboardShortcuts bundle is required
-          if [ ! -d "$APP_DIR/Contents/Resources/KeyboardShortcuts_KeyboardShortcuts.bundle" ]; then
-            echo "ERROR: KeyboardShortcuts resource bundle not found!"
-            echo "Available in Resources:"
-            ls -la "$APP_DIR/Contents/Resources/"
+          # KeyboardShortcuts bundle is required (at app root for SPM resource accessor)
+          if [ ! -d "$APP_DIR/KeyboardShortcuts_KeyboardShortcuts.bundle" ]; then
+            echo "ERROR: KeyboardShortcuts resource bundle not found at app root!"
+            echo "Available at app root:"
+            ls -la "$APP_DIR/"
             exit 1
           fi
-          echo "✓ KeyboardShortcuts bundle exists"
+          echo "✓ KeyboardShortcuts bundle exists at app root"
           
           # Check rpath
           echo "==> Verifying rpath:"

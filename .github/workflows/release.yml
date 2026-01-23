@@ -98,17 +98,24 @@ jobs:
           fi
           
           # Copy resource bundles (KeyboardShortcuts has localized strings)
-          # Only copy unique bundles (avoid duplicates from arm64/x86_64 builds)
+          # SPM's resource_bundle_accessor looks for bundles at Bundle.main.bundleURL
+          # which is the .app directory (e.g., Pasta.app/), NOT Contents/MacOS/ or Contents/Resources/
           echo "==> Copying resource bundles"
           for bundle in $(find .build -name "*.bundle" -type d); do
             bundle_name=$(basename "$bundle")
+            # Skip Sparkle test bundles
+            if [[ "$bundle" == *"SUUpdateValidatorTest"* ]]; then
+              echo "Skipping Sparkle test bundle: $bundle_name"
+              continue
+            fi
             # Skip if already copied (check if destination exists)
-            if [ -d "$APP_DIR/Contents/Resources/$bundle_name" ]; then
+            if [ -d "$APP_DIR/$bundle_name" ]; then
               echo "Skipping (already exists): $bundle_name"
               continue
             fi
-            echo "Copying bundle: $bundle_name"
-            cp -R "$bundle" "$APP_DIR/Contents/Resources/"
+            echo "Copying bundle: $bundle_name to app root"
+            # Copy to app bundle root (where SPM's Bundle.main.bundleURL points)
+            cp -R "$bundle" "$APP_DIR/"
           done
           
           # Fix rpath to find frameworks in Contents/Frameworks
