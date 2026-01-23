@@ -1,4 +1,5 @@
 import AppKit
+import KeyboardShortcuts
 import SwiftUI
 import os.log
 
@@ -34,7 +35,6 @@ struct PastaApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panelController: PanelController<PanelContentView>?
     private var quickSearchController: QuickSearchController?
-    private var hotkeyManager: HotkeyManager?
     private var statusItem: NSStatusItem?
     private var defaultsObserver: NSObjectProtocol?
     private var settingsWindow: NSWindow?
@@ -91,8 +91,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Show the main window on launch
         panelController?.show()
         
-        // Setup hotkey to toggle quick search (Spotlight-like)
-        hotkeyManager = HotkeyManager { [weak self] in
+        // Setup hotkey to toggle quick search using KeyboardShortcuts
+        KeyboardShortcuts.onKeyUp(for: .openPasta) { [weak self] in
             PastaLogger.app.debug("Hotkey triggered, toggling quick search")
             Task { @MainActor in
                 self?.toggleQuickSearch()

@@ -1,11 +1,15 @@
 import AppKit
+import KeyboardShortcuts
 import PastaCore
 import SwiftUI
 
+// Define the keyboard shortcut name
+public extension KeyboardShortcuts.Name {
+    static let openPasta = Self("openPasta", default: .init(.c, modifiers: [.control, .command]))
+}
+
 public struct SettingsView: View {
     private enum Defaults {
-        static let hotkeyKey = "pasta.hotkey.key"
-        static let hotkeyModifiers = "pasta.hotkey.modifiers"
         static let launchAtLogin = "pasta.launchAtLogin"
         static let maxEntries = "pasta.maxEntries"
         static let excludedApps = "pasta.excludedApps"
@@ -21,8 +25,6 @@ public struct SettingsView: View {
         static let extractContent = "pasta.extractContent"
     }
 
-    @AppStorage(Defaults.hotkeyKey) private var hotkeyKey: String = "c"
-    @AppStorage(Defaults.hotkeyModifiers) private var hotkeyModifiersRaw: Int = Int(NSEvent.ModifierFlags([.control, .command]).rawValue)
     @AppStorage(Defaults.launchAtLogin) private var launchAtLogin: Bool = false
     @AppStorage(Defaults.maxEntries) private var maxEntries: Int = 0
     @AppStorage(Defaults.excludedApps) private var excludedAppsText: String = ""
@@ -53,8 +55,6 @@ public struct SettingsView: View {
     public var body: some View {
         TabView(selection: $selectedTab) {
             GeneralSettingsTab(
-                hotkeyKey: $hotkeyKey,
-                hotkeyModifiersRaw: $hotkeyModifiersRaw,
                 launchAtLogin: $launchAtLogin,
                 appMode: $appMode,
                 appearance: $appearance
@@ -117,8 +117,6 @@ public struct SettingsView: View {
 // MARK: - General Settings Tab
 
 private struct GeneralSettingsTab: View {
-    @Binding var hotkeyKey: String
-    @Binding var hotkeyModifiersRaw: Int
     @Binding var launchAtLogin: Bool
     @Binding var appMode: String
     @Binding var appearance: String
@@ -126,10 +124,7 @@ private struct GeneralSettingsTab: View {
     var body: some View {
         Form {
             Section {
-                HotkeyRecorderRow(
-                    hotkeyKey: $hotkeyKey,
-                    hotkeyModifiersRaw: $hotkeyModifiersRaw
-                )
+                KeyboardShortcuts.Recorder("Open Pasta", name: .openPasta)
             } header: {
                 Label("Keyboard Shortcut", systemImage: "keyboard")
             }
@@ -397,215 +392,6 @@ private struct StorageSettingsTab: View {
 
     private func format(bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
-    }
-}
-
-// MARK: - Hotkey Recorder
-
-private struct HotkeyRecorderRow: View {
-    @Binding var hotkeyKey: String
-    @Binding var hotkeyModifiersRaw: Int
-
-    @State private var isRecording = false
-    @State private var pendingKey: String? = nil
-    @State private var pendingModifiers: Int? = nil
-
-    private var displayString: String {
-        let modifiers = NSEvent.ModifierFlags(rawValue: UInt(hotkeyModifiersRaw))
-        var parts: [String] = []
-        if modifiers.contains(.control) { parts.append("⌃") }
-        if modifiers.contains(.option) { parts.append("⌥") }
-        if modifiers.contains(.shift) { parts.append("⇧") }
-        if modifiers.contains(.command) { parts.append("⌘") }
-        parts.append(hotkeyKey.uppercased())
-        return parts.joined()
-    }
-
-    private var pendingDisplayString: String {
-        guard let key = pendingKey, let mods = pendingModifiers else { return "" }
-        let modifiers = NSEvent.ModifierFlags(rawValue: UInt(mods))
-        var parts: [String] = []
-        if modifiers.contains(.control) { parts.append("⌃") }
-        if modifiers.contains(.option) { parts.append("⌥") }
-        if modifiers.contains(.shift) { parts.append("⇧") }
-        if modifiers.contains(.command) { parts.append("⌘") }
-        parts.append(key.uppercased())
-        return parts.joined()
-    }
-
-    var body: some View {
-        HStack {
-            Text("Open Pasta")
-            
-            Spacer()
-
-            if isRecording {
-                HStack(spacing: 8) {
-                    HotkeyRecorderField(
-                        pendingKey: $pendingKey,
-                        pendingModifiers: $pendingModifiers
-                    )
-                    .frame(width: 120, height: 28)
-                    
-                    if pendingKey != nil {
-                        Button("Save") {
-                            if let key = pendingKey, let mods = pendingModifiers {
-                                hotkeyKey = key
-                                hotkeyModifiersRaw = mods
-                            }
-                            isRecording = false
-                            pendingKey = nil
-                            pendingModifiers = nil
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                    }
-                    
-                    Button("Cancel") {
-                        isRecording = false
-                        pendingKey = nil
-                        pendingModifiers = nil
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            } else {
-                Button {
-                    isRecording = true
-                    pendingKey = nil
-                    pendingModifiers = nil
-                } label: {
-                    Text(displayString)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(minWidth: 80)
-                }
-                .buttonStyle(.bordered)
-            }
-        }
-    }
-}
-
-// NSViewRepresentable for capturing key events
-private struct HotkeyRecorderField: NSViewRepresentable {
-    @Binding var pendingKey: String?
-    @Binding var pendingModifiers: Int?
-
-    func makeNSView(context: Context) -> HotkeyTextField {
-        let field = HotkeyTextField()
-        field.onKeyRecorded = { key, modifiers in
-            pendingKey = key
-            pendingModifiers = modifiers
-        }
-        return field
-    }
-
-    func updateNSView(_ nsView: HotkeyTextField, context: Context) {
-        if let key = pendingKey, let mods = pendingModifiers {
-            nsView.updateDisplay(key: key, modifiers: mods)
-        }
-    }
-}
-
-private class HotkeyTextField: NSTextField {
-    var onKeyRecorded: ((String, Int) -> Void)?
-    private var localMonitor: Any?
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        setup()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        setup()
-    }
-
-    private func setup() {
-        isEditable = false
-        isSelectable = false
-        isBezeled = true
-        bezelStyle = .roundedBezel
-        alignment = .center
-        font = .monospacedSystemFont(ofSize: 13, weight: .medium)
-        placeholderString = "Click, then press keys..."
-        stringValue = ""
-        
-        // Make it focusable
-        focusRingType = .exterior
-    }
-
-    override var acceptsFirstResponder: Bool { true }
-
-    override func becomeFirstResponder() -> Bool {
-        let result = super.becomeFirstResponder()
-        if result {
-            stringValue = ""
-            placeholderString = "Press keys..."
-            startMonitoring()
-        }
-        return result
-    }
-    
-    override func resignFirstResponder() -> Bool {
-        stopMonitoring()
-        if stringValue.isEmpty {
-            placeholderString = "Click, then press keys..."
-        }
-        return super.resignFirstResponder()
-    }
-    
-    private func startMonitoring() {
-        stopMonitoring()
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.window?.firstResponder == self.currentEditor() || self.window?.firstResponder == self else {
-                return event
-            }
-            self.handleKeyEvent(event)
-            return nil // Consume the event
-        }
-    }
-    
-    private func stopMonitoring() {
-        if let monitor = localMonitor {
-            NSEvent.removeMonitor(monitor)
-            localMonitor = nil
-        }
-    }
-    
-    private func handleKeyEvent(_ event: NSEvent) {
-        guard let characters = event.charactersIgnoringModifiers?.lowercased(),
-              !characters.isEmpty else { return }
-
-        let key = characters
-        let modifiers = event.modifierFlags.intersection([.control, .option, .shift, .command])
-
-        // Require at least one modifier
-        guard !modifiers.isEmpty else {
-            placeholderString = "Add ⌘, ⌃, ⌥, or ⇧"
-            stringValue = ""
-            return
-        }
-
-        updateDisplay(key: key, modifiers: Int(modifiers.rawValue))
-        onKeyRecorded?(key, Int(modifiers.rawValue))
-        
-        // Resign first responder after successful capture
-        window?.makeFirstResponder(nil)
-    }
-
-    func updateDisplay(key: String, modifiers: Int) {
-        let flags = NSEvent.ModifierFlags(rawValue: UInt(modifiers))
-        var parts: [String] = []
-        if flags.contains(.control) { parts.append("⌃") }
-        if flags.contains(.option) { parts.append("⌥") }
-        if flags.contains(.shift) { parts.append("⇧") }
-        if flags.contains(.command) { parts.append("⌘") }
-        parts.append(key.uppercased())
-        stringValue = parts.joined()
-    }
-    
-    deinit {
-        stopMonitoring()
     }
 }
 
@@ -884,7 +670,7 @@ private struct AboutSettingsTab: View {
                     
                     DependencyRow(name: "Sparkle", version: "2.6.0+", url: "https://sparkle-project.org", description: "Auto-update framework")
                     DependencyRow(name: "GRDB", version: "6.24+", url: "https://github.com/groue/GRDB.swift", description: "SQLite toolkit")
-                    DependencyRow(name: "HotKey", version: "0.2.1+", url: "https://github.com/soffes/HotKey", description: "Global hotkeys")
+                    DependencyRow(name: "KeyboardShortcuts", version: "2.0+", url: "https://github.com/sindresorhus/KeyboardShortcuts", description: "Global hotkeys")
                 }
             } header: {
                 Label("Dependencies", systemImage: "shippingbox")
