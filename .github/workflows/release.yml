@@ -74,6 +74,7 @@ jobs:
           rm -rf "$APP_DIR"
           mkdir -p "$APP_DIR/Contents/MacOS"
           mkdir -p "$APP_DIR/Contents/Resources"
+          mkdir -p "$APP_DIR/Contents/Frameworks"
           
           # Copy the universal binary (keep internal name as PastaApp)
           cp ".build/universal/${APP_NAME}" "$APP_DIR/Contents/MacOS/${APP_NAME}"
@@ -85,6 +86,16 @@ jobs:
           
           # Copy app icon to Resources
           cp "Resources/DMG/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
+          
+          # Copy Sparkle framework
+          SPARKLE_PATH=$(find .build -name "Sparkle.framework" -type d | head -1)
+          if [ -n "$SPARKLE_PATH" ]; then
+            echo "==> Copying Sparkle framework from $SPARKLE_PATH"
+            cp -R "$SPARKLE_PATH" "$APP_DIR/Contents/Frameworks/"
+          else
+            echo "ERROR: Sparkle.framework not found!"
+            exit 1
+          fi
           
           # Make executable
           chmod +x "$APP_DIR/Contents/MacOS/${APP_NAME}"
