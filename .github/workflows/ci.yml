@@ -52,9 +52,15 @@ jobs:
           echo "==> Copied Sparkle from $SPARKLE_PATH"
           
           # Copy ALL resource bundles (same as release.yml)
+          # Only copy unique bundles (avoid duplicates from arm64/x86_64 builds)
           echo "==> Copying resource bundles"
           find .build -name "*.bundle" -type d | while read bundle; do
             bundle_name=$(basename "$bundle")
+            # Skip if already copied
+            if [ -d "$APP_DIR/Contents/Resources/$bundle_name" ]; then
+              echo "Skipping (already exists): $bundle_name"
+              continue
+            fi
             echo "Copying bundle: $bundle_name"
             cp -R "$bundle" "$APP_DIR/Contents/Resources/"
           done

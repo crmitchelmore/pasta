@@ -98,9 +98,16 @@ jobs:
           fi
           
           # Copy resource bundles (KeyboardShortcuts has localized strings)
+          # Only copy unique bundles (avoid duplicates from arm64/x86_64 builds)
           echo "==> Copying resource bundles"
+          declare -A copied_bundles
           find .build -name "*.bundle" -type d | while read bundle; do
             bundle_name=$(basename "$bundle")
+            # Skip if already copied (check if destination exists)
+            if [ -d "$APP_DIR/Contents/Resources/$bundle_name" ]; then
+              echo "Skipping (already exists): $bundle_name"
+              continue
+            fi
             echo "Copying bundle: $bundle_name"
             cp -R "$bundle" "$APP_DIR/Contents/Resources/"
           done
