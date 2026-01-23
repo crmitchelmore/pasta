@@ -17,6 +17,27 @@ Pasta is a macOS clipboard history manager built with SwiftUI and Swift Package 
 
 ## Critical Patterns
 
+### Search Implementation (FTS5)
+**ALWAYS** use SQLite FTS5 for search, not in-memory fuzzy search libraries.
+
+The database has an FTS5 virtual table (`clipboard_entries_fts`) with triggers to keep it synced.
+Use `DatabaseManager.searchFTS()` which supports prefix matching:
+
+```swift
+// Fast: FTS5 search (<1ms for 10k+ entries)
+let results = try database.searchFTS(query: "hello", contentType: nil, limit: 50)
+
+// The query "hello world" becomes FTS5 query "hello* world*" for prefix matching
+```
+
+**Why:** In-memory Fuse search caused 200-500ms delays and beach ball on 6k+ entries.
+FTS5 runs in SQLite's optimized C engine with inverted index.
+
+**Also:** When filtering results on main thread, limit input to ~200 entries max:
+```swift
+let limited = Array(input.prefix(200))  // Prevent main thread blocking
+```
+
 ### Quick Search Paste Behavior
 **DO NOT** paste while the quick search panel is visible. The correct sequence is:
 
@@ -123,6 +144,13 @@ git tag v0.x.x && git push origin v0.x.x
 ```
 
 The workflow builds a universal binary, signs, notarizes, and creates a GitHub release with DMG.
+
+### Protected Branch Limitation
+The release workflow **cannot push to main** due to branch protection requiring status checks.
+
+- Don't try to `git push` from release workflows to protected main branch.
+- For appcast/changelog updates, deploy directly to CDN (Cloudflare Pages) without git commit.
+- The appcast.xml is deployed to pasta-app.com via Cloudflare, not committed to the repo.
 
 ## SPM + Dynamic Frameworks (Sparkle)
 
