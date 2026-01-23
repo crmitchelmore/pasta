@@ -95,6 +95,9 @@ jobs:
         env:
           SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
         run: |
+          # Get the short commit SHA
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          
           cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -132,6 +135,9 @@ jobs:
               <string>AppIcon</string>
               <key>LSUIElement</key>
               <true/>
+              <!-- Git Commit SHA for About screen -->
+              <key>GitCommitSHA</key>
+              <string>${COMMIT_SHA}</string>
               <!-- Sparkle Auto-Update Configuration -->
               <key>SUFeedURL</key>
               <string>https://github.com/crmitchelmore/pasta/releases/latest/download/appcast.xml</string>
