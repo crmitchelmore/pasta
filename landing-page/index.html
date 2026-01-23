@@ -11,7 +11,7 @@
   <meta property="og:url" content="https://pasta-app.com">
   <meta property="og:image" content="https://pasta-app.com/images/og-image.png">
   <meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍝</text></svg>">
+  <link rel="icon" href="images/app-icon.png" type="image/png">
   
   <!-- Fonts: Satoshi for headings, General Sans for body -->
   <link rel="preconnect" href="https://api.fontshare.com">
@@ -24,10 +24,10 @@
       --color-bg-card: #1a1f2e;
       --color-text: #f8fafc;
       --color-text-muted: #8b95a8;
-      --color-accent: #f59e0b;
-      --color-accent-warm: #fbbf24;
-      --color-accent-deep: #d97706;
-      --color-accent-glow: rgba(245, 158, 11, 0.25);
+      --color-accent: #3b82f6;
+      --color-accent-warm: #60a5fa;
+      --color-accent-deep: #2563eb;
+      --color-accent-glow: rgba(59, 130, 246, 0.25);
       --color-secondary: #10b981;
       --color-tertiary: #8b5cf6;
       --color-border: rgba(255, 255, 255, 0.06);
@@ -136,13 +136,15 @@
     .nav__logo-icon {
       width: 38px;
       height: 38px;
-      background: linear-gradient(135deg, var(--color-accent-deep) 0%, var(--color-accent-warm) 100%);
       border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.4rem;
+      overflow: hidden;
       box-shadow: 0 4px 12px var(--color-accent-glow);
+    }
+    
+    .nav__logo-icon img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
     }
 
     .nav__links {
@@ -383,8 +385,8 @@
       margin-bottom: 1.25rem;
     }
 
-    .feature-card__icon--amber {
-      background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(217, 119, 6, 0.2) 100%);
+    .feature-card__icon--blue {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.2) 100%);
     }
     .feature-card__icon--emerald {
       background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.2) 100%);
@@ -460,6 +462,67 @@
       font-size: 0.8rem;
       color: var(--color-text-muted);
       font-family: 'SF Mono', 'Monaco', monospace;
+    }
+    
+    /* Quick Search Section */
+    .quick-search {
+      padding: 8rem 2rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    
+    .quick-search__content {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      align-items: center;
+      margin-top: 3rem;
+    }
+    
+    @media (max-width: 768px) {
+      .quick-search__content {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+      }
+    }
+    
+    .quick-search__text h3 {
+      font-family: var(--font-display);
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+    }
+    
+    .quick-search__text p {
+      color: var(--color-text-muted);
+      line-height: 1.7;
+      margin-bottom: 1.5rem;
+    }
+    
+    .quick-search__shortcut {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: var(--color-bg-card);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      border: 1px solid var(--color-border);
+      font-family: 'SF Mono', 'Monaco', monospace;
+      font-size: 0.9rem;
+    }
+    
+    .quick-search__screenshot {
+      position: relative;
+    }
+    
+    .quick-search__screenshot img {
+      width: 100%;
+      height: auto;
+      border-radius: 12px;
+      box-shadow: 
+        0 0 0 1px var(--color-border),
+        0 20px 60px rgba(0, 0, 0, 0.4),
+        0 0 80px var(--color-accent-glow);
     }
 
     /* Keyboard Shortcuts Section */
@@ -686,7 +749,7 @@
   <!-- Navigation -->
   <nav class="nav">
     <a href="/" class="nav__logo">
-      <span class="nav__logo-icon">🍝</span>
+      <span class="nav__logo-icon"><img src="images/app-icon.png" alt="Pasta icon"></span>
       Pasta
     </a>
     <ul class="nav__links">
@@ -770,7 +833,7 @@
     
     <div class="features__grid">
       <div class="feature-card">
-        <div class="feature-card__icon feature-card__icon--amber">📋</div>
+        <div class="feature-card__icon feature-card__icon--blue">📋</div>
         <h3 class="feature-card__title">Unlimited History</h3>
         <p class="feature-card__description">
           Every copy is saved automatically. Search through weeks of clipboard history instantly.
@@ -891,6 +954,33 @@
             <div class="content-type__example">Everything else</div>
           </div>
         </div>
+      </div>
+    </div>
+  </section>
+  
+  <!-- Quick Search Section -->
+  <section class="quick-search">
+    <div class="section-header">
+      <span class="section-label">Quick Search</span>
+      <h2 class="section-title">Spotlight for your clipboard.</h2>
+    </div>
+    
+    <div class="quick-search__content">
+      <div class="quick-search__text">
+        <h3>Instant access anywhere</h3>
+        <p>
+          Press the global hotkey to summon a floating search panel from any app. 
+          Type to filter, use arrow keys to select, and press Enter to paste instantly.
+        </p>
+        <div class="quick-search__shortcut">
+          <span class="key">⌃</span>
+          <span class="key">⌘</span>
+          <span class="key">V</span>
+          to open
+        </div>
+      </div>
+      <div class="quick-search__screenshot">
+        <img src="images/screenshot-quicksearch.png" alt="Quick Search panel - Spotlight-style clipboard access" />
       </div>
     </div>
   </section>
