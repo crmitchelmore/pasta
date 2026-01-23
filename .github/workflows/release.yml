@@ -494,19 +494,9 @@ jobs:
       
       - name: Update landing page appcast.xml
         run: |
-          # Copy the generated appcast to the landing-page directory
+          # Copy the generated appcast to the landing-page directory for deployment
           cp "$APPCAST_PATH" landing-page/appcast.xml
-          
-          # Configure git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          # Commit and push the updated appcast
-          git add landing-page/appcast.xml
-          git commit -m "Update appcast.xml for v${{ steps.version.outputs.version }}"
-          git push origin HEAD:main
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "Appcast copied to landing-page/appcast.xml"
       
       - name: Deploy landing page with updated appcast
         uses: cloudflare/wrangler-action@v3
