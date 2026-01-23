@@ -175,8 +175,14 @@ public final class PasteService {
     private func makeContents(for entry: ClipboardEntry) -> Contents? {
         switch entry.contentType {
         case .image, .screenshot:
-            guard let data = entry.rawData else { return nil }
-            return .imageTIFF(data)
+            // Try rawData first, then load from imagePath if needed
+            if let data = entry.rawData {
+                return .imageTIFF(data)
+            } else if let imagePath = entry.imagePath,
+                      let data = try? Data(contentsOf: URL(fileURLWithPath: imagePath)) {
+                return .imageTIFF(data)
+            }
+            return nil
 
         case .filePath:
             let paths = entry.content
