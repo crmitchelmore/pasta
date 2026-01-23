@@ -817,7 +817,9 @@ struct PanelContentView: View {
     }
     
     private func applyFiltersToEntries(_ input: [ClipboardEntry]) -> [ClipboardEntry] {
-        var out = input
+        // Limit input to avoid processing thousands of entries on main thread
+        let limited = Array(input.prefix(200))
+        var out = limited
         if let contentTypeFilter {
             out = out.filter { $0.contentType == contentTypeFilter }
         }
