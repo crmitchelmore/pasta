@@ -15,8 +15,8 @@ let package = Package(
     dependencies: [
         // SQLite database
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "6.24.0"),
-        // Global keyboard shortcuts (recording UI + triggering)
-        .package(url: "https://github.com/sindresorhus/KeyboardShortcuts.git", from: "2.0.0"),
+        // Global keyboard shortcuts (Carbon-based, no resource bundle)
+        .package(url: "https://github.com/soffes/HotKey.git", from: "0.2.0"),
         // Fuzzy text search
         .package(url: "https://github.com/krisk/fuse-swift.git", from: "1.4.0"),
         // Auto-updates
@@ -30,7 +30,7 @@ let package = Package(
                 "PastaCore",
                 "PastaUI",
                 "PastaDetectors",
-                "KeyboardShortcuts",
+                "HotKey",
                 .product(name: "Sparkle", package: "Sparkle")
             ],
             resources: [
@@ -52,8 +52,7 @@ let package = Package(
             name: "PastaUI",
             dependencies: [
                 "PastaCore",
-                "PastaDetectors",
-                "KeyboardShortcuts"
+                "PastaDetectors"
             ]
         ),
         

@@ -1,12 +1,6 @@
 import AppKit
-import KeyboardShortcuts
 import PastaCore
 import SwiftUI
-
-// Define the keyboard shortcut name
-public extension KeyboardShortcuts.Name {
-    static let openPasta = Self("openPasta", default: .init(.v, modifiers: [.control, .command]))
-}
 
 public struct SettingsView: View {
     private enum Defaults {
@@ -124,7 +118,13 @@ private struct GeneralSettingsTab: View {
     var body: some View {
         Form {
             Section {
-                KeyboardShortcuts.Recorder("Open Pasta", name: .openPasta)
+                HStack {
+                    Text("Open Pasta")
+                    Spacer()
+                    Text("⌃⌘V")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
             } header: {
                 Label("Keyboard Shortcut", systemImage: "keyboard")
             }
@@ -670,7 +670,7 @@ private struct AboutSettingsTab: View {
                     
                     DependencyRow(name: "Sparkle", version: "2.6.0+", url: "https://sparkle-project.org", description: "Auto-update framework")
                     DependencyRow(name: "GRDB", version: "6.24+", url: "https://github.com/groue/GRDB.swift", description: "SQLite toolkit")
-                    DependencyRow(name: "KeyboardShortcuts", version: "2.0+", url: "https://github.com/sindresorhus/KeyboardShortcuts", description: "Global hotkeys")
+                    DependencyRow(name: "HotKey", version: "0.2+", url: "https://github.com/soffes/HotKey", description: "Global hotkeys")
                 }
             } header: {
                 Label("Dependencies", systemImage: "shippingbox")
