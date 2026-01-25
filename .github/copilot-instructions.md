@@ -96,6 +96,14 @@ DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
 }
 ```
 
+### Sidebar / Filters Performance (SwiftUI)
+Avoid O(N) work inside SwiftUI `View` computed properties (e.g. sidebar counts).
+If counts/derived data depend on `entries`, precompute once when entries change
+(`.onReceive(backgroundService.$entries)` or similar), store in `@State`, and pass into views.
+
+For large datasets (5k+), also preload first-page results per filter (e.g. per ContentType)
+off-main-thread so switching filters is instant.
+
 ### Keyboard Event Handling in SwiftUI
 SwiftUI's `.onKeyPress` doesn't work when a TextField has focus. Use `NSEvent.addLocalMonitorForEvents`:
 
