@@ -212,6 +212,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func checkForMountedPastaDMG() {
         let fileManager = FileManager.default
         
+        // Only show eject dialog once per volume - track which volumes we've asked about
+        // This prevents the dialog from appearing after Sparkle auto-updates
+        let askedVolumesKey = "pasta.askedToEjectVolumes"
+        var askedVolumes = Set(UserDefaults.standard.stringArray(forKey: askedVolumesKey) ?? [])
+        
         do {
             let volumes = try fileManager.contentsOfDirectory(atPath: "/Volumes")
             
@@ -221,6 +226,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 
                 // Check if this looks like our Pasta DMG
                 if volume.lowercased().contains("pasta") || fileManager.fileExists(atPath: appPath) {
+                    // Skip if we've already asked about this volume
+                    if askedVolumes.contains(volume) {
+                        PastaLogger.app.debug("Already asked about volume: \(volume), skipping")
+                        return
+                    }
+                    
+                    // Remember we asked about this volume
+                    askedVolumes.insert(volume)
+                    UserDefaults.standard.set(Array(askedVolumes), forKey: askedVolumesKey)
+                    
                     showEjectDMGAlert(volumeName: volume)
                     return
                 }
