@@ -74,6 +74,14 @@ All data stored locally:
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+## Support
+
+Pasta is free and open source. If you find it useful, consider supporting development:
+
+- 💝 [GitHub Sponsors](https://github.com/sponsors/crmitchelmore)
+- ☕️ [Ko-fi](https://ko-fi.com/crmitchelmore)
+- ⭐️ Star this repo!
+
 ## License
 
 MIT

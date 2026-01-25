@@ -1,3 +1,4 @@
+import AppKit
 import PastaCore
 import SwiftUI
 
@@ -78,6 +79,7 @@ public struct ClipboardListView: View {
     private let searchQuery: String
     private let filterType: ContentType?
     private let filterApp: String?
+    @Binding private var showExtractedValuesOnly: Bool
     private let onCopy: (ClipboardEntry) -> Void
     private let onPaste: (ClipboardEntry) -> Void
     private let onDelete: (ClipboardEntry) -> Void
@@ -92,6 +94,12 @@ public struct ClipboardListView: View {
     @State private var sections: [SectionData] = []
     @State private var entryLookup: [UUID: ClipboardEntry] = [:]
     @State private var lastDataHash: Int = 0
+    
+    /// Whether we can show the "values only" toggle (filtering by extractable type)
+    private var canShowValuesToggle: Bool {
+        guard let filterType else { return false }
+        return MetadataParser.extractableTypes.contains(filterType)
+    }
 
     public init(
         entries: [ClipboardEntry],
@@ -99,6 +107,7 @@ public struct ClipboardListView: View {
         searchQuery: String = "",
         filterType: ContentType? = nil,
         filterApp: String? = nil,
+        showExtractedValuesOnly: Binding<Bool> = .constant(false),
         onCopy: @escaping (ClipboardEntry) -> Void,
         onPaste: @escaping (ClipboardEntry) -> Void,
         onDelete: @escaping (ClipboardEntry) -> Void,
@@ -110,6 +119,7 @@ public struct ClipboardListView: View {
         self.searchQuery = searchQuery
         self.filterType = filterType
         self.filterApp = filterApp
+        _showExtractedValuesOnly = showExtractedValuesOnly
         self.onCopy = onCopy
         self.onPaste = onPaste
         self.onDelete = onDelete
@@ -258,6 +268,14 @@ public struct ClipboardListView: View {
                 
                 Spacer()
                 
+                // Show "Values Only" toggle when filtering by extractable type
+                if canShowValuesToggle {
+                    Toggle("Values Only", isOn: $showExtractedValuesOnly)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .help("Show only the extracted \(filterType?.displayTitle.lowercased() ?? "items") instead of full text")
+                }
+                
                 Button {
                     isSelectionMode = true
                 } label: {
@@ -299,7 +317,10 @@ public struct ClipboardListView: View {
     
     @ViewBuilder
     private var listContent: some View {
-        if isSelectionMode {
+        if showExtractedValuesOnly && canShowValuesToggle, let filterType {
+            // Show extracted values only mode
+            extractedValuesListView(for: filterType)
+        } else if isSelectionMode {
             // Use SwiftUI List for selection mode (less performance critical)
             selectionModeList
         } else {
@@ -320,6 +341,67 @@ public struct ClipboardListView: View {
                     if let entry = entryLookup[id] { onReveal(entry) }
                 }
             )
+        }
+    }
+    
+    /// View showing only extracted values for the filtered type
+    @ViewBuilder
+    private func extractedValuesListView(for type: ContentType) -> some View {
+        let allValues = extractedValuesForType(type)
+        
+        if allValues.isEmpty {
+            ContentUnavailableView(
+                "No \(type.displayTitle.lowercased()) found",
+                systemImage: type.systemImageName,
+                description: Text("No extracted values of this type.")
+            )
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 1) {
+                    ForEach(allValues) { item in
+                        ExtractedValueRow(item: item)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .background(Color(nsColor: .textBackgroundColor).opacity(0.3))
+        }
+    }
+    
+    /// Extract all values of the given type from all displayed entries
+    private func extractedValuesForType(_ type: ContentType) -> [ExtractedValueItem] {
+        var results: [ExtractedValueItem] = []
+        
+        for entry in entries {
+            let values = entry.extractedValues(for: type)
+            for value in values {
+                results.append(ExtractedValueItem(
+                    value: value.value,
+                    displayValue: value.displayValue,
+                    type: type,
+                    sourceEntryID: entry.id,
+                    sourcePreview: String(entry.content.prefix(50))
+                ))
+            }
+            
+            // Also include the entry itself if its primary type matches
+            if entry.contentType == type {
+                results.append(ExtractedValueItem(
+                    value: entry.content,
+                    displayValue: String(entry.content.prefix(100)),
+                    type: type,
+                    sourceEntryID: entry.id,
+                    sourcePreview: nil
+                ))
+            }
+        }
+        
+        // Remove duplicates by value
+        var seen: Set<String> = []
+        return results.filter { item in
+            if seen.contains(item.value) { return false }
+            seen.insert(item.value)
+            return true
         }
     }
     
@@ -442,6 +524,80 @@ private extension String {
             return String(last).capitalized
         }
         return self
+    }
+}
+
+// MARK: - Extracted Value Types
+
+/// Item representing an extracted value from an entry
+private struct ExtractedValueItem: Identifiable {
+    let id = UUID()
+    let value: String
+    let displayValue: String
+    let type: ContentType
+    let sourceEntryID: UUID
+    let sourcePreview: String?  // nil if this IS the primary entry
+}
+
+/// Row view for displaying an extracted value
+private struct ExtractedValueRow: View {
+    let item: ExtractedValueItem
+    @State private var copied = false
+    
+    var body: some View {
+        Button {
+            copyToClipboard()
+        } label: {
+            HStack(spacing: 10) {
+                // Type icon
+                Image(systemName: item.type.systemImageName)
+                    .foregroundStyle(item.type.tint)
+                    .frame(width: 20)
+                
+                // Value
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.displayValue)
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                    
+                    if let source = item.sourcePreview {
+                        Text("from: \(source)...")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+                
+                Spacer(minLength: 4)
+                
+                // Copy indicator
+                Image(systemName: copied ? "checkmark.circle.fill" : "doc.on.doc")
+                    .font(.caption)
+                    .foregroundStyle(copied ? .green : .secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Click to copy: \(item.value)")
+    }
+    
+    private func copyToClipboard() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(item.value, forType: .string)
+        
+        withAnimation(.easeInOut(duration: 0.2)) {
+            copied = true
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                copied = false
+            }
+        }
     }
 }
 

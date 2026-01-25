@@ -96,6 +96,12 @@ public struct SettingsView: View {
                 Label("About", systemImage: "info.circle")
             }
             .tag(SettingsTab.about)
+            
+            TipJarView()
+            .tabItem {
+                Label("Tip Jar", systemImage: "heart.fill")
+            }
+            .tag(SettingsTab.tipJar)
         }
         .frame(width: 520, height: 500)
         .padding(.top, 8)
@@ -104,7 +110,7 @@ public struct SettingsView: View {
     }
 
     private enum SettingsTab: Hashable {
-        case general, clipboard, storage, `import`, about
+        case general, clipboard, storage, `import`, about, tipJar
     }
 }
 

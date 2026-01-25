@@ -144,7 +144,7 @@ public struct FilterSidebarView: View {
         return counts
     }
     
-    /// Returns type counts with file path images also counted under .image
+    /// Returns type counts including entries that contain a type in metadata (not just primary type)
     private var effectiveTypeCounts: [ContentType: Int] {
         var counts = typeCounts
         
@@ -156,6 +156,20 @@ public struct FilterSidebarView: View {
         
         if imageFilePathCount > 0 {
             counts[.image, default: 0] += imageFilePathCount
+        }
+        
+        // For extractable types, also count entries that CONTAIN items of that type in metadata
+        // but don't have that as their primary type
+        for type in MetadataParser.extractableTypes {
+            let containsCount = entries.filter { entry in
+                // Don't double-count entries that already have this as primary type
+                guard entry.contentType != type else { return false }
+                return MetadataParser.containsType(type, in: entry.metadata)
+            }.count
+            
+            if containsCount > 0 {
+                counts[type, default: 0] += containsCount
+            }
         }
         
         return counts

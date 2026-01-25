@@ -28,6 +28,13 @@ struct PastaApp: App {
             )
             .frame(minWidth: 450, minHeight: 400)
         }
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    UpdaterManager.shared.checkForUpdates()
+                }
+            }
+        }
     }
 }
 
@@ -630,6 +637,7 @@ struct PanelContentView: View {
     @State private var sourceAppFilter: String = ""
 
     @State private var selectedEntryID: UUID? = nil
+    @State private var showExtractedValuesOnly: Bool = false
 
     @State private var isShowingOnboarding: Bool = false
     @State private var isShowingErrorAlert: Bool = false
@@ -699,6 +707,8 @@ struct PanelContentView: View {
             ClipboardListView(
                 entries: displayedEntries,
                 selectedEntryID: $selectedEntryID,
+                filterType: contentTypeFilter,
+                showExtractedValuesOnly: $showExtractedValuesOnly,
                 onCopy: { entry in copyEntry(entry) },
                 onPaste: { entry in pasteEntry(entry) },
                 onDelete: { entry in deleteEntry(entry) },
@@ -763,6 +773,8 @@ struct PanelContentView: View {
                 if newValue != .url {
                     urlDomainFilter = nil
                 }
+                // Reset "values only" toggle when filter changes
+                showExtractedValuesOnly = false
                 triggerSearchUpdate()
             }
             .onChange(of: sourceAppFilter) { _, _ in
@@ -819,9 +831,15 @@ struct PanelContentView: View {
     private func applyFiltersToEntries(_ input: [ClipboardEntry]) -> [ClipboardEntry] {
         var out = input
         
-        // Apply type filter first (before limiting) so we get all matching entries
+        // Apply type filter - include entries that CONTAIN the type in metadata, not just primary type
         if let contentTypeFilter {
-            out = out.filter { $0.contentType == contentTypeFilter }
+            if MetadataParser.extractableTypes.contains(contentTypeFilter) {
+                // For extractable types, include entries that contain the type in metadata
+                out = out.filter { $0.containsType(contentTypeFilter) }
+            } else {
+                // For non-extractable types, use primary type only
+                out = out.filter { $0.contentType == contentTypeFilter }
+            }
         }
         
         let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
