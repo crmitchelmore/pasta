@@ -5,6 +5,9 @@ import SwiftUI
 public struct FilterSidebarView: View {
     public let entries: [ClipboardEntry]
 
+    private let effectiveTypeCountsOverride: [ContentType: Int]?
+    private let sourceAppCountsOverride: [String: Int]?
+
     @Binding private var selectedContentType: ContentType?
     @Binding private var selectedURLDomain: String?
     @Binding private var selection: FilterSelection?
@@ -16,11 +19,15 @@ public struct FilterSidebarView: View {
 
     public init(
         entries: [ClipboardEntry],
+        effectiveTypeCounts: [ContentType: Int]? = nil,
+        sourceAppCounts: [String: Int]? = nil,
         selectedContentType: Binding<ContentType?>,
         selectedURLDomain: Binding<String?>,
         selection: Binding<FilterSelection?>
     ) {
         self.entries = entries
+        effectiveTypeCountsOverride = effectiveTypeCounts
+        sourceAppCountsOverride = sourceAppCounts
         _selectedContentType = selectedContentType
         _selectedURLDomain = selectedURLDomain
         _selection = selection
@@ -101,23 +108,26 @@ public struct FilterSidebarView: View {
                 }
             }
 
-            if !domainCounts.isEmpty {
+            let hasAnyURLs = entries.contains { $0.contentType == .url }
+            if hasAnyURLs {
                 Section {
                     DisclosureGroup("Domains", isExpanded: $showDomains) {
-                        sidebarRow(
-                            title: "All Domains",
-                            systemImageName: "globe",
-                            count: domainCounts.values.reduce(0, +),
-                            selectionValue: .domain("")
-                        )
-
-                        ForEach(sortedDomains, id: \.domain) { item in
+                        if showDomains {
                             sidebarRow(
-                                title: item.domain,
-                                systemImageName: "link",
-                                count: item.count,
-                                selectionValue: .domain(item.domain)
+                                title: "All Domains",
+                                systemImageName: "globe",
+                                count: domainCounts.values.reduce(0, +),
+                                selectionValue: .domain("")
                             )
+
+                            ForEach(sortedDomains, id: \.domain) { item in
+                                sidebarRow(
+                                    title: item.domain,
+                                    systemImageName: "link",
+                                    count: item.count,
+                                    selectionValue: .domain(item.domain)
+                                )
+                            }
                         }
                     }
                 }
@@ -146,6 +156,10 @@ public struct FilterSidebarView: View {
     
     /// Returns type counts including entries that contain a type in metadata (not just primary type)
     private var effectiveTypeCounts: [ContentType: Int] {
+        if let effectiveTypeCountsOverride {
+            return effectiveTypeCountsOverride
+        }
+
         var counts = typeCounts
         
         // Count file paths that are images and add to image count
@@ -203,6 +217,10 @@ public struct FilterSidebarView: View {
     // MARK: - Source App Counts
     
     private var sourceAppCounts: [String: Int] {
+        if let sourceAppCountsOverride {
+            return sourceAppCountsOverride
+        }
+
         var counts: [String: Int] = [:]
         for entry in entries {
             let app = entry.sourceApp ?? "Unknown"

@@ -24,40 +24,86 @@ public struct MetadataParser {
         .envVar, .envVarBlock,
         .filePath, .shellCommand
     ]
+
+    private struct TypeBits {
+        static let email: UInt64 = 1 << 0
+        static let url: UInt64 = 1 << 1
+        static let phoneNumber: UInt64 = 1 << 2
+        static let ipAddress: UInt64 = 1 << 3
+        static let uuid: UInt64 = 1 << 4
+        static let hash: UInt64 = 1 << 5
+        static let apiKey: UInt64 = 1 << 6
+        static let jwt: UInt64 = 1 << 7
+        static let envVar: UInt64 = 1 << 8
+        static let envVarBlock: UInt64 = 1 << 9
+        static let filePath: UInt64 = 1 << 10
+        static let shellCommand: UInt64 = 1 << 11
+    }
+
+    private static let containsTypeCache: NSCache<NSString, NSNumber> = {
+        let cache = NSCache<NSString, NSNumber>()
+        cache.countLimit = 20_000
+        return cache
+    }()
+
+    private static func bit(for type: ContentType) -> UInt64 {
+        switch type {
+        case .email: return TypeBits.email
+        case .url: return TypeBits.url
+        case .phoneNumber: return TypeBits.phoneNumber
+        case .ipAddress: return TypeBits.ipAddress
+        case .uuid: return TypeBits.uuid
+        case .hash: return TypeBits.hash
+        case .apiKey: return TypeBits.apiKey
+        case .jwt: return TypeBits.jwt
+        case .envVar: return TypeBits.envVar
+        case .envVarBlock: return TypeBits.envVarBlock
+        case .filePath: return TypeBits.filePath
+        case .shellCommand: return TypeBits.shellCommand
+        default: return 0
+        }
+    }
+
+    private static func containedTypesBitmask(in metadata: String) -> UInt64 {
+        let key = metadata as NSString
+        if let cached = containsTypeCache.object(forKey: key) {
+            return UInt64(truncating: cached)
+        }
+
+        guard let dict = parseJSON(metadata) else {
+            containsTypeCache.setObject(0, forKey: key)
+            return 0
+        }
+
+        var mask: UInt64 = 0
+        if hasItems(dict, key: "emails") { mask |= TypeBits.email }
+        if hasItems(dict, key: "urls") { mask |= TypeBits.url }
+        if hasItems(dict, key: "phoneNumbers") { mask |= TypeBits.phoneNumber }
+        if hasItems(dict, key: "ipAddresses") { mask |= TypeBits.ipAddress }
+        if hasItems(dict, key: "uuids") { mask |= TypeBits.uuid }
+        if hasItems(dict, key: "hashes") { mask |= TypeBits.hash }
+        if hasItems(dict, key: "apiKeys") { mask |= TypeBits.apiKey }
+        if hasItems(dict, key: "jwt") { mask |= TypeBits.jwt }
+        if hasItems(dict, key: "filePaths") { mask |= TypeBits.filePath }
+        if hasItems(dict, key: "shellCommands") { mask |= TypeBits.shellCommand }
+
+        if let env = dict["env"] as? [String: Any] {
+            mask |= TypeBits.envVar
+            if (env["isBlock"] as? Bool) == true {
+                mask |= TypeBits.envVarBlock
+            }
+        }
+
+        containsTypeCache.setObject(NSNumber(value: mask), forKey: key)
+        return mask
+    }
     
     /// Check if an entry's metadata contains items of a given type
     public static func containsType(_ type: ContentType, in metadata: String?) -> Bool {
-        guard let metadata = metadata, let dict = parseJSON(metadata) else { return false }
-        
-        switch type {
-        case .email:
-            return hasItems(dict, key: "emails")
-        case .url:
-            return hasItems(dict, key: "urls")
-        case .phoneNumber:
-            return hasItems(dict, key: "phoneNumbers")
-        case .ipAddress:
-            return hasItems(dict, key: "ipAddresses")
-        case .uuid:
-            return hasItems(dict, key: "uuids")
-        case .hash:
-            return hasItems(dict, key: "hashes")
-        case .apiKey:
-            return hasItems(dict, key: "apiKeys")
-        case .jwt:
-            return hasItems(dict, key: "jwt")
-        case .envVar:
-            return (dict["env"] as? [String: Any]) != nil
-        case .envVarBlock:
-            guard let env = dict["env"] as? [String: Any] else { return false }
-            return (env["isBlock"] as? Bool) == true
-        case .filePath:
-            return hasItems(dict, key: "filePaths")
-        case .shellCommand:
-            return hasItems(dict, key: "shellCommands")
-        default:
-            return false
-        }
+        guard let metadata else { return false }
+        let mask = containedTypesBitmask(in: metadata)
+        let bit = bit(for: type)
+        return (mask & bit) != 0
     }
     
     /// Extract all values of a given type from metadata

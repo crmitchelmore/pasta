@@ -664,6 +664,16 @@ struct PanelContentView: View {
     @State private var displayedEntries: [ClipboardEntry] = []
     @State private var searchDebounceTask: Task<Void, Never>? = nil
 
+    private enum Preload {
+        static let limit = 200
+    }
+
+    // Preloaded first-page results per type (and nil = All)
+    @State private var preloadedEntriesByType: [ContentType?: [ClipboardEntry]] = [:]
+    @State private var preloadedEffectiveTypeCounts: [ContentType: Int]? = nil
+    @State private var preloadedSourceAppCounts: [String: Int]? = nil
+    @State private var preloadTask: Task<Void, Never>? = nil
+
     @FocusState private var searchFocused: Bool
     @FocusState private var listFocused: Bool
 
@@ -712,6 +722,8 @@ struct PanelContentView: View {
         HStack(alignment: .top, spacing: 12) {
             FilterSidebarView(
                 entries: backgroundService.entries,
+                effectiveTypeCounts: preloadedEffectiveTypeCounts,
+                sourceAppCounts: preloadedSourceAppCounts,
                 selectedContentType: $contentTypeFilter,
                 selectedURLDomain: $urlDomainFilter,
                 selection: $filterSelection
@@ -760,10 +772,13 @@ struct PanelContentView: View {
                 }
             }
             .onReceive(backgroundService.$entries) { entries in
+                // Keep preload cache warm so type switching is instant
+                schedulePreload(for: entries)
+
                 // Update displayed entries when source changes (new items, deletions)
                 let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.isEmpty {
-                    displayedEntries = applyFiltersToEntries(entries)
+                    displayedEntries = preloadedEntriesForCurrentFilters() ?? applyFiltersToEntries(entries)
                 } else {
                     triggerSearchUpdate()
                 }
@@ -773,8 +788,8 @@ struct PanelContentView: View {
                 searchDebounceTask?.cancel()
                 let trimmed = newQuery.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.isEmpty {
-                    // Empty query - update immediately with all entries
-                    displayedEntries = applyFiltersToEntries(backgroundService.entries)
+                    // Empty query - update immediately
+                    displayedEntries = preloadedEntriesForCurrentFilters() ?? applyFiltersToEntries(backgroundService.entries)
                 } else {
                     // Debounce for typing - search runs on main actor after debounce
                     searchDebounceTask = Task { @MainActor in
@@ -843,6 +858,101 @@ struct PanelContentView: View {
             ))
     }
     
+    private func schedulePreload(for entries: [ClipboardEntry]) {
+        preloadTask?.cancel()
+        let snapshot = entries
+
+        preloadTask = Task {
+            let result = await Task.detached(priority: .utility) { () -> (entriesByType: [ContentType?: [ClipboardEntry]], effectiveTypeCounts: [ContentType: Int], sourceAppCounts: [String: Int]) in
+                func filePathIsImage(_ metadata: String?) -> Bool {
+                    guard let meta = metadata,
+                          let data = meta.data(using: .utf8),
+                          let dict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                          let paths = dict["filePaths"] as? [[String: Any]],
+                          let first = paths.first,
+                          let fileType = first["fileType"] as? String
+                    else { return false }
+
+                    return fileType == "image"
+                }
+
+                var out: [ContentType?: [ClipboardEntry]] = [:]
+                out[nil] = Array(snapshot.prefix(Preload.limit))
+
+                var counts: [ContentType: Int] = [:]
+                var sourceAppCounts: [String: Int] = [:]
+
+                for entry in snapshot {
+                    counts[entry.contentType, default: 0] += 1
+                    let app = entry.sourceApp ?? "Unknown"
+                    sourceAppCounts[app, default: 0] += 1
+                }
+
+                let imageFilePathCount = snapshot.reduce(0) { acc, entry in
+                    guard entry.contentType == .filePath else { return acc }
+                    return acc + (filePathIsImage(entry.metadata) ? 1 : 0)
+                }
+
+                if imageFilePathCount > 0 {
+                    counts[.image, default: 0] += imageFilePathCount
+                }
+
+                for type in MetadataParser.extractableTypes {
+                    var containsCount = 0
+                    for entry in snapshot {
+                        guard entry.contentType != type else { continue }
+                        if MetadataParser.containsType(type, in: entry.metadata) {
+                            containsCount += 1
+                        }
+                    }
+
+                    if containsCount > 0 {
+                        counts[type, default: 0] += containsCount
+                    }
+                }
+
+                for type in ContentType.allCases {
+                    var matches: [ClipboardEntry] = []
+                    matches.reserveCapacity(Preload.limit)
+
+                    if MetadataParser.extractableTypes.contains(type) {
+                        for entry in snapshot {
+                            if entry.containsType(type) {
+                                matches.append(entry)
+                                if matches.count >= Preload.limit { break }
+                            }
+                        }
+                    } else {
+                        for entry in snapshot {
+                            if entry.contentType == type {
+                                matches.append(entry)
+                                if matches.count >= Preload.limit { break }
+                            }
+                        }
+                    }
+
+                    out[type] = matches
+                }
+
+                return (out, counts, sourceAppCounts)
+            }.value
+
+            await MainActor.run {
+                preloadedEntriesByType = result.entriesByType
+                preloadedEffectiveTypeCounts = result.effectiveTypeCounts
+                preloadedSourceAppCounts = result.sourceAppCounts
+            }
+        }
+    }
+
+    private func preloadedEntriesForCurrentFilters() -> [ClipboardEntry]? {
+        // Only use preload cache for the common case: no query, no domain filter, no source app filter
+        guard searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        guard urlDomainFilter == nil else { return nil }
+        guard sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return preloadedEntriesByType[contentTypeFilter]
+    }
+
     private func applyFiltersToEntries(_ input: [ClipboardEntry]) -> [ClipboardEntry] {
         var out = input
         
@@ -879,7 +989,7 @@ struct PanelContentView: View {
         searchDebounceTask?.cancel()
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            displayedEntries = applyFiltersToEntries(backgroundService.entries)
+            displayedEntries = preloadedEntriesForCurrentFilters() ?? applyFiltersToEntries(backgroundService.entries)
         } else {
             performSearch(query: trimmed)
         }
@@ -912,8 +1022,9 @@ struct PanelContentView: View {
             searchService = SearchService(database: database)
         }
         
-        // Initialize displayed entries
-        displayedEntries = applyFiltersToEntries(backgroundService.entries)
+        // Initialize preload cache + displayed entries
+        schedulePreload(for: backgroundService.entries)
+        displayedEntries = preloadedEntriesForCurrentFilters() ?? applyFiltersToEntries(backgroundService.entries)
         
         if selectedEntryID == nil {
             selectedEntryID = displayedEntries.first?.id
