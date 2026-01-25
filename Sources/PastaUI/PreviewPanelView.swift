@@ -310,59 +310,12 @@ public struct PreviewPanelView: View {
     // MARK: - Extracted Items
     
     fileprivate func extractedItems(from entry: ClipboardEntry) -> [ExtractedItem]? {
-        guard let meta = entry.metadata else { return nil }
-        guard let dict = parseJSONDictionary(meta) else { return nil }
-        
-        var items: [ExtractedItem] = []
-        
-        // Extract emails
-        if let emails = dict["emails"] as? [[String: Any]] {
-            for email in emails {
-                if let value = email["email"] as? String {
-                    items.append(ExtractedItem(type: .email, value: value, displayValue: value))
-                }
-            }
+        let extracted = entry.allExtractedValues
+        guard !extracted.isEmpty else { return nil }
+
+        return extracted.map {
+            ExtractedItem(type: $0.type, value: $0.value, displayValue: $0.displayValue)
         }
-        
-        // Extract URLs
-        if let urls = dict["urls"] as? [[String: Any]] {
-            for url in urls {
-                if let value = url["url"] as? String {
-                    let domain = url["domain"] as? String ?? value
-                    items.append(ExtractedItem(type: .url, value: value, displayValue: domain))
-                }
-            }
-        }
-        
-        // Extract phone numbers
-        if let phones = dict["phoneNumbers"] as? [[String: Any]] {
-            for phone in phones {
-                if let value = phone["number"] as? String {
-                    items.append(ExtractedItem(type: .phoneNumber, value: value, displayValue: value))
-                }
-            }
-        }
-        
-        // Extract IP addresses
-        if let ips = dict["ipAddresses"] as? [[String: Any]] {
-            for ip in ips {
-                if let value = ip["address"] as? String {
-                    let version = ip["version"] as? String ?? ""
-                    items.append(ExtractedItem(type: .ipAddress, value: value, displayValue: "\(value) (\(version.uppercased()))"))
-                }
-            }
-        }
-        
-        // Extract UUIDs
-        if let uuids = dict["uuids"] as? [[String: Any]] {
-            for uuid in uuids {
-                if let value = uuid["uuid"] as? String {
-                    items.append(ExtractedItem(type: .uuid, value: value, displayValue: value))
-                }
-            }
-        }
-        
-        return items.isEmpty ? nil : items
     }
 
     private func prettyPrintedJSON(_ json: String?) -> String? {
@@ -448,42 +401,35 @@ extension PreviewPanelView {
         let type: ExtractedItemType
         let value: String
         let displayValue: String
+
+        init(type: ContentType, value: String, displayValue: String) {
+            self.type = .contentType(type)
+            self.value = value
+            self.displayValue = displayValue
+        }
     }
     
     enum ExtractedItemType {
-        case email
-        case url
-        case phoneNumber
-        case ipAddress
-        case uuid
+        case contentType(ContentType)
         
         var icon: String {
             switch self {
-            case .email: return "envelope"
-            case .url: return "link"
-            case .phoneNumber: return "phone"
-            case .ipAddress: return "network"
-            case .uuid: return "number"
+            case .contentType(let type):
+                return type.systemImageName
             }
         }
         
         var label: String {
             switch self {
-            case .email: return "Email"
-            case .url: return "URL"
-            case .phoneNumber: return "Phone"
-            case .ipAddress: return "IP"
-            case .uuid: return "UUID"
+            case .contentType(let type):
+                return type.displayTitle
             }
         }
         
         var tint: Color {
             switch self {
-            case .email: return .red
-            case .url: return .blue
-            case .phoneNumber: return .green
-            case .ipAddress: return .purple
-            case .uuid: return .orange
+            case .contentType(let type):
+                return type.tint
             }
         }
     }

@@ -496,6 +496,7 @@ public struct ContentTypeDetector {
                 if let iss = d.claims.iss { claims["iss"] = iss }
 
                 var obj: [String: Any] = [
+                    "token": d.token,
                     "confidence": d.confidence,
                     "headerJSON": d.headerJSON,
                     "payloadJSON": d.payloadJSON,
@@ -510,6 +511,7 @@ public struct ContentTypeDetector {
         if !apiKeys.isEmpty {
             meta["apiKeys"] = apiKeys.map { d in
                 [
+                    "key": d.key,
                     "provider": d.provider,
                     "confidence": d.confidence,
                     "isLikelyLive": d.isLikelyLive

@@ -19,7 +19,10 @@ public struct MetadataParser {
     
     /// Content types that can be extracted from metadata
     public static let extractableTypes: Set<ContentType> = [
-        .email, .url, .phoneNumber, .ipAddress, .uuid
+        .email, .url, .phoneNumber, .ipAddress, .uuid,
+        .hash, .apiKey, .jwt,
+        .envVar, .envVarBlock,
+        .filePath, .shellCommand
     ]
     
     /// Check if an entry's metadata contains items of a given type
@@ -37,6 +40,21 @@ public struct MetadataParser {
             return hasItems(dict, key: "ipAddresses")
         case .uuid:
             return hasItems(dict, key: "uuids")
+        case .hash:
+            return hasItems(dict, key: "hashes")
+        case .apiKey:
+            return hasItems(dict, key: "apiKeys")
+        case .jwt:
+            return hasItems(dict, key: "jwt")
+        case .envVar:
+            return (dict["env"] as? [String: Any]) != nil
+        case .envVarBlock:
+            guard let env = dict["env"] as? [String: Any] else { return false }
+            return (env["isBlock"] as? Bool) == true
+        case .filePath:
+            return hasItems(dict, key: "filePaths")
+        case .shellCommand:
+            return hasItems(dict, key: "shellCommands")
         default:
             return false
         }
@@ -57,6 +75,20 @@ public struct MetadataParser {
             return extractIPAddresses(from: dict)
         case .uuid:
             return extractUUIDs(from: dict)
+        case .hash:
+            return extractHashes(from: dict)
+        case .apiKey:
+            return extractAPIKeys(from: dict)
+        case .jwt:
+            return extractJWTs(from: dict)
+        case .envVar:
+            return extractEnvVars(from: dict, blockOnly: false)
+        case .envVarBlock:
+            return extractEnvVars(from: dict, blockOnly: true)
+        case .filePath:
+            return extractFilePaths(from: dict)
+        case .shellCommand:
+            return extractShellCommands(from: dict)
         default:
             return []
         }
@@ -72,6 +104,12 @@ public struct MetadataParser {
         values.append(contentsOf: extractPhoneNumbers(from: dict))
         values.append(contentsOf: extractIPAddresses(from: dict))
         values.append(contentsOf: extractUUIDs(from: dict))
+        values.append(contentsOf: extractHashes(from: dict))
+        values.append(contentsOf: extractAPIKeys(from: dict))
+        values.append(contentsOf: extractJWTs(from: dict))
+        values.append(contentsOf: extractEnvVars(from: dict, blockOnly: false))
+        values.append(contentsOf: extractFilePaths(from: dict))
+        values.append(contentsOf: extractShellCommands(from: dict))
         
         return values
     }
@@ -91,6 +129,23 @@ public struct MetadataParser {
             return (dict["ipAddresses"] as? [[String: Any]])?.count ?? 0
         case .uuid:
             return (dict["uuids"] as? [[String: Any]])?.count ?? 0
+        case .hash:
+            return (dict["hashes"] as? [[String: Any]])?.count ?? 0
+        case .apiKey:
+            return (dict["apiKeys"] as? [[String: Any]])?.count ?? 0
+        case .jwt:
+            return (dict["jwt"] as? [[String: Any]])?.count ?? 0
+        case .envVar:
+            return ((dict["env"] as? [String: Any])?["vars"] as? [[String: Any]])?.count ?? 0
+        case .envVarBlock:
+            guard let env = dict["env"] as? [String: Any], (env["isBlock"] as? Bool) == true else { return 0 }
+            return (env["vars"] as? [[String: Any]])?.count ?? 0
+        case .filePath:
+            return (dict["filePaths"] as? [[String: Any]])?.count ?? 0
+        case .shellCommand:
+            return (dict["shellCommands"] as? [[String: Any]])?.count ?? 0
+        case .code:
+            return (dict["code"] as? [[String: Any]])?.count ?? 0
         default:
             return 0
         }
@@ -153,7 +208,81 @@ public struct MetadataParser {
             return ExtractedValue(type: .uuid, value: uuid)
         }
     }
+    
+    private static func extractHashes(from dict: [String: Any]) -> [ExtractedValue] {
+        guard let items = dict["hashes"] as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let hash = item["hash"] as? String else { return nil }
+            let kind = item["kind"] as? String
+            let display = kind.map { "\($0.uppercased()): \(hash)" } ?? hash
+            return ExtractedValue(type: .hash, value: hash, displayValue: display)
+        }
+    }
+    
+    private static func extractAPIKeys(from dict: [String: Any]) -> [ExtractedValue] {
+        guard let items = dict["apiKeys"] as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let key = item["key"] as? String else { return nil }
+            let provider = item["provider"] as? String
+            let display = provider.map { "\($0): \(key)" } ?? key
+            return ExtractedValue(type: .apiKey, value: key, displayValue: display)
+        }
+    }
+    
+    private static func extractJWTs(from dict: [String: Any]) -> [ExtractedValue] {
+        guard let items = dict["jwt"] as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let token = item["token"] as? String else { return nil }
+            let isExpired = item["isExpired"] as? Bool
+            let display = isExpired == true ? "JWT (expired)" : "JWT"
+            return ExtractedValue(type: .jwt, value: token, displayValue: display)
+        }
+    }
+    
+    private static func extractEnvVars(from dict: [String: Any], blockOnly: Bool) -> [ExtractedValue] {
+        guard let env = dict["env"] as? [String: Any],
+              let vars = env["vars"] as? [[String: Any]]
+        else { return [] }
+        
+        if blockOnly, (env["isBlock"] as? Bool) != true {
+            return []
+        }
+        
+        return vars.compactMap { item in
+            guard let key = item["key"] as? String else { return nil }
+            let value = item["value"] as? String ?? ""
+            let display = value.isEmpty ? key : "\(key)=\(value)"
+            return ExtractedValue(type: .envVar, value: display, displayValue: display)
+        }
+    }
+    
+    private static func extractFilePaths(from dict: [String: Any]) -> [ExtractedValue] {
+        guard let items = dict["filePaths"] as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let path = item["path"] as? String else { return nil }
+            return ExtractedValue(type: .filePath, value: path)
+        }
+    }
+    
+    private static func extractShellCommands(from dict: [String: Any]) -> [ExtractedValue] {
+        guard let items = dict["shellCommands"] as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let command = item["command"] as? String else { return nil }
+            let exec = item["executable"] as? String
+            let display = exec.map { "\($0): \(command)" } ?? command
+            return ExtractedValue(type: .shellCommand, value: command, displayValue: display)
+        }
+    }
+    
+    private static func extractCodeLanguages(from dict: [String: Any]) -> [ExtractedValue] {
+        guard let items = dict["code"] as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let lang = item["language"] as? String else { return nil }
+            return ExtractedValue(type: .code, value: lang, displayValue: lang.uppercased())
+        }
+    }
 }
+
 
 // MARK: - ClipboardEntry Extension
 
