@@ -152,6 +152,13 @@ The release workflow **cannot push to main** due to branch protection requiring 
 - For appcast/changelog updates, deploy directly to CDN (Cloudflare Pages) without git commit.
 - The appcast.xml is deployed to pasta-app.com via Cloudflare, not committed to the repo.
 
+### Cloudflare Pages Production Deployment
+When deploying to Cloudflare Pages from a tag-triggered workflow (not main branch), you MUST use `--branch=main` to deploy to production:
+```bash
+wrangler pages deploy landing-page --project-name=pasta-app --branch=main
+```
+Without `--branch=main`, deployments go to preview URLs only.
+
 ## SPM + Dynamic Frameworks (Sparkle)
 
 When using Swift Package Manager with dynamic frameworks like Sparkle, the release workflow must:
