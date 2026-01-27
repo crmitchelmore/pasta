@@ -318,7 +318,9 @@ public final class DatabaseManager {
                 args.append(contentType.rawValue)
             }
 
-            sql += " ORDER BY rank ASC, e.timestamp DESC LIMIT ?"
+            // Round rank to 1 decimal place so entries with similar relevance
+            // are grouped together, then sort by timestamp within each group
+            sql += " ORDER BY ROUND(rank, 1) ASC, e.timestamp DESC LIMIT ?"
             args.append(limit)
 
             let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
@@ -360,7 +362,9 @@ public final class DatabaseManager {
                 args.append(contentType.rawValue)
             }
             
-            sql += " ORDER BY rank ASC, e.timestamp DESC LIMIT ?"
+            // Round rank to 1 decimal place so entries with similar relevance
+            // are grouped together, then sort by timestamp within each group
+            sql += " ORDER BY ROUND(rank, 1) ASC, e.timestamp DESC LIMIT ?"
             args.append(limit)
             
             let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
