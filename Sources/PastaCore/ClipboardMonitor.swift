@@ -53,14 +53,14 @@ public struct SystemPasteboard: PasteboardProviding {
     public var changeCount: Int { pasteboard.changeCount }
 
     public func readContents() -> PasteboardContents? {
-        if let data = pasteboard.data(forType: .tiff) {
-            return .image(data)
-        }
-
+        // Check for file paths first (copying files in Finder)
         if let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !objects.isEmpty {
             return .filePaths(objects.map { $0.path })
         }
 
+        // Check for text content (RTF or plain text)
+        // Do this BEFORE images because apps like Excel/Word include thumbnail images
+        // alongside text, and we want to capture the text, not the preview image
         if let rtfData = pasteboard.data(forType: .rtf),
            let attributed = try? NSAttributedString(data: rtfData, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil) {
             return .rtf(attributed.string)
@@ -68,6 +68,11 @@ public struct SystemPasteboard: PasteboardProviding {
 
         if let string = pasteboard.string(forType: .string) {
             return .text(string)
+        }
+
+        // Only treat as image if no text content is available
+        if let data = pasteboard.data(forType: .tiff) {
+            return .image(data)
         }
 
         return nil
