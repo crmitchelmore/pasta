@@ -17,6 +17,10 @@ public final class QuickSearchManager: ObservableObject {
     @Published public private(set) var availableFilters: [FilterInfo] = []
     @Published public private(set) var isReady: Bool = false
     
+    // Command mode state
+    @Published public private(set) var isCommandMode: Bool = false
+    @Published public private(set) var commandResults: [Command] = []
+    
     public struct FilterInfo: Equatable, Sendable {
         public let type: ContentType
         public let count: Int
@@ -59,21 +63,34 @@ public final class QuickSearchManager: ObservableObject {
         query = ""
         selectedFilter = nil
         selectedIndex = 0
+        isCommandMode = false
+        commandResults = []
         results = Array(allEntries.prefix(9))
         PastaLogger.search.debug("prepareForSearch: allEntries=\(allEntries.count), results=\(results.count)")
     }
     
     /// Move selection up or down
     public func moveSelection(by delta: Int) {
-        let maxIndex = min(results.count, 9) - 1
+        let maxIndex: Int
+        if isCommandMode {
+            maxIndex = min(commandResults.count, 9) - 1
+        } else {
+            maxIndex = min(results.count, 9) - 1
+        }
         guard maxIndex >= 0 else { return }
         selectedIndex = max(0, min(maxIndex, selectedIndex + delta))
     }
     
-    /// Get the currently selected entry
+    /// Get the currently selected entry (for clipboard mode)
     public var selectedEntry: ClipboardEntry? {
-        guard selectedIndex >= 0 && selectedIndex < results.count else { return nil }
+        guard !isCommandMode, selectedIndex >= 0 && selectedIndex < results.count else { return nil }
         return results[selectedIndex]
+    }
+    
+    /// Get the currently selected command (for command mode)
+    public var selectedCommand: Command? {
+        guard isCommandMode, selectedIndex >= 0 && selectedIndex < commandResults.count else { return nil }
+        return commandResults[selectedIndex]
     }
     
     // MARK: - Entry Updates
@@ -116,6 +133,22 @@ public final class QuickSearchManager: ObservableObject {
         searchDebounceTask?.cancel()
         
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Check for command mode (query starts with !)
+        if trimmed.hasPrefix("!") {
+            isCommandMode = true
+            let commandQuery = String(trimmed.dropFirst())
+            commandResults = CommandRegistry.shared.search(query: commandQuery)
+            selectedIndex = 0
+            results = []
+            return
+        }
+        
+        // Exit command mode if no longer starting with !
+        if isCommandMode {
+            isCommandMode = false
+            commandResults = []
+        }
         
         // Empty query = immediate results
         if trimmed.isEmpty {

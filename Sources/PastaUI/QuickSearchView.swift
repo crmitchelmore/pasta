@@ -10,56 +10,94 @@ public struct QuickSearchView: View {
     private let onPaste: (ClipboardEntry) -> Void
     private let onOpenFullApp: (() -> Void)?
     private let showOpenFullAppButton: Bool
+    private let onExecuteCommand: ((Command) async -> CommandResult)?
     
     @FocusState private var isSearchFocused: Bool
+    @State private var commandFeedback: String? = nil
+    @State private var showingConfirmation: Bool = false
+    @State private var pendingConfirmAction: (@Sendable @MainActor () async -> CommandResult)? = nil
+    @State private var confirmationMessage: String = ""
     
     public init(
         onDismiss: @escaping () -> Void,
         onPaste: @escaping (ClipboardEntry) -> Void,
         onOpenFullApp: (() -> Void)? = nil,
-        showOpenFullAppButton: Bool = false
+        showOpenFullAppButton: Bool = false,
+        onExecuteCommand: ((Command) async -> CommandResult)? = nil
     ) {
         self.onDismiss = onDismiss
         self.onPaste = onPaste
         self.onOpenFullApp = onOpenFullApp
         self.showOpenFullAppButton = showOpenFullAppButton
+        self.onExecuteCommand = onExecuteCommand
     }
     
     public var body: some View {
         QuickSearchKeyHandler(
             onArrowUp: { manager.moveSelection(by: -1) },
             onArrowDown: { manager.moveSelection(by: 1) },
-            onReturn: { pasteSelectedEntry() },
+            onReturn: { handleReturn() },
             onEscape: { onDismiss() },
             onCommandNumber: { digit in
                 let index = digit - 1
-                if let entry = manager.results[safe: index] {
-                    onPaste(entry)
-                    onDismiss()
+                if manager.isCommandMode {
+                    if let command = manager.commandResults[safe: index] {
+                        executeCommand(command)
+                    }
+                } else {
+                    if let entry = manager.results[safe: index] {
+                        onPaste(entry)
+                        onDismiss()
+                    }
                 }
             }
         ) {
-            VStack(spacing: 0) {
-                // Search field
-                searchField
+            ZStack {
+                VStack(spacing: 0) {
+                    // Search field
+                    searchField
+                    
+                    // Quick filters (hidden in command mode)
+                    if !manager.isCommandMode {
+                        filterBar
+                    }
+                    
+                    Divider()
+                        .opacity(0.5)
+                    
+                    // Results or Commands
+                    if manager.isCommandMode {
+                        commandsList
+                    } else if manager.results.isEmpty && !manager.query.isEmpty {
+                        emptyState
+                    } else {
+                        resultsList
+                    }
+                    
+                    // Command feedback
+                    if let feedback = commandFeedback {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text(feedback)
+                                .font(.caption)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.green.opacity(0.1))
+                    }
+                }
+                .frame(width: 680, height: dynamicHeight)
+                .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
                 
-                // Quick filters
-                filterBar
-                
-                Divider()
-                    .opacity(0.5)
-                
-                // Results
-                if manager.results.isEmpty && !manager.query.isEmpty {
-                    emptyState
-                } else {
-                    resultsList
+                // Confirmation dialog overlay
+                if showingConfirmation {
+                    confirmationOverlay
                 }
             }
-            .frame(width: 680, height: max(400, min(500, CGFloat(100 + manager.results.count * 52))))
-            .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
         }
         .onAppear {
             manager.prepareForSearch()
@@ -73,6 +111,22 @@ public struct QuickSearchView: View {
         }
     }
     
+    private var dynamicHeight: CGFloat {
+        let itemCount = manager.isCommandMode ? manager.commandResults.count : manager.results.count
+        let baseHeight: CGFloat = manager.isCommandMode ? 80 : 100 // Less for command mode (no filter bar)
+        return max(400, min(500, baseHeight + CGFloat(itemCount * 52)))
+    }
+    
+    private func handleReturn() {
+        if manager.isCommandMode {
+            if let command = manager.selectedCommand {
+                executeCommand(command)
+            }
+        } else {
+            pasteSelectedEntry()
+        }
+    }
+    
     private func pasteSelectedEntry() {
         if let entry = manager.selectedEntry {
             onPaste(entry)
@@ -80,18 +134,128 @@ public struct QuickSearchView: View {
         }
     }
     
+    private func executeCommand(_ command: Command) {
+        Task { @MainActor in
+            let result: CommandResult
+            if let handler = onExecuteCommand {
+                result = await handler(command)
+            } else {
+                result = await CommandRegistry.shared.execute(command)
+            }
+            
+            switch result {
+            case .success(let message):
+                commandFeedback = message
+                // Auto-dismiss after brief feedback
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                onDismiss()
+                
+            case .needsConfirmation(let message, let confirmAction):
+                confirmationMessage = message
+                pendingConfirmAction = confirmAction
+                showingConfirmation = true
+                
+            case .error(let message):
+                commandFeedback = "Error: \(message)"
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                commandFeedback = nil
+                
+            case .openMainWindow:
+                onDismiss()
+                // The handler in AppDelegate will open the main window
+                
+            case .dismissed:
+                onDismiss()
+            }
+        }
+    }
+    
+    private var confirmationOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.5)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 16) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.largeTitle)
+                    .foregroundStyle(.yellow)
+                
+                Text(confirmationMessage)
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                
+                HStack(spacing: 12) {
+                    Button("Cancel") {
+                        showingConfirmation = false
+                        pendingConfirmAction = nil
+                    }
+                    .keyboardShortcut(.escape)
+                    
+                    Button("Confirm") {
+                        Task { @MainActor in
+                            showingConfirmation = false
+                            if let action = pendingConfirmAction {
+                                let result = await action()
+                                pendingConfirmAction = nil
+                                
+                                if case .success(let message) = result {
+                                    commandFeedback = message
+                                    try? await Task.sleep(nanoseconds: 800_000_000)
+                                    onDismiss()
+                                }
+                            }
+                        }
+                    }
+                    .keyboardShortcut(.return)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                }
+            }
+            .padding(24)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .shadow(radius: 10)
+        }
+    }
+    
+    private var commandsList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(Array(manager.commandResults.prefix(9).enumerated()), id: \.element.id) { index, command in
+                        CommandRow(
+                            command: command,
+                            index: index + 1,
+                            isSelected: manager.selectedIndex == index
+                        )
+                        .id(command.id)
+                        .onTapGesture {
+                            executeCommand(command)
+                        }
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+            }
+            .onChange(of: manager.selectedIndex) { _, newIndex in
+                if let command = manager.commandResults[safe: newIndex] {
+                    proxy.scrollTo(command.id, anchor: .center)
+                }
+            }
+        }
+    }
+    
     private var searchField: some View {
         HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
+            Image(systemName: manager.isCommandMode ? "terminal" : "magnifyingglass")
                 .font(.title2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(manager.isCommandMode ? .orange : .secondary)
             
-            TextField("Search clipboard history...", text: $manager.query)
+            TextField(manager.isCommandMode ? "Type a command..." : "Search clipboard history... (! for commands)", text: $manager.query)
                 .textFieldStyle(.plain)
                 .font(.title3)
                 .focused($isSearchFocused)
                 .onSubmit {
-                    pasteSelectedEntry()
+                    handleReturn()
                 }
             
             if !manager.query.isEmpty {
@@ -104,7 +268,8 @@ public struct QuickSearchView: View {
                 .buttonStyle(.plain)
             }
             
-            Text("⌘\(manager.results.isEmpty ? "" : "1-9")")
+            let hasItems = manager.isCommandMode ? !manager.commandResults.isEmpty : !manager.results.isEmpty
+            Text("⌘\(hasItems ? "1-9" : "")")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .padding(.horizontal, 6)
@@ -421,6 +586,62 @@ private struct QuickSearchRow: View {
         let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
         let singleLine = trimmed.components(separatedBy: .newlines).joined(separator: " ")
         return singleLine.isEmpty ? "(empty)" : String(singleLine.prefix(100))
+    }
+}
+
+// MARK: - Command Row
+
+private struct CommandRow: View {
+    let command: Command
+    let index: Int
+    let isSelected: Bool
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Command icon
+            Image(systemName: command.icon)
+                .font(.title3)
+                .foregroundStyle(command.isDestructive ? .red : .orange)
+                .frame(width: 28)
+            
+            // Command info
+            VStack(alignment: .leading, spacing: 2) {
+                Text("!\(command.trigger)")
+                    .font(.body.monospaced())
+                    .fontWeight(.medium)
+                
+                HStack(spacing: 6) {
+                    Text(command.description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            Spacer()
+            
+            // Category badge
+            Text(command.category.rawValue)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+            
+            // Keyboard shortcut hint
+            Text("⌘\(index)")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isSelected ? Color.orange.opacity(0.2) : Color.clear)
+        )
+        .contentShape(Rectangle())
     }
 }
 

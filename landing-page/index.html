@@ -417,6 +417,15 @@
       color: var(--color-text-muted);
       line-height: 1.7;
     }
+    
+    .feature-card__description code {
+      background: rgba(139, 92, 246, 0.15);
+      color: var(--color-tertiary);
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+      font-family: 'SF Mono', 'Menlo', monospace;
+      font-size: 0.9em;
+    }
 
     /* Content Types Section */
     .content-types {
@@ -925,6 +934,14 @@
           100% local storage. No cloud sync, no telemetry, no accounts. Your data stays on your Mac.
         </p>
       </div>
+      
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--violet">⌘</div>
+        <h3 class="feature-card__title">Command Mode</h3>
+        <p class="feature-card__description">
+          Type <code>!</code> to enter command mode. Clear history, toggle settings, change themes—all without touching your mouse.
+        </p>
+      </div>
     </div>
   </section>
 
@@ -1083,6 +1100,13 @@
         <span class="shortcut__action">Close Window</span>
         <div class="shortcut__keys">
           <span class="key">Esc</span>
+        </div>
+      </div>
+      
+      <div class="shortcut">
+        <span class="shortcut__action">Enter Command Mode</span>
+        <div class="shortcut__keys">
+          <span class="key">!</span>
         </div>
       </div>
     </div>

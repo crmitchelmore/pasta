@@ -95,7 +95,7 @@ final class PanelController<Content: View>: ObservableObject {
         let contentRect = NSRect(origin: .zero, size: windowSize)
         window = MainWindow(contentRect: contentRect, content: contentBuilder)
         
-        // Observe window close to update state
+        // Observe window close to update state and clear window reference
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: window,
@@ -104,6 +104,7 @@ final class PanelController<Content: View>: ObservableObject {
             guard let self else { return }
             Task { @MainActor in
                 self.isVisible = false
+                self.window = nil  // Clear reference so next show() creates a fresh window
             }
         }
     }

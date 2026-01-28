@@ -86,6 +86,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             database: BackgroundService.shared.database
         )
         
+        // Configure command handlers
+        setupCommandHandlers()
+        
         // Create the floating panel controller (main window)
         panelController = PanelController(
             size: NSSize(width: 900, height: 640),
@@ -143,9 +146,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onOpenFullApp: {
                     self?.showMainWindow()
                 },
-                showOpenFullAppButton: isDockOnly
+                showOpenFullAppButton: isDockOnly,
+                onExecuteCommand: { command in
+                    await self?.handleCommandResult(command) ?? .dismissed
+                }
             )
         }
+    }
+    
+    private func setupCommandHandlers() {
+        var handlers = CommandHandlers()
+        
+        handlers.deleteRecent = { minutes in
+            try BackgroundService.shared.deleteRecent(minutes: minutes)
+        }
+        
+        handlers.deleteAll = {
+            try BackgroundService.shared.deleteAll()
+        }
+        
+        handlers.openSettings = { [weak self] in
+            self?.openSettings()
+        }
+        
+        handlers.checkForUpdates = {
+            UpdaterManager.shared.checkForUpdates()
+        }
+        
+        handlers.openReleaseNotes = {
+            if let url = URL(string: "https://github.com/crmitchelmore/pasta/releases") {
+                NSWorkspace.shared.open(url)
+            }
+        }
+        
+        handlers.quitApp = {
+            NSApplication.shared.terminate(nil)
+        }
+        
+        handlers.openMainWindow = { [weak self] contentType in
+            self?.quickSearchController?.hide()
+            self?.showMainWindow()
+            // TODO: Apply filter in main window if contentType is provided
+        }
+        
+        CommandRegistry.shared.handlers = handlers
+    }
+    
+    private func handleCommandResult(_ command: Command) async -> CommandResult {
+        let result = await CommandRegistry.shared.execute(command)
+        
+        // Handle special results that need app-level actions
+        if case .openMainWindow(let contentType) = result {
+            quickSearchController?.hide()
+            showMainWindow()
+            // TODO: Apply contentType filter in main window
+        }
+        
+        return result
     }
     
     private func showMainWindow() {
@@ -430,6 +487,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Show Pasta", action: #selector(showPanel), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
+        
+        // Quick clear options
+        let clearSubmenu = NSMenu()
+        clearSubmenu.addItem(NSMenuItem(title: "Last 10 Minutes", action: #selector(clearLast10Minutes), keyEquivalent: ""))
+        clearSubmenu.addItem(NSMenuItem(title: "Last Hour", action: #selector(clearLastHour), keyEquivalent: ""))
+        let clearItem = NSMenuItem(title: "Clear History…", action: nil, keyEquivalent: "")
+        clearItem.submenu = clearSubmenu
+        menu.addItem(clearItem)
+        
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
@@ -481,6 +548,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func checkForUpdates() {
         UpdaterManager.shared.checkForUpdates()
+    }
+    
+    @objc private func clearLast10Minutes() {
+        do {
+            let count = try BackgroundService.shared.deleteRecent(minutes: 10)
+            PastaLogger.app.info("Cleared \(count) entries from last 10 minutes")
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.app, context: "Failed to clear recent entries")
+        }
+    }
+    
+    @objc private func clearLastHour() {
+        do {
+            let count = try BackgroundService.shared.deleteRecent(minutes: 60)
+            PastaLogger.app.info("Cleared \(count) entries from last hour")
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.app, context: "Failed to clear recent entries")
+        }
     }
 
     private func configureAppIcon() {

@@ -421,4 +421,24 @@ final class BackgroundService: ObservableObject {
 
         return EnrichResult(primaryEntry: entry, extractedEntries: extractedEntries, envVarSplitEntries: [])
     }
+    
+    // MARK: - Delete Operations
+    
+    /// Deletes entries from the last X minutes and refreshes the entries list.
+    @discardableResult
+    func deleteRecent(minutes: Int) throws -> Int {
+        let deleteService = DeleteService(database: database, imageStorage: imageStorage)
+        let count = try deleteService.deleteRecent(minutes: minutes)
+        refresh()
+        return count
+    }
+    
+    /// Deletes all entries and refreshes the entries list.
+    @discardableResult
+    func deleteAll() throws -> Int {
+        let deleteService = DeleteService(database: database, imageStorage: imageStorage)
+        let count = try deleteService.deleteAll()
+        refresh()
+        return count
+    }
 }
