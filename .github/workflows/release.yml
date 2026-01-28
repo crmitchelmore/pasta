@@ -506,6 +506,62 @@ jobs:
           command: pages deploy landing-page --project-name=pasta-app --branch=main
       
       # ============================================================================
+      # UPDATE HOMEBREW TAP
+      # ============================================================================
+      
+      - name: Update Homebrew tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
+          SHA256=$(shasum -a 256 "$DMG_FILE" | awk '{print $1}')
+          
+          echo "==> Updating Homebrew tap for version $VERSION"
+          echo "    SHA256: $SHA256"
+          
+          # Clone the tap repo
+          git clone https://x-access-token:${GH_TOKEN}@github.com/crmitchelmore/homebrew-pasta.git /tmp/homebrew-tap
+          cd /tmp/homebrew-tap
+          
+          # Update the cask file
+          cat > Casks/pasta.rb << EOF
+          cask "pasta" do
+            version "$VERSION"
+            sha256 "$SHA256"
+
+            url "https://github.com/crmitchelmore/pasta/releases/download/v#{version}/Pasta-#{version}.dmg"
+            name "Pasta"
+            desc "Blazing-fast, local-first clipboard history manager for macOS"
+            homepage "https://pasta-app.com"
+
+            livecheck do
+              url :url
+              strategy :github_latest
+            end
+
+            depends_on macos: ">= :sonoma"
+
+            app "Pasta.app"
+
+            zap trash: [
+              "~/Library/Application Support/Pasta",
+              "~/Library/Caches/com.pasta.clipboard",
+              "~/Library/Preferences/com.pasta.clipboard.plist",
+            ]
+          end
+          EOF
+          
+          # Commit and push
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/pasta.rb
+          git commit -m "Update Pasta to v$VERSION"
+          git push
+          
+          echo "==> Homebrew tap updated successfully"
+      
+      # ============================================================================
       # CLEANUP
       # ============================================================================
       

@@ -15,6 +15,13 @@ A blazing-fast, local-first clipboard history manager for macOS with intelligent
 
 ## Installation
 
+### Homebrew (Recommended)
+
+```bash
+brew tap crmitchelmore/pasta
+brew install --cask pasta
+```
+
 ### Download
 
 Download the latest DMG from [Releases](https://github.com/crmitchelmore/pasta/releases).
