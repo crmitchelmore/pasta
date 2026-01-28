@@ -18,7 +18,9 @@ let package = Package(
         // Global keyboard shortcuts (Carbon-based, no resource bundle)
         .package(url: "https://github.com/soffes/HotKey.git", from: "0.2.0"),
         // Auto-updates
-        .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0")
+        .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
+        // Crash reporting
+        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "8.40.0")
     ],
     targets: [
         // Main application
@@ -29,7 +31,8 @@ let package = Package(
                 "PastaUI",
                 "PastaDetectors",
                 "HotKey",
-                .product(name: "Sparkle", package: "Sparkle")
+                .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "Sentry", package: "sentry-cocoa")
             ],
             resources: [
                 .process("Resources")

@@ -1,5 +1,6 @@
 import AppKit
 import HotKey
+import Sentry
 import SwiftUI
 import os.log
 
@@ -16,6 +17,11 @@ extension Notification.Name {
 @main
 struct PastaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
+    init() {
+        // Initialize Sentry as early as possible
+        SentryManager.start()
+    }
 
     var body: some Scene {
         Settings {
