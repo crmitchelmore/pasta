@@ -54,10 +54,18 @@ public final class SearchService {
             return Match(entry: entry, score: Double(index) * 0.01, ranges: ranges, isExactMatch: isExactMatch)
         }
         
-        let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
-        PastaLogger.search.info("FTS5 search completed: \(results.count) results in \(String(format: "%.1f", elapsed))ms")
+        // Only sort to prioritize exact matches; preserve FTS5 ordering otherwise
+        let orderedResults = results.sorted { lhs, rhs in
+            if lhs.isExactMatch != rhs.isExactMatch {
+                return lhs.isExactMatch
+            }
+            return lhs.score < rhs.score  // Preserves FTS5 ordering
+        }
         
-        return results
+        let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+        PastaLogger.search.info("FTS5 search completed: \(orderedResults.count) results in \(String(format: "%.1f", elapsed))ms")
+        
+        return orderedResults
     }
 
     private func relaxedQuery(from query: String) -> String? {
