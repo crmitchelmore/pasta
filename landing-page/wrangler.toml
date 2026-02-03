@@ -1,8 +1,3 @@
 # Cloudflare Pages Configuration
-
-[build]
-command = "echo 'Static site - no build needed'"
-output = "."
-
-[build.environment]
-NODE_VERSION = "18"
+name = "pasta-app"
+pages_build_output_dir = "."
