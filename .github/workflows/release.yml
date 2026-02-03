@@ -159,7 +159,7 @@ jobs:
               <string>${COMMIT_SHA}</string>
               <!-- Sparkle Auto-Update Configuration -->
               <key>SUFeedURL</key>
-              <string>https://github.com/crmitchelmore/pasta/releases/latest/download/appcast.xml</string>
+              <string>https://pasta-app.com/appcast.xml</string>
               <key>SUPublicEDKey</key>
               <string>${SPARKLE_PUBLIC_KEY}</string>
               <key>SUEnableAutomaticChecks</key>
