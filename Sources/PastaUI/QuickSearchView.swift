@@ -37,9 +37,8 @@ public struct QuickSearchView: View {
         QuickSearchKeyHandler(
             onArrowUp: { manager.moveSelection(by: -1) },
             onArrowDown: { manager.moveSelection(by: 1) },
-            onArrowRight: { if !manager.isCommandMode { isPreviewVisible = true } },
+            onArrowRight: { if !manager.isCommandMode && !manager.query.isEmpty { isPreviewVisible = true } },
             onArrowLeft: { isPreviewVisible = false },
-            onSpace: { if !manager.isCommandMode { isPreviewVisible = true } },
             onReturn: { handleReturn() },
             onEscape: {
                 if isPreviewVisible {
@@ -394,7 +393,6 @@ private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
     let onArrowDown: () -> Void
     let onArrowRight: () -> Void
     let onArrowLeft: () -> Void
-    let onSpace: () -> Void
     let onReturn: () -> Void
     let onEscape: () -> Void
     let onCommandNumber: (Int) -> Void
@@ -405,7 +403,6 @@ private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
         onArrowDown: @escaping () -> Void,
         onArrowRight: @escaping () -> Void,
         onArrowLeft: @escaping () -> Void,
-        onSpace: @escaping () -> Void,
         onReturn: @escaping () -> Void,
         onEscape: @escaping () -> Void,
         onCommandNumber: @escaping (Int) -> Void,
@@ -415,7 +412,6 @@ private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
         self.onArrowDown = onArrowDown
         self.onArrowRight = onArrowRight
         self.onArrowLeft = onArrowLeft
-        self.onSpace = onSpace
         self.onReturn = onReturn
         self.onEscape = onEscape
         self.onCommandNumber = onCommandNumber
@@ -428,7 +424,6 @@ private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
             onArrowDown: onArrowDown,
             onArrowRight: onArrowRight,
             onArrowLeft: onArrowLeft,
-            onSpace: onSpace,
             onReturn: onReturn,
             onEscape: onEscape,
             onCommandNumber: onCommandNumber,
@@ -441,7 +436,6 @@ private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
         nsView.onArrowDown = onArrowDown
         nsView.onArrowRight = onArrowRight
         nsView.onArrowLeft = onArrowLeft
-        nsView.onSpace = onSpace
         nsView.onReturn = onReturn
         nsView.onEscape = onEscape
         nsView.onCommandNumber = onCommandNumber
@@ -454,7 +448,6 @@ private final class KeyInterceptingView: NSView {
     var onArrowDown: () -> Void
     var onArrowRight: () -> Void
     var onArrowLeft: () -> Void
-    var onSpace: () -> Void
     var onReturn: () -> Void
     var onEscape: () -> Void
     var onCommandNumber: (Int) -> Void
@@ -467,7 +460,6 @@ private final class KeyInterceptingView: NSView {
         onArrowDown: @escaping () -> Void,
         onArrowRight: @escaping () -> Void,
         onArrowLeft: @escaping () -> Void,
-        onSpace: @escaping () -> Void,
         onReturn: @escaping () -> Void,
         onEscape: @escaping () -> Void,
         onCommandNumber: @escaping (Int) -> Void,
@@ -477,7 +469,6 @@ private final class KeyInterceptingView: NSView {
         self.onArrowDown = onArrowDown
         self.onArrowRight = onArrowRight
         self.onArrowLeft = onArrowLeft
-        self.onSpace = onSpace
         self.onReturn = onReturn
         self.onEscape = onEscape
         self.onCommandNumber = onCommandNumber
@@ -560,11 +551,6 @@ private final class KeyInterceptingView: NSView {
         case 123: // Left arrow
             if baseModifiers.isEmpty {
                 onArrowLeft()
-                return true
-            }
-        case 49: // Space
-            if baseModifiers.isEmpty {
-                onSpace()
                 return true
             }
         case 36: // Return

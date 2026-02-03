@@ -42,28 +42,22 @@ public final class SearchService {
 
         // Use FTS5 for blazing fast search
         var entries = try database.searchFTS(query: trimmed, contentType: contentType, limit: limit)
-        if entries.isEmpty, let relaxedQuery = relaxedQuery(from: trimmed) {
-            entries = try database.searchFTS(query: relaxedQuery, contentType: contentType, limit: limit)
+        if entries.isEmpty, let relaxed = relaxedQuery(from: trimmed) {
+            entries = try database.searchFTS(query: relaxed, contentType: contentType, limit: limit)
         }
         
-        // Convert to Match objects (skip expensive range computation - not needed for display)
+        // Convert to Match objects (FTS5 already returns results ranked by BM25 relevance)
         let normalizedQuery = trimmed.lowercased()
         let results: [Match] = entries.enumerated().map { index, entry in
             let isExactMatch = entry.content.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalizedQuery
             let ranges = matchRanges(in: entry.content, query: trimmed)
             return Match(entry: entry, score: Double(index) * 0.01, ranges: ranges, isExactMatch: isExactMatch)
         }
-        let orderedResults = results.sorted { lhs, rhs in
-            if lhs.isExactMatch != rhs.isExactMatch {
-                return lhs.isExactMatch
-            }
-            return lhs.score < rhs.score
-        }
         
         let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
-        PastaLogger.search.info("FTS5 search completed: \(orderedResults.count) results in \(String(format: "%.1f", elapsed))ms")
+        PastaLogger.search.info("FTS5 search completed: \(results.count) results in \(String(format: "%.1f", elapsed))ms")
         
-        return orderedResults
+        return results
     }
 
     private func relaxedQuery(from query: String) -> String? {
