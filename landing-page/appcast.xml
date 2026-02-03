@@ -6,14 +6,14 @@
     <description>Most recent updates to Pasta</description>
     <language>en</language>
     <item>
-      <title>Version 0.6.42</title>
-      <sparkle:version>52</sparkle:version>
-      <sparkle:shortVersionString>0.6.42</sparkle:shortVersionString>
-      <pubDate>Fri, 23 Jan 2026 18:40:12 +0000</pubDate>
+      <title>Version 0.7.1</title>
+      <sparkle:version>60</sparkle:version>
+      <sparkle:shortVersionString>0.7.1</sparkle:shortVersionString>
+      <pubDate>Tue, 03 Feb 2026 18:37:02 +0000</pubDate>
       <enclosure
-        url="https://github.com/crmitchelmore/pasta/releases/download/v0.6.42/Pasta-0.6.42.dmg"
-        sparkle:edSignature="IzeA5CXD3Gx42LtswoxHE0m5azgRVxtWe1SwgNKc+owsy34ENFE56HibaGSNuSydowI3nwT/8izJWbET2fBdBw=="
-        length="14170914"
+        url="https://github.com/crmitchelmore/pasta/releases/download/v0.7.1/Pasta-0.7.1.dmg"
+        sparkle:edSignature="5gOSViLQpM5wABO1lyReMqFrww1ZrMgaNisqOS20wbCuoBZcZauhAXCThrIFnG11Fux0sy2D+/0HrdoJgtZfCA=="
+        length="15605233"
         type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
