@@ -65,7 +65,7 @@ public final class QuickSearchManager: ObservableObject {
         selectedIndex = 0
         isCommandMode = false
         commandResults = []
-        results = Array(allEntries.prefix(9))
+        results = Array(allEntries.prefix(50))
         PastaLogger.search.debug("prepareForSearch: allEntries=\(allEntries.count), results=\(results.count)")
     }
     
@@ -75,7 +75,7 @@ public final class QuickSearchManager: ObservableObject {
         if isCommandMode {
             maxIndex = min(commandResults.count, 9) - 1
         } else {
-            maxIndex = min(results.count, 9) - 1
+            maxIndex = results.count - 1
         }
         guard maxIndex >= 0 else { return }
         selectedIndex = max(0, min(maxIndex, selectedIndex + delta))
@@ -175,9 +175,9 @@ public final class QuickSearchManager: ObservableObject {
         selectedIndex = 0
         
         if let filter = selectedFilter {
-            results = allEntries.lazy.filter { $0.contentType == filter }.prefix(9).map { $0 }
+            results = allEntries.lazy.filter { $0.contentType == filter }.prefix(50).map { $0 }
         } else {
-            results = Array(allEntries.prefix(9))
+            results = Array(allEntries.prefix(50))
         }
     }
     

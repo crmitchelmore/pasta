@@ -2,6 +2,11 @@
 
 All notable changes to Pasta will be documented in this file.
 
+## [0.7.1] - 2026-01-31
+
+### Changed
+- Quick search now shows the 50 most recent clipboard items on open for faster lookback.
+
 ## [0.7.0] - 2026-01-28
 
 ### Added

@@ -102,27 +102,13 @@ jobs:
           fi
           echo "✓ Sparkle.framework exists"
           
-          # Check resource bundles (in Resources/ with symlinks at app root)
-          BUNDLE_COUNT=$(find "$APP_DIR/Contents/Resources" -maxdepth 1 -name "*.bundle" -type d | wc -l | tr -d ' ')
-          echo "Found $BUNDLE_COUNT resource bundle(s) in Contents/Resources"
-          find "$APP_DIR/Contents/Resources" -maxdepth 1 -name "*.bundle" -type d
-          
-          # KeyboardShortcuts bundle is required
-          if [ ! -d "$APP_DIR/Contents/Resources/KeyboardShortcuts_KeyboardShortcuts.bundle" ]; then
-            echo "ERROR: KeyboardShortcuts resource bundle not found!"
-            echo "Available in Resources:"
-            ls -la "$APP_DIR/Contents/Resources/"
+          # Note: HotKey library (used for global shortcuts) has no resource bundle
+          # Only check that Resources directory exists
+          if [ ! -d "$APP_DIR/Contents/Resources" ]; then
+            echo "ERROR: Resources directory not found!"
             exit 1
           fi
-          echo "✓ KeyboardShortcuts bundle exists in Resources"
-          
-          # Check symlink at app root
-          if [ ! -L "$APP_DIR/KeyboardShortcuts_KeyboardShortcuts.bundle" ]; then
-            echo "ERROR: Symlink not found at app root!"
-            ls -la "$APP_DIR/"
-            exit 1
-          fi
-          echo "✓ Symlink exists at app root"
+          echo "✓ Resources directory exists"
           
           # Check rpath
           echo "==> Verifying rpath:"
