@@ -305,6 +305,7 @@ public struct ContentTypeDetector {
     ) -> (ContentType, Double) {
         let trimmed = analysisText.trimmingCharacters(in: .whitespacesAndNewlines)
         let totalLength = trimmed.count
+        let wordCount = trimmed.split(whereSeparator: { $0.isWhitespace }).count
         
         // Helper to check if detected content covers most of the text (>= 80%)
         // This prevents labeling "Check out /path/to/file.txt for details" as .filePath
@@ -312,6 +313,11 @@ public struct ContentTypeDetector {
             guard totalLength > 0 else { return false }
             let coverage = Double(detectedContent.count) / Double(totalLength)
             return coverage >= 0.80
+        }
+        
+        func isShortContext(_ detectedContent: String) -> Bool {
+            let extra = max(0, totalLength - detectedContent.count)
+            return extra <= 8 || (wordCount <= 3 && extra <= 12)
         }
         
         // Priority order is the stable tiebreaker when confidences match.
@@ -365,7 +371,7 @@ public struct ContentTypeDetector {
         
         // IP Address - only if it covers most of the text
         if let bestIP = ipAddresses.max(by: { $0.confidence < $1.confidence }) {
-            if coversMostOfText(bestIP.address) {
+            if coversMostOfText(bestIP.address) || isShortContext(bestIP.address) {
                 candidates.append((.ipAddress, bestIP.confidence))
             }
         }

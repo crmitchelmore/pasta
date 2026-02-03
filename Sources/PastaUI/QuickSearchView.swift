@@ -17,6 +17,7 @@ public struct QuickSearchView: View {
     @State private var showingConfirmation: Bool = false
     @State private var pendingConfirmAction: (@Sendable @MainActor () async -> CommandResult)? = nil
     @State private var confirmationMessage: String = ""
+    @State private var isPreviewVisible: Bool = false
     
     public init(
         onDismiss: @escaping () -> Void,
@@ -36,8 +37,17 @@ public struct QuickSearchView: View {
         QuickSearchKeyHandler(
             onArrowUp: { manager.moveSelection(by: -1) },
             onArrowDown: { manager.moveSelection(by: 1) },
+            onArrowRight: { if !manager.isCommandMode { isPreviewVisible = true } },
+            onArrowLeft: { isPreviewVisible = false },
+            onSpace: { if !manager.isCommandMode { isPreviewVisible = true } },
             onReturn: { handleReturn() },
-            onEscape: { onDismiss() },
+            onEscape: {
+                if isPreviewVisible {
+                    isPreviewVisible = false
+                } else {
+                    onDismiss()
+                }
+            },
             onCommandNumber: { digit in
                 let index = digit - 1
                 if manager.isCommandMode {
@@ -53,44 +63,58 @@ public struct QuickSearchView: View {
             }
         ) {
             ZStack {
-                VStack(spacing: 0) {
-                    // Search field
-                    searchField
-                    
-                    // Quick filters (hidden in command mode)
-                    if !manager.isCommandMode {
-                        filterBar
-                    }
-                    
-                    Divider()
-                        .opacity(0.5)
-                    
-                    // Results or Commands
-                    if manager.isCommandMode {
-                        commandsList
-                    } else if manager.results.isEmpty && !manager.query.isEmpty {
-                        emptyState
-                    } else {
-                        resultsList
-                    }
-                    
-                    // Command feedback
-                    if let feedback = commandFeedback {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text(feedback)
-                                .font(.caption)
+                HStack(spacing: 0) {
+                    // Main quick search panel
+                    VStack(spacing: 0) {
+                        // Search field
+                        searchField
+                        
+                        // Quick filters (hidden in command mode)
+                        if !manager.isCommandMode {
+                            filterBar
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.green.opacity(0.1))
+                        
+                        Divider()
+                            .opacity(0.5)
+                        
+                        // Results or Commands
+                        if manager.isCommandMode {
+                            commandsList
+                        } else if manager.results.isEmpty && !manager.query.isEmpty {
+                            emptyState
+                        } else {
+                            resultsList
+                        }
+                        
+                        // Command feedback
+                        if let feedback = commandFeedback {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text(feedback)
+                                    .font(.caption)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.green.opacity(0.1))
+                        }
+                    }
+                    .frame(width: 680, height: dynamicHeight)
+                    .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    
+                    // Preview panel (shown when activated)
+                    if isPreviewVisible, let entry = manager.selectedEntry {
+                        QuickSearchPreviewPanel(entry: entry)
+                            .frame(width: 380, height: dynamicHeight)
+                            .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .padding(.leading, 8)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
-                .frame(width: 680, height: dynamicHeight)
-                .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .animation(.easeInOut(duration: 0.2), value: isPreviewVisible)
                 .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
                 
                 // Confirmation dialog overlay
@@ -337,7 +361,7 @@ public struct QuickSearchView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(Array(manager.results.prefix(9).enumerated()), id: \.element.id) { index, entry in
+                    ForEach(Array(manager.results.enumerated()), id: \.element.id) { index, entry in
                         QuickSearchRow(
                             entry: entry,
                             index: index + 1,
@@ -368,6 +392,9 @@ public struct QuickSearchView: View {
 private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
     let onArrowUp: () -> Void
     let onArrowDown: () -> Void
+    let onArrowRight: () -> Void
+    let onArrowLeft: () -> Void
+    let onSpace: () -> Void
     let onReturn: () -> Void
     let onEscape: () -> Void
     let onCommandNumber: (Int) -> Void
@@ -376,6 +403,9 @@ private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
     init(
         onArrowUp: @escaping () -> Void,
         onArrowDown: @escaping () -> Void,
+        onArrowRight: @escaping () -> Void,
+        onArrowLeft: @escaping () -> Void,
+        onSpace: @escaping () -> Void,
         onReturn: @escaping () -> Void,
         onEscape: @escaping () -> Void,
         onCommandNumber: @escaping (Int) -> Void,
@@ -383,6 +413,9 @@ private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
     ) {
         self.onArrowUp = onArrowUp
         self.onArrowDown = onArrowDown
+        self.onArrowRight = onArrowRight
+        self.onArrowLeft = onArrowLeft
+        self.onSpace = onSpace
         self.onReturn = onReturn
         self.onEscape = onEscape
         self.onCommandNumber = onCommandNumber
@@ -393,6 +426,9 @@ private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
         KeyInterceptingView(
             onArrowUp: onArrowUp,
             onArrowDown: onArrowDown,
+            onArrowRight: onArrowRight,
+            onArrowLeft: onArrowLeft,
+            onSpace: onSpace,
             onReturn: onReturn,
             onEscape: onEscape,
             onCommandNumber: onCommandNumber,
@@ -403,6 +439,9 @@ private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
     func updateNSView(_ nsView: KeyInterceptingView, context: Context) {
         nsView.onArrowUp = onArrowUp
         nsView.onArrowDown = onArrowDown
+        nsView.onArrowRight = onArrowRight
+        nsView.onArrowLeft = onArrowLeft
+        nsView.onSpace = onSpace
         nsView.onReturn = onReturn
         nsView.onEscape = onEscape
         nsView.onCommandNumber = onCommandNumber
@@ -413,6 +452,9 @@ private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
 private final class KeyInterceptingView: NSView {
     var onArrowUp: () -> Void
     var onArrowDown: () -> Void
+    var onArrowRight: () -> Void
+    var onArrowLeft: () -> Void
+    var onSpace: () -> Void
     var onReturn: () -> Void
     var onEscape: () -> Void
     var onCommandNumber: (Int) -> Void
@@ -423,6 +465,9 @@ private final class KeyInterceptingView: NSView {
     init<Content: View>(
         onArrowUp: @escaping () -> Void,
         onArrowDown: @escaping () -> Void,
+        onArrowRight: @escaping () -> Void,
+        onArrowLeft: @escaping () -> Void,
+        onSpace: @escaping () -> Void,
         onReturn: @escaping () -> Void,
         onEscape: @escaping () -> Void,
         onCommandNumber: @escaping (Int) -> Void,
@@ -430,6 +475,9 @@ private final class KeyInterceptingView: NSView {
     ) {
         self.onArrowUp = onArrowUp
         self.onArrowDown = onArrowDown
+        self.onArrowRight = onArrowRight
+        self.onArrowLeft = onArrowLeft
+        self.onSpace = onSpace
         self.onReturn = onReturn
         self.onEscape = onEscape
         self.onCommandNumber = onCommandNumber
@@ -504,6 +552,21 @@ private final class KeyInterceptingView: NSView {
                 onArrowDown()
                 return true
             }
+        case 124: // Right arrow
+            if baseModifiers.isEmpty {
+                onArrowRight()
+                return true
+            }
+        case 123: // Left arrow
+            if baseModifiers.isEmpty {
+                onArrowLeft()
+                return true
+            }
+        case 49: // Space
+            if baseModifiers.isEmpty {
+                onSpace()
+                return true
+            }
         case 36: // Return
             if baseModifiers.isEmpty {
                 onReturn()
@@ -560,18 +623,26 @@ private struct QuickSearchRow: View {
                     Text(entry.timestamp.relativeFormatted)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+                    
+                    Text("•")
+                        .foregroundStyle(.tertiary)
+                    Text("\(entry.content.count.formatted()) chars")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
             
             Spacer()
             
-            // Keyboard shortcut hint
-            Text("⌘\(index)")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+            // Keyboard shortcut hint (first 9 items only)
+            if index <= 9 {
+                Text("⌘\(index)")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -586,6 +657,81 @@ private struct QuickSearchRow: View {
         let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
         let singleLine = trimmed.components(separatedBy: .newlines).joined(separator: " ")
         return singleLine.isEmpty ? "(empty)" : String(singleLine.prefix(100))
+    }
+}
+
+// MARK: - Quick Search Preview Panel
+
+private struct QuickSearchPreviewPanel: View {
+    let entry: ClipboardEntry
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header with metadata
+            HStack(spacing: 8) {
+                Image(systemName: entry.contentType.systemImageName)
+                    .font(.title3)
+                    .foregroundStyle(entry.contentType.tint)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.contentType.displayTitle)
+                        .font(.headline)
+                    
+                    HStack(spacing: 6) {
+                        if let app = entry.sourceApp?.appDisplayName {
+                            Text(app)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("•")
+                                .foregroundStyle(.tertiary)
+                        }
+                        Text(entry.timestamp.relativeFormatted)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                // Character count badge
+                Text("\(entry.content.count.formatted()) chars")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            
+            Divider()
+                .opacity(0.5)
+            
+            // Scrollable content
+            ScrollView {
+                Text(entry.content)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+            }
+            
+            Divider()
+                .opacity(0.5)
+            
+            // Footer with hint
+            HStack {
+                Text("← to close")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Text("↵ to paste")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
     }
 }
 
