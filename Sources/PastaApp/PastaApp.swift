@@ -836,6 +836,7 @@ struct PanelContentView: View {
             .frame(width: 320)
             .focusable()
             .focused($listFocused)
+            .focusEffectDisabled()
             .accessibilitySortPriority(2)
 
             PreviewPanelView(entry: displayedEntries.first(where: { $0.id == selectedEntryID }))

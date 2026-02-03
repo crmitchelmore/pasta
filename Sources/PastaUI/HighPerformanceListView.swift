@@ -77,6 +77,7 @@ public struct HighPerformanceListView: NSViewRepresentable {
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
+        scrollView.focusRingType = .none
         
         let tableView = NSTableView()
         tableView.style = .inset
@@ -89,6 +90,7 @@ public struct HighPerformanceListView: NSViewRepresentable {
         tableView.selectionHighlightStyle = .regular
         tableView.allowsMultipleSelection = false
         tableView.allowsEmptySelection = true
+        tableView.focusRingType = .none
         
         // Single column
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("content"))
