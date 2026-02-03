@@ -62,59 +62,63 @@ public struct QuickSearchView: View {
             }
         ) {
             ZStack {
-                HStack(spacing: 0) {
-                    // Main quick search panel
-                    VStack(spacing: 0) {
-                        // Search field
-                        searchField
-                        
-                        // Quick filters (hidden in command mode)
-                        if !manager.isCommandMode {
-                            filterBar
-                        }
-                        
-                        Divider()
-                            .opacity(0.5)
-                        
-                        // Results or Commands
-                        if manager.isCommandMode {
-                            commandsList
-                        } else if manager.results.isEmpty && !manager.query.isEmpty {
-                            emptyState
-                        } else {
-                            resultsList
-                        }
-                        
-                        // Command feedback
-                        if let feedback = commandFeedback {
-                            HStack {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
-                                Text(feedback)
-                                    .font(.caption)
+                VStack(spacing: 0) {
+                    // Search field - always full width
+                    searchField
+                    
+                    // Quick filters (hidden in command mode) - always full width
+                    if !manager.isCommandMode {
+                        filterBar
+                    }
+                    
+                    Divider()
+                        .opacity(0.5)
+                    
+                    // Results area - changes layout when preview is visible
+                    if manager.isCommandMode {
+                        commandsList
+                    } else if manager.results.isEmpty && !manager.query.isEmpty {
+                        emptyState
+                    } else {
+                        HStack(spacing: 0) {
+                            // Results list - shrinks to micro view when preview visible
+                            if isPreviewVisible {
+                                microResultsList
+                                    .frame(width: 100)
+                                
+                                Divider()
+                                    .opacity(0.5)
+                                
+                                // Preview panel fills remaining space
+                                if let entry = manager.selectedEntry {
+                                    QuickSearchPreviewPanel(entry: entry)
+                                        .frame(maxWidth: .infinity)
+                                }
+                            } else {
+                                resultsList
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.green.opacity(0.1))
                         }
                     }
-                    .frame(width: 680, height: dynamicHeight)
-                    .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     
-                    // Preview panel (shown when activated)
-                    if isPreviewVisible, let entry = manager.selectedEntry {
-                        QuickSearchPreviewPanel(entry: entry)
-                            .frame(width: 380, height: dynamicHeight)
-                            .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .padding(.leading, 8)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    // Command feedback
+                    if let feedback = commandFeedback {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text(feedback)
+                                .font(.caption)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.green.opacity(0.1))
                     }
                 }
-                .animation(.easeInOut(duration: 0.2), value: isPreviewVisible)
+                .frame(width: 680, height: dynamicHeight)
+                .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
+                .animation(.easeInOut(duration: 0.2), value: isPreviewVisible)
                 
                 // Confirmation dialog overlay
                 if showingConfirmation {
@@ -384,6 +388,33 @@ public struct QuickSearchView: View {
             }
         }
     }
+    
+    private var microResultsList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(Array(manager.results.enumerated()), id: \.element.id) { index, entry in
+                        QuickSearchMicroRow(
+                            entry: entry,
+                            index: index + 1,
+                            isSelected: manager.selectedIndex == index
+                        )
+                        .id(entry.id)
+                        .onTapGesture {
+                            manager.selectedIndex = index
+                        }
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 6)
+            }
+            .onChange(of: manager.selectedIndex) { _, newIndex in
+                if let entry = manager.results[safe: newIndex] {
+                    proxy.scrollTo(entry.id, anchor: .center)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Key Handler (NSViewRepresentable to capture keys globally)
@@ -643,6 +674,45 @@ private struct QuickSearchRow: View {
         let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
         let singleLine = trimmed.components(separatedBy: .newlines).joined(separator: " ")
         return singleLine.isEmpty ? "(empty)" : String(singleLine.prefix(100))
+    }
+}
+
+// MARK: - Quick Search Micro Row (compact view for preview mode)
+
+private struct QuickSearchMicroRow: View {
+    let entry: ClipboardEntry
+    let index: Int
+    let isSelected: Bool
+    
+    var body: some View {
+        VStack(spacing: 4) {
+            // Content type icon
+            Image(systemName: entry.contentType.systemImageName)
+                .font(.title3)
+                .foregroundStyle(entry.contentType.tint)
+            
+            // App name (abbreviated)
+            if let app = entry.sourceApp?.appDisplayName {
+                Text(app.prefix(6))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            
+            // Keyboard shortcut hint (first 9 items only)
+            if index <= 9 {
+                Text("⌘\(index)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+        )
+        .contentShape(Rectangle())
     }
 }
 
