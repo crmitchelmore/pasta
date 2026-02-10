@@ -2,6 +2,11 @@
 
 All notable changes to Pasta will be documented in this file.
 
+## [0.7.9] - 2026-02-10
+
+### Fixed
+- Fixed stale preload cache causing outdated entries to display after data changes.
+
 ## [0.7.1] - 2026-01-31
 
 ### Changed
