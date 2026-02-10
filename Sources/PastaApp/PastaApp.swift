@@ -868,9 +868,10 @@ struct PanelContentView: View {
                 schedulePreload(for: entries)
 
                 // Update displayed entries when source changes (new items, deletions)
+                // Always use applyFiltersToEntries with fresh entries - don't use stale preload cache
                 let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.isEmpty {
-                    displayedEntries = preloadedEntriesForCurrentFilters() ?? applyFiltersToEntries(entries)
+                    displayedEntries = applyFiltersToEntries(entries)
                 } else {
                     triggerSearchUpdate()
                 }
