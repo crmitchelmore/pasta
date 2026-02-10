@@ -145,13 +145,39 @@ swift build -c release   # Release build
 swift test               # Run all tests
 ```
 
-## Release Process
-Push a version tag to trigger the release workflow:
-```bash
-git tag v0.x.x && git push origin v0.x.x
-```
+## Commit Conventions
+Use [Conventional Commits](https://www.conventionalcommits.org/) for all commit messages. These drive automated version bumps and releases.
 
-The workflow builds a universal binary, signs, notarizes, and creates a GitHub release with DMG.
+### Commit types and version impact
+| Prefix | Version bump | Example |
+|--------|-------------|---------|
+| `feat:` | Minor (0.x.0) | `feat(ui): add dark mode toggle` |
+| `fix:` | Patch (0.0.x) | `fix: prevent crash on empty clipboard` |
+| `perf:` | Patch (0.0.x) | `perf: reduce FTS5 query time` |
+| `docs:` | No release | `docs: update README` |
+| `chore:` | No release | `chore: update dependencies` |
+| `ci:` | No release | `ci: add smoke test step` |
+| `test:` | No release | `test: add search edge cases` |
+| `refactor:` | No release | `refactor: extract paste service` |
+| `style:` | No release | `style: fix indentation` |
+| `build:` | No release | `build: update Package.swift` |
+| `!` after type | **Major** (x.0.0) | `feat!: redesign settings API` |
+| `BREAKING CHANGE:` in body | **Major** (x.0.0) | (any type with breaking body) |
+
+### Scopes
+Use optional scopes for clarity: `feat(ui):`, `fix(core):`, `perf(search):`.
+
+## Release Process
+Releases are fully automated via conventional commits:
+
+1. Push to `main` → CI runs (build, test, smoke test)
+2. CI passes → auto-release job parses commits since last tag
+3. If releasable commits exist (`feat:`, `fix:`, `perf:`, or breaking) → version tag is created
+4. Tag push → release workflow builds universal binary, signs, notarizes, and creates GitHub release with DMG
+
+**No manual tagging is needed.** Just use the correct conventional commit prefix and push to main.
+
+To force a release for non-standard commit types, use `fix:` or `feat:` prefix as appropriate.
 
 ### Protected Branch Limitation
 The release workflow **cannot push to main** due to branch protection requiring status checks.
