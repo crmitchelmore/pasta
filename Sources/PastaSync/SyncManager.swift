@@ -65,6 +65,7 @@ public final class SyncManager: ObservableObject {
     
     /// Checks whether the running binary has the icloud-services entitlement.
     private static func hasCloudKitEntitlement() -> Bool {
+        #if os(macOS)
         guard let task = SecTaskCreateFromSelf(nil) else { return false }
         let value = SecTaskCopyValueForEntitlement(
             task,
@@ -72,6 +73,10 @@ public final class SyncManager: ObservableObject {
             nil
         )
         return value != nil
+        #else
+        // iOS always has entitlements when properly provisioned
+        return true
+        #endif
     }
     
     // MARK: - Zone Setup
@@ -109,11 +114,14 @@ public final class SyncManager: ObservableObject {
     }
     
     /// Pushes multiple entries to CloudKit in batches.
-    public func pushEntries(_ entries: [ClipboardEntry], batchSize: Int = 200) async throws {
-        guard resolveContainer(), let database else { return }
+    /// Returns the number of entries successfully pushed.
+    @discardableResult
+    public func pushEntries(_ entries: [ClipboardEntry], batchSize: Int = 200) async throws -> Int {
+        guard resolveContainer(), let database else { return 0 }
         await MainActor.run { syncState = .syncing }
         defer { Task { @MainActor in syncState = .idle } }
         
+        var pushedCount = 0
         let batches = stride(from: 0, to: entries.count, by: batchSize).map {
             Array(entries[$0..<min($0 + batchSize, entries.count)])
         }
@@ -136,8 +144,16 @@ public final class SyncManager: ObservableObject {
                 database.add(operation)
             }
             
-            logger.info("Pushed batch of \(batch.count) entries")
+            pushedCount += batch.count
+            let total = entries.count
+            await MainActor.run {
+                syncedEntryCount = pushedCount
+            }
+            logger.info("Pushed batch of \(batch.count) entries (\(pushedCount)/\(total))")
         }
+        
+        await MainActor.run { lastSyncDate = Date() }
+        return pushedCount
     }
     
     /// Deletes an entry from CloudKit.

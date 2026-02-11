@@ -39,13 +39,16 @@ public struct SettingsView: View {
     private let checkForUpdates: (() -> Void)?
     private let automaticallyChecksForUpdates: Binding<Bool>?
     private let syncManager: SyncManager?
+    private let allEntries: (() -> [ClipboardEntry])?
 
     public init(
         syncManager: SyncManager? = nil,
+        allEntries: (() -> [ClipboardEntry])? = nil,
         checkForUpdates: (() -> Void)? = nil,
         automaticallyChecksForUpdates: Binding<Bool>? = nil
     ) {
         self.syncManager = syncManager
+        self.allEntries = allEntries
         self.checkForUpdates = checkForUpdates
         self.automaticallyChecksForUpdates = automaticallyChecksForUpdates
     }
@@ -87,7 +90,7 @@ public struct SettingsView: View {
             .tag(SettingsTab.storage)
             
             if let syncManager {
-                iCloudSettingsTab(syncManager: syncManager)
+                iCloudSettingsTab(syncManager: syncManager, allEntries: allEntries ?? { [] })
                     .tabItem {
                         Label("iCloud", systemImage: "icloud")
                     }
@@ -417,6 +420,7 @@ private struct StorageSettingsTab: View {
 
 private struct iCloudSettingsTab: View {
     @ObservedObject var syncManager: SyncManager
+    let allEntries: () -> [ClipboardEntry]
     @State private var iCloudAvailable: Bool? = nil
     @State private var isResetting = false
 
@@ -451,6 +455,10 @@ private struct iCloudSettingsTab: View {
                     Button("Sync") {
                         Task {
                             try? await syncManager.setupZone()
+                            let entries = allEntries()
+                            if !entries.isEmpty {
+                                try? await syncManager.pushEntries(entries)
+                            }
                             _ = try? await syncManager.fetchChanges()
                         }
                     }
