@@ -74,8 +74,7 @@ final class BackgroundService: ObservableObject {
             storageError = PastaError.unknown(underlying: error)
         }
         self.imageStorage = storage
-        let isCI = ProcessInfo.processInfo.environment["CI"] != nil
-        self.syncManager = SyncManager(containerIdentifier: "iCloud.com.pasta.ios", syncEnabled: !isCI)
+        self.syncManager = SyncManager(containerIdentifier: "iCloud.com.pasta.ios")
         
         self.clipboardMonitor = ClipboardMonitor()
         self.contentTypeDetector = ContentTypeDetector()

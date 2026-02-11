@@ -2,6 +2,7 @@ import CloudKit
 import Foundation
 import os.log
 import PastaCore
+import Security
 
 /// Orchestrates CloudKit sync for clipboard entries.
 /// Used by both macOS (push) and iOS (pull + push responses).
@@ -45,6 +46,14 @@ public final class SyncManager: ObservableObject {
     private func resolveContainer() -> Bool {
         guard syncEnabled else { return false }
         guard container == nil else { return true }
+        
+        // Check entitlement at runtime to avoid SIGTRAP from CKContainer
+        // when the binary lacks CloudKit entitlements.
+        guard Self.hasCloudKitEntitlement() else {
+            logger.info("CloudKit entitlement not present, sync disabled")
+            return false
+        }
+        
         if let containerIdentifier {
             container = CKContainer(identifier: containerIdentifier)
         } else {
@@ -52,6 +61,17 @@ public final class SyncManager: ObservableObject {
         }
         database = container?.privateCloudDatabase
         return container != nil
+    }
+    
+    /// Checks whether the running binary has the icloud-services entitlement.
+    private static func hasCloudKitEntitlement() -> Bool {
+        guard let task = SecTaskCreateFromSelf(nil) else { return false }
+        let value = SecTaskCopyValueForEntitlement(
+            task,
+            "com.apple.developer.icloud-services" as CFString,
+            nil
+        )
+        return value != nil
     }
     
     // MARK: - Zone Setup
