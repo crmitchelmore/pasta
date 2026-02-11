@@ -237,12 +237,30 @@ jobs:
               <true/>
               <key>com.apple.security.cs.disable-library-validation</key>
               <true/>
+              <key>com.apple.developer.icloud-services</key>
+              <array>
+                  <string>CloudKit</string>
+              </array>
+              <key>com.apple.developer.icloud-container-identifiers</key>
+              <array>
+                  <string>iCloud.com.pasta.ios</string>
+              </array>
+              <key>com.apple.developer.icloud-container-environment</key>
+              <string>Production</string>
+              <key>aps-environment</key>
+              <string>production</string>
           </dict>
           </plist>
           PLIST
           
           echo "==> Entitlements file created"
           cat entitlements.plist
+      
+      - name: Embed provisioning profile
+        run: |
+          echo "${{ secrets.MACOS_PROVISIONING_PROFILE }}" | base64 -D -o "${APP_DIR}/Contents/embedded.provisionprofile"
+          echo "==> Provisioning profile embedded"
+          ls -la "${APP_DIR}/Contents/embedded.provisionprofile"
       
       - name: Code sign app bundle
         run: |
