@@ -2,6 +2,7 @@
 .build/
 .swiftpm/
 *.xcodeproj/
+!PastaIOS/PastaIOS.xcodeproj/
 xcuserdata/
 DerivedData/
 .idea/

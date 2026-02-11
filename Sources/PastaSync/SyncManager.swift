@@ -20,7 +20,7 @@ public final class SyncManager: ObservableObject {
     private var database: CKDatabase?
     private let recordMapper: RecordMapper
     private let logger = Logger(subsystem: "com.pasta.sync", category: "SyncManager")
-    private let containerIdentifier: String
+    private let containerIdentifier: String?
     
     // Zone for custom zone operations
     public static let zoneName = "PastaZone"
@@ -32,7 +32,10 @@ public final class SyncManager: ObservableObject {
     /// Whether sync is enabled. Disabled when CloudKit entitlement is missing.
     public let syncEnabled: Bool
     
-    public init(containerIdentifier: String = "iCloud.com.pasta.ios", syncEnabled: Bool = true) {
+    /// - Parameters:
+    ///   - containerIdentifier: Explicit CloudKit container ID, or nil to use the default container.
+    ///   - syncEnabled: Set false to disable all CloudKit operations.
+    public init(containerIdentifier: String? = nil, syncEnabled: Bool = true) {
         self.containerIdentifier = containerIdentifier
         self.syncEnabled = syncEnabled
         self.recordMapper = RecordMapper()
@@ -42,7 +45,11 @@ public final class SyncManager: ObservableObject {
     private func resolveContainer() -> Bool {
         guard syncEnabled else { return false }
         guard container == nil else { return true }
-        container = CKContainer(identifier: containerIdentifier)
+        if let containerIdentifier {
+            container = CKContainer(identifier: containerIdentifier)
+        } else {
+            container = CKContainer.default()
+        }
         database = container?.privateCloudDatabase
         return container != nil
     }
