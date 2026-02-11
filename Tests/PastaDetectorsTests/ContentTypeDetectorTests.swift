@@ -74,6 +74,42 @@ final class ContentTypeDetectorTests: XCTestCase {
         XCTAssertNotNil(meta["hashes"])
     }
 
+    func testJWTDoesNotProduceFalseAPIKeyDetections() throws {
+        let detector = ContentTypeDetector(jwtDetector: JWTDetector(now: { Date(timeIntervalSince1970: 2_000) }))
+
+        // A realistic JWT with long base64url segments that could match broad API key patterns
+        let header = "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":\"abc123\"}"
+        let payload = "{\"sub\":\"user_2abc\",\"iss\":\"https://clerk.example.com\",\"iat\":1500,\"exp\":2500,\"azp\":\"app_2def\",\"org_id\":\"org_2ghi\",\"permissions\":[\"read\",\"write\"]}"
+        let token = makeJWT(headerJSON: header, payloadJSON: payload, signature: String(repeating: "x", count: 64))
+
+        let out = detector.detect(in: token)
+        XCTAssertEqual(out.primaryType, .jwt)
+
+        let meta = try XCTUnwrap(parseJSON(out.metadataJSON))
+        // Must not contain false positive API keys from JWT segments
+        let apiKeys = meta["apiKeys"] as? [[String: Any]]
+        XCTAssertNil(apiKeys, "JWT should not produce false API key detections")
+    }
+
+    func testAPIKeyBoundaryEnforcementPreventsEmbeddedMatches() {
+        let detector = APIKeyDetector()
+
+        // An AWS secret key pattern embedded in a longer string (no whitespace boundary)
+        let embedded = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGH"
+        let detections = detector.detect(in: embedded)
+        // Should not match because the 40-char AWS pattern is embedded in a longer run
+        let awsKeys = detections.filter { $0.provider.contains("AWS") }
+        XCTAssertTrue(awsKeys.isEmpty, "Should not detect embedded AWS key without boundary")
+    }
+
+    func testAPIKeyWithWhitespaceBoundaryIsDetected() {
+        let detector = APIKeyDetector()
+
+        let key = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
+        let detections = detector.detect(in: "token: \(key) is live")
+        XCTAssertTrue(detections.contains(where: { $0.provider == "GitHub PAT" }))
+    }
+
     private func parseJSON(_ json: String?) -> [String: Any]? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         return (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any]

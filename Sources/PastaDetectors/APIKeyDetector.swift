@@ -22,11 +22,16 @@ public struct APIKeyDetector {
         let provider: String
         let pattern: String
         let confidence: Double
+        /// When true, the pattern has a distinctive prefix (e.g. `sk-`, `ghp_`) so
+        /// boundary enforcement is less critical. When false, a post-match boundary
+        /// check is applied to reject matches embedded in longer alphanumeric runs.
+        let hasDistinctivePrefix: Bool
         
-        init(_ provider: String, _ pattern: String, confidence: Double = 0.95) {
+        init(_ provider: String, _ pattern: String, confidence: Double = 0.95, hasDistinctivePrefix: Bool = true) {
             self.provider = provider
             self.pattern = pattern
             self.confidence = confidence
+            self.hasDistinctivePrefix = hasDistinctivePrefix
         }
     }
     
@@ -45,7 +50,7 @@ public struct APIKeyDetector {
         
         // AWS
         KeyPattern("AWS Access Key", #"AKIA[0-9A-Z]{16}"#),
-        KeyPattern("AWS Secret Key", #"(?<![A-Za-z0-9/+])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])"#, confidence: 0.70),
+        KeyPattern("AWS Secret Key", #"(?<![A-Za-z0-9/+])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])"#, confidence: 0.70, hasDistinctivePrefix: false),
         
         // GitHub
         KeyPattern("GitHub PAT", #"ghp_[a-zA-Z0-9]{36}"#),
@@ -82,9 +87,6 @@ public struct APIKeyDetector {
         // PyPI
         KeyPattern("PyPI Token", #"pypi-[a-zA-Z0-9\-_]{100,}"#),
         
-        // Heroku
-        KeyPattern("Heroku API Key", #"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"#, confidence: 0.60),
-        
         // DigitalOcean
         KeyPattern("DigitalOcean", #"dop_v1_[a-f0-9]{64}"#),
         KeyPattern("DigitalOcean", #"doo_v1_[a-f0-9]{64}"#),
@@ -96,14 +98,8 @@ public struct APIKeyDetector {
         // Firebase
         KeyPattern("Firebase", #"AAAA[A-Za-z0-9_-]{7}:[A-Za-z0-9_-]{140}"#),
         
-        // Datadog
-        KeyPattern("Datadog API Key", #"[a-f0-9]{32}"#, confidence: 0.50),
-        
         // Linear
         KeyPattern("Linear API Key", #"lin_api_[a-zA-Z0-9]{40}"#),
-        
-        // Vercel
-        KeyPattern("Vercel Token", #"[A-Za-z0-9]{24}"#, confidence: 0.40),
         
         // Supabase
         KeyPattern("Supabase", #"sbp_[a-f0-9]{40}"#),
@@ -114,24 +110,12 @@ public struct APIKeyDetector {
         // HuggingFace
         KeyPattern("HuggingFace", #"hf_[a-zA-Z0-9]{34}"#),
         
-        // Cohere
-        KeyPattern("Cohere", #"[a-zA-Z0-9]{40}"#, confidence: 0.35),
-        
         // Mapbox
         KeyPattern("Mapbox", #"pk\.[a-zA-Z0-9]{60,}"#),
         KeyPattern("Mapbox Secret", #"sk\.[a-zA-Z0-9]{60,}"#),
         
-        // Algolia
-        KeyPattern("Algolia", #"[a-f0-9]{32}"#, confidence: 0.45),
-        
         // PlanetScale
         KeyPattern("PlanetScale", #"pscale_tkn_[a-zA-Z0-9_]+"#),
-        
-        // Deepgram
-        KeyPattern("Deepgram", #"[a-f0-9]{40}"#, confidence: 0.50),
-        
-        // Rev.ai
-        KeyPattern("Rev.ai", #"[a-zA-Z0-9]{32,}"#, confidence: 0.40),
         
         // Generic patterns (lower confidence)
         KeyPattern("Generic API Key", #"(?i)api[_-]?key['":\s=]+['"]?([a-zA-Z0-9\-_]{20,})['"]?"#, confidence: 0.65),
@@ -164,6 +148,14 @@ public struct APIKeyDetector {
                 // Skip if we've already found this key
                 guard seenKeys.insert(key).inserted else { continue }
                 
+                // For patterns without a distinctive prefix, verify the match is
+                // bounded by whitespace, start/end of string, or common delimiters
+                // (quotes, equals, colons, commas, brackets). This prevents matching
+                // substrings inside longer tokens like JWTs or base64-encoded content.
+                if !keyPattern.hasDistinctivePrefix && !hasBoundary(in: trimmed, matchRange: matchRange) {
+                    continue
+                }
+                
                 // Skip obvious test/example keys
                 let isLikelyLive = !isTestOrExampleKey(key)
                 
@@ -188,6 +180,30 @@ public struct APIKeyDetector {
         }
         
         return detections
+    }
+    
+    /// Checks that a match is bounded by whitespace, start/end, or common delimiters.
+    /// Returns false if the match is embedded inside a longer alphanumeric/base64 sequence.
+    private func hasBoundary(in text: String, matchRange: Range<String.Index>) -> Bool {
+        let boundaryChars: Set<Character> = [" ", "\t", "\n", "\r", "\"", "'", "=", ":", ",", ";", "(", ")", "[", "]", "{", "}", "<", ">", "|", "`"]
+        
+        // Check leading boundary
+        if matchRange.lowerBound != text.startIndex {
+            let preceding = text[text.index(before: matchRange.lowerBound)]
+            if !boundaryChars.contains(preceding) && !preceding.isNewline {
+                return false
+            }
+        }
+        
+        // Check trailing boundary
+        if matchRange.upperBound != text.endIndex {
+            let following = text[matchRange.upperBound]
+            if !boundaryChars.contains(following) && !following.isNewline {
+                return false
+            }
+        }
+        
+        return true
     }
     
     /// Check if a key looks like a test/example/placeholder

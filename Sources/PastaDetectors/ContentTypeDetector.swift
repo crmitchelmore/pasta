@@ -99,7 +99,19 @@ public struct ContentTypeDetector {
         let analysisText = decodedText ?? trimmed
 
         let jwt = jwtDetector.detect(in: analysisText)
-        let apiKeys = apiKeyDetector.detect(in: analysisText)
+        let rawApiKeys = apiKeyDetector.detect(in: analysisText)
+        
+        // Suppress API key detections that are substrings of detected JWT tokens.
+        // JWT base64url segments frequently match broad API key patterns.
+        let apiKeys: [APIKeyDetector.Detection]
+        if jwt.isEmpty {
+            apiKeys = rawApiKeys
+        } else {
+            let jwtTokens = jwt.map(\.token)
+            apiKeys = rawApiKeys.filter { detection in
+                !jwtTokens.contains { $0.contains(detection.key) }
+            }
+        }
         let emails = emailDetector.detect(in: analysisText)
         let phoneNumbers = phoneNumberDetector.detect(in: analysisText)
         let ipAddresses = ipAddressDetector.detect(in: analysisText)
