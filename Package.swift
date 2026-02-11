@@ -4,13 +4,15 @@ import PackageDescription
 let package = Package(
     name: "Pasta",
     platforms: [
-        .macOS(.v14)
+        .macOS(.v14),
+        .iOS(.v17)
     ],
     products: [
         .executable(name: "PastaApp", targets: ["PastaApp"]),
         .library(name: "PastaCore", targets: ["PastaCore"]),
         .library(name: "PastaUI", targets: ["PastaUI"]),
-        .library(name: "PastaDetectors", targets: ["PastaDetectors"])
+        .library(name: "PastaDetectors", targets: ["PastaDetectors"]),
+        .library(name: "PastaSync", targets: ["PastaSync"])
     ],
     dependencies: [
         // SQLite database
@@ -30,6 +32,7 @@ let package = Package(
                 "PastaCore",
                 "PastaUI",
                 "PastaDetectors",
+                "PastaSync",
                 "HotKey",
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "Sentry", package: "sentry-cocoa")
@@ -59,6 +62,14 @@ let package = Package(
         // Content type detection algorithms
         .target(
             name: "PastaDetectors",
+            dependencies: [
+                "PastaCore"
+            ]
+        ),
+        
+        // CloudKit sync for macOS and iOS
+        .target(
+            name: "PastaSync",
             dependencies: [
                 "PastaCore"
             ]

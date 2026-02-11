@@ -4,6 +4,7 @@ import UserNotifications
 
 @preconcurrency import PastaCore
 import PastaDetectors
+import PastaSync
 
 #if canImport(AppKit)
 import AppKit
@@ -19,6 +20,7 @@ final class BackgroundService: ObservableObject {
     @Published var lastError: PastaError? = nil
     
     let database: DatabaseManager
+    let syncManager: SyncManager
     
     private let imageStorage: ImageStorageManager
     private let clipboardMonitor: ClipboardMonitor
@@ -72,6 +74,7 @@ final class BackgroundService: ObservableObject {
             storageError = PastaError.unknown(underlying: error)
         }
         self.imageStorage = storage
+        self.syncManager = SyncManager()
         
         self.clipboardMonitor = ClipboardMonitor()
         self.contentTypeDetector = ContentTypeDetector()
@@ -84,6 +87,7 @@ final class BackgroundService: ObservableObject {
         
         subscribe()
         refresh()
+        setupSync()
         
         // Run initial pruning
         pruneOldEntries()
@@ -100,6 +104,23 @@ final class BackgroundService: ObservableObject {
         screenshotMonitor.start()
         startPruneTimer()
         PastaLogger.app.info("Background clipboard monitoring started")
+    }
+    
+    private func setupSync() {
+        Task {
+            do {
+                let status = try await syncManager.checkAccountStatus()
+                guard status == .available else {
+                    PastaLogger.app.info("iCloud not available, sync disabled")
+                    return
+                }
+                try await syncManager.setupZone()
+                try await syncManager.registerSubscription()
+                PastaLogger.app.info("CloudKit sync initialised")
+            } catch {
+                PastaLogger.logError(error, logger: PastaLogger.app, context: "CloudKit sync setup failed")
+            }
+        }
     }
     
     func stop() {
@@ -212,6 +233,7 @@ final class BackgroundService: ObservableObject {
                     }
 
                     // Insert all entries
+                    var insertedEntries: [ClipboardEntry] = []
                     for e in result.allEntries {
                         // Skip API keys if setting is enabled
                         if skipAPIKeys && e.contentType == .apiKey {
@@ -221,9 +243,20 @@ final class BackgroundService: ObservableObject {
                         
                         do {
                             try db.insert(e, deduplicate: deduplicate)
+                            insertedEntries.append(e)
                             PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)\(e.isExtracted ? " (extracted)" : "")")
                         } catch {
                             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert entry")
+                        }
+                    }
+
+                    // Push to CloudKit (fire-and-forget)
+                    if !insertedEntries.isEmpty {
+                        let syncManager = self.syncManager
+                        Task.detached(priority: .utility) {
+                            for entry in insertedEntries {
+                                try? await syncManager.pushEntry(entry)
+                            }
                         }
                     }
 
@@ -275,12 +308,24 @@ final class BackgroundService: ObservableObject {
                         result = EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: [])
                     }
 
+                    var insertedScreenshots: [ClipboardEntry] = []
                     for e in result.allEntries {
                         do {
                             try db.insert(e, deduplicate: deduplicate)
+                            insertedScreenshots.append(e)
                             PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)")
                         } catch {
                             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert screenshot entry")
+                        }
+                    }
+
+                    // Push to CloudKit (fire-and-forget)
+                    if !insertedScreenshots.isEmpty {
+                        let syncManager = self.syncManager
+                        Task.detached(priority: .utility) {
+                            for entry in insertedScreenshots {
+                                try? await syncManager.pushEntry(entry)
+                            }
                         }
                     }
 
