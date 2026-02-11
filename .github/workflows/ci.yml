@@ -126,10 +126,24 @@ jobs:
           
           echo "==> Smoke test: attempting to launch app..."
           
-          # Try to launch the app - this will catch:
-          # - Missing frameworks (dyld errors)
-          # - Missing resource bundles (Swift resource errors)
-          # - Other immediate crash issues
+          # Sign with CloudKit entitlements (CKContainer crashes without them)
+          cat > /tmp/smoke_entitlements.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>com.apple.developer.icloud-services</key>
+              <array>
+                  <string>CloudKit</string>
+              </array>
+              <key>com.apple.developer.icloud-container-identifiers</key>
+              <array>
+                  <string>iCloud.com.pasta.ios</string>
+              </array>
+          </dict>
+          </plist>
+          PLIST
+          codesign --force --sign - --entitlements /tmp/smoke_entitlements.plist "$APP_DIR/Contents/MacOS/PastaApp"
           
           # Launch in background, capture any stderr
           "$APP_DIR/Contents/MacOS/PastaApp" 2> /tmp/launch_error.log &
