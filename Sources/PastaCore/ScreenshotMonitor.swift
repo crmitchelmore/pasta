@@ -2,7 +2,7 @@ import Combine
 import Foundation
 import os.log
 
-#if canImport(CoreServices)
+#if os(macOS)
 import CoreServices
 #endif
 
@@ -64,7 +64,9 @@ public final class ScreenshotMonitor {
     private var captureStartTime: Date = Date()
     
     // FSEvents stream for efficient file monitoring
+    #if os(macOS)
     private var eventStream: FSEventStreamRef?
+    #endif
     private var isRunning = false
     
     // Fallback polling
@@ -133,7 +135,7 @@ public final class ScreenshotMonitor {
     // MARK: - FSEvents
     
     private func startFSEventsStream(for directoryURL: URL) -> Bool {
-        #if canImport(CoreServices)
+        #if os(macOS)
         let pathsToWatch = [directoryURL.path] as CFArray
         
         // Use passRetained to prevent use-after-free - we release in stopFSEventsStream
@@ -186,7 +188,7 @@ public final class ScreenshotMonitor {
     }
     
     private func stopFSEventsStream() {
-        #if canImport(CoreServices)
+        #if os(macOS)
         if let stream = eventStream {
             FSEventStreamStop(stream)
             FSEventStreamInvalidate(stream)
@@ -360,7 +362,7 @@ public final class ScreenshotMonitor {
     }
 
     private func screenshotMetadataFlag(for url: URL) -> Bool? {
-#if canImport(CoreServices)
+#if os(macOS)
         let key = "kMDItemIsScreenCapture" as CFString
         guard let item = MDItemCreate(kCFAllocatorDefault, url.path as CFString) else { return nil }
         return MDItemCopyAttribute(item, key) as? Bool

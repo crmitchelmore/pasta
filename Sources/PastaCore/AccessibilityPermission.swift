@@ -1,8 +1,8 @@
-#if canImport(ApplicationServices)
+#if os(macOS)
 import ApplicationServices
 #endif
 
-#if canImport(CoreGraphics)
+#if os(macOS)
 import CoreGraphics
 #endif
 
@@ -10,7 +10,7 @@ public enum AccessibilityPermission {
     /// Returns true if the current process is trusted for Accessibility features (eg CGEvent posting).
     /// Note: AXIsProcessTrusted() can be cached by the system; changes may not reflect immediately.
     public static func isTrusted() -> Bool {
-        #if canImport(ApplicationServices)
+        #if os(macOS)
         // Use simple AXIsProcessTrusted() - AXIsProcessTrustedWithOptions can have issues
         return AXIsProcessTrusted()
         #else
@@ -21,7 +21,7 @@ public enum AccessibilityPermission {
     /// Returns true if Input Monitoring permission is granted.
     /// Required for NSEvent.addGlobalMonitorForEvents on macOS Catalina+.
     public static func hasInputMonitoring() -> Bool {
-        #if canImport(CoreGraphics)
+        #if os(macOS)
         return CGPreflightListenEventAccess()
         #else
         return false
@@ -36,7 +36,7 @@ public enum AccessibilityPermission {
 
     /// Best-effort: asks the system to show the Accessibility permission prompt.
     public static func requestPrompt() {
-        #if canImport(ApplicationServices)
+        #if os(macOS)
         let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as NSString: true]
         _ = AXIsProcessTrustedWithOptions(options)
         #endif
@@ -46,7 +46,7 @@ public enum AccessibilityPermission {
     /// Returns true if granted, false otherwise.
     @discardableResult
     public static func requestInputMonitoring() -> Bool {
-        #if canImport(CoreGraphics)
+        #if os(macOS)
         return CGRequestListenEventAccess()
         #else
         return false

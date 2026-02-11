@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import GRDB
 
@@ -737,3 +738,4 @@ public enum ImportError: LocalizedError {
         }
     }
 }
+#endif
