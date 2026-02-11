@@ -84,17 +84,81 @@ jobs:
       - name: Validate release entitlements
         run: |
           # These entitlements cause SIGKILL on launch if not in provisioning profile
-          RESTRICTED_KEYS="aps-environment"
+          RESTRICTED_KEYS="aps-environment get-task-allow com.apple.developer.team-identifier"
           
           for key in $RESTRICTED_KEYS; do
-            if grep -q "<key>${key}</key>" ".github/workflows/release.yml"; then
-              echo "ERROR: release.yml contains restricted entitlement '${key}'."
+            if grep -q "<key>${key}</key>" "Resources/release.entitlements"; then
+              echo "ERROR: release.entitlements contains restricted key '${key}'."
               echo "This will cause 'The application can't be opened' on user machines."
               echo "Remove it or update the provisioning profile first."
               exit 1
             fi
           done
-          echo "✓ No restricted entitlements found in release workflow"
+          echo "✓ No restricted entitlements found"
+      
+      - name: Sign test bundle (mirrors release signing)
+        run: |
+          set -e
+          APP_DIR="${{ steps.bundle.outputs.APP_DIR }}"
+          
+          # CI uses ad-hoc signing (no Developer ID cert).
+          # iCloud entitlements are restricted and require a provisioning profile,
+          # so we strip them for the launch test. The entitlement validation step
+          # above catches restricted keys statically.
+          
+          # Create CI-safe entitlements (non-restricted keys only)
+          python3 -c "
+          import plistlib, sys
+          RESTRICTED_PREFIXES = ['com.apple.developer.icloud', 'aps-environment',
+                                 'get-task-allow', 'com.apple.developer.team-identifier']
+          with open('Resources/release.entitlements', 'rb') as f:
+              ents = plistlib.load(f)
+          safe = {k: v for k, v in ents.items()
+                  if not any(k.startswith(p) for p in RESTRICTED_PREFIXES)}
+          with open('/tmp/ci-entitlements.plist', 'wb') as f:
+              plistlib.dump(safe, f)
+          print(f'CI entitlements: {list(safe.keys())}')
+          "
+          
+          echo "==> Signing framework binaries (no app entitlements)..."
+          find "$APP_DIR/Contents/Frameworks" -type f -perm +111 | while read binary; do
+            if file "$binary" | grep -q "Mach-O"; then
+              echo "  Signing: $binary"
+              codesign --force --sign - --options runtime --timestamp=none "$binary" || true
+            fi
+          done
+          
+          find "$APP_DIR/Contents/Frameworks" -name "*.xpc" -o -name "*.app" | while read bundle; do
+            if [ -d "$bundle" ]; then
+              echo "  Signing bundle: $bundle"
+              codesign --force --sign - --options runtime --timestamp=none "$bundle" || true
+            fi
+          done
+          
+          find "$APP_DIR/Contents/Frameworks" -name "*.framework" | while read fw; do
+            echo "  Signing framework: $fw"
+            codesign --force --sign - --options runtime --timestamp=none "$fw" || true
+          done
+          
+          echo "==> Signing main binary with CI entitlements..."
+          codesign --force --sign - --options runtime --timestamp=none \
+            --entitlements /tmp/ci-entitlements.plist \
+            "$APP_DIR/Contents/MacOS/PastaApp"
+          
+          echo "==> Signing app bundle..."
+          codesign --force --sign - --options runtime --timestamp=none \
+            --entitlements /tmp/ci-entitlements.plist \
+            "$APP_DIR"
+          
+          codesign --verify --verbose=2 "$APP_DIR"
+          
+          # Verify entitlements are NOT on framework binaries
+          SPARKLE_ENTS=$(codesign -d --entitlements - "$APP_DIR/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle" 2>&1 || true)
+          if echo "$SPARKLE_ENTS" | grep -q "icloud"; then
+            echo "ERROR: Sparkle binary has iCloud entitlements — this will crash at launch!"
+            exit 1
+          fi
+          echo "✓ Framework entitlements are clean"
       
       - name: Verify bundle structure
         run: |
@@ -139,26 +203,30 @@ jobs:
           set -e
           APP_DIR="${{ steps.bundle.outputs.APP_DIR }}"
           
-          echo "==> Smoke test: attempting to launch app..."
+          echo "==> Smoke test: launching signed app bundle..."
           
-          # Launch in background, capture any stderr
-          "$APP_DIR/Contents/MacOS/PastaApp" 2> /tmp/launch_error.log &
+          # PASTA_CI disables CloudKit init (requires real signing)
+          PASTA_CI=1 "$APP_DIR/Contents/MacOS/PastaApp" 2> /tmp/launch_error.log &
           APP_PID=$!
           
-          # Wait a moment for app to either crash or start
-          sleep 3
+          # Wait for app to either crash or start
+          sleep 5
           
           # Check if still running
           if kill -0 $APP_PID 2>/dev/null; then
-            echo "✓ App launched successfully and is running!"
+            echo "✓ App launched successfully and is running (PID $APP_PID)"
             kill $APP_PID 2>/dev/null || true
+            wait $APP_PID 2>/dev/null || true
           else
+            EXIT_CODE=0
+            wait $APP_PID 2>/dev/null || EXIT_CODE=$?
             echo "ERROR: App crashed or failed to launch!"
+            echo "==> Exit code: $EXIT_CODE"
             echo "==> Error log:"
             cat /tmp/launch_error.log || true
-            echo "==> Exit code:"
-            wait $APP_PID 2>/dev/null
-            echo $?
+            echo ""
+            echo "==> System log (AMFI/codesign):"
+            log show --last 30s --predicate 'process == "amfid" OR process == "syspolicyd" OR subsystem == "com.apple.MobileFileIntegrity"' 2>/dev/null | tail -20 || true
             exit 1
           fi
           

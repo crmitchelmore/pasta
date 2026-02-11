@@ -226,32 +226,10 @@ jobs:
           echo "identity=$IDENTITY" >> $GITHUB_OUTPUT
           echo "==> Found signing identity: $IDENTITY"
       
-      - name: Create entitlements file
+      - name: Prepare entitlements file
         run: |
-          cat > entitlements.plist <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>com.apple.security.automation.apple-events</key>
-              <true/>
-              <key>com.apple.security.cs.disable-library-validation</key>
-              <true/>
-              <key>com.apple.developer.icloud-services</key>
-              <array>
-                  <string>CloudKit</string>
-              </array>
-              <key>com.apple.developer.icloud-container-identifiers</key>
-              <array>
-                  <string>iCloud.com.pasta.ios</string>
-              </array>
-              <key>com.apple.developer.icloud-container-environment</key>
-              <string>Production</string>
-          </dict>
-          </plist>
-          PLIST
-          
-          echo "==> Entitlements file created"
+          cp Resources/release.entitlements entitlements.plist
+          echo "==> Entitlements file:"
           cat entitlements.plist
       
       - name: Validate entitlements (no restricted keys without profile)
@@ -279,23 +257,58 @@ jobs:
       - name: Code sign app bundle
         run: |
           echo "==> Signing app bundle with hardened runtime"
+          IDENTITY="${{ steps.signing.outputs.identity }}"
           
-          # Sign all nested binaries and frameworks first
-          find "${APP_DIR}/Contents" -type f -perm +111 | while read binary; do
+          # Sign framework internals first (WITHOUT app entitlements)
+          # Applying iCloud/CloudKit entitlements to framework binaries causes
+          # dyld signature rejection at launch.
+          echo "==> Signing framework binaries (no app entitlements)..."
+          find "${APP_DIR}/Contents/Frameworks" -type f -perm +111 | while read binary; do
             if file "$binary" | grep -q "Mach-O"; then
-              echo "Signing: $binary"
+              echo "  Signing: $binary"
               codesign --force \
-                --sign "${{ steps.signing.outputs.identity }}" \
+                --sign "$IDENTITY" \
                 --options runtime \
                 --timestamp \
-                --entitlements entitlements.plist \
                 "$binary" || true
             fi
           done
           
-          # Sign the app bundle
-          codesign --deep --force \
-            --sign "${{ steps.signing.outputs.identity }}" \
+          # Sign framework bundles (XPC services, apps inside frameworks)
+          find "${APP_DIR}/Contents/Frameworks" -name "*.xpc" -o -name "*.app" | while read bundle; do
+            if [ -d "$bundle" ]; then
+              echo "  Signing bundle: $bundle"
+              codesign --force \
+                --sign "$IDENTITY" \
+                --options runtime \
+                --timestamp \
+                "$bundle" || true
+            fi
+          done
+          
+          # Sign the framework itself
+          find "${APP_DIR}/Contents/Frameworks" -name "*.framework" | while read fw; do
+            echo "  Signing framework: $fw"
+            codesign --force \
+              --sign "$IDENTITY" \
+              --options runtime \
+              --timestamp \
+              "$fw" || true
+          done
+          
+          # Sign the main app binary WITH entitlements
+          echo "==> Signing main binary with entitlements..."
+          codesign --force \
+            --sign "$IDENTITY" \
+            --options runtime \
+            --timestamp \
+            --entitlements entitlements.plist \
+            "${APP_DIR}/Contents/MacOS/PastaApp"
+          
+          # Sign the app bundle (top-level, with entitlements)
+          echo "==> Signing app bundle..."
+          codesign --force \
+            --sign "$IDENTITY" \
             --options runtime \
             --timestamp \
             --entitlements entitlements.plist \
@@ -303,6 +316,15 @@ jobs:
           
           echo "==> Verifying signature"
           codesign --verify --verbose=4 "${APP_DIR}"
+          
+          # Verify entitlements are NOT on framework binaries
+          echo "==> Checking framework entitlements are clean..."
+          SPARKLE_ENTS=$(codesign -d --entitlements - "${APP_DIR}/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle" 2>&1 || true)
+          if echo "$SPARKLE_ENTS" | grep -q "icloud"; then
+            echo "ERROR: Sparkle binary has iCloud entitlements — this will crash at launch!"
+            exit 1
+          fi
+          echo "✓ Framework entitlements are clean"
       
       # ============================================================================
       # CREATE DMG
