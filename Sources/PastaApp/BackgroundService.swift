@@ -115,7 +115,6 @@ final class BackgroundService: ObservableObject {
                     return
                 }
                 try await syncManager.setupZone()
-                try await syncManager.registerSubscription()
                 PastaLogger.app.info("CloudKit sync initialised")
             } catch {
                 PastaLogger.logError(error, logger: PastaLogger.app, context: "CloudKit sync setup failed")

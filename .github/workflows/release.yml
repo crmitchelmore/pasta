@@ -247,14 +247,28 @@ jobs:
               </array>
               <key>com.apple.developer.icloud-container-environment</key>
               <string>Production</string>
-              <key>aps-environment</key>
-              <string>production</string>
           </dict>
           </plist>
           PLIST
           
           echo "==> Entitlements file created"
           cat entitlements.plist
+      
+      - name: Validate entitlements (no restricted keys without profile)
+        run: |
+          # These entitlements require specific provisioning profile capabilities.
+          # Adding one without updating the profile will cause SIGKILL on launch.
+          RESTRICTED_KEYS="aps-environment get-task-allow com.apple.developer.team-identifier"
+          
+          for key in $RESTRICTED_KEYS; do
+            if grep -q "$key" entitlements.plist; then
+              echo "ERROR: entitlements.plist contains restricted key '$key'."
+              echo "This requires a matching provisioning profile capability."
+              echo "Remove it or update the profile before releasing."
+              exit 1
+            fi
+          done
+          echo "==> Entitlements validation passed (no unexpected restricted keys)"
       
       - name: Embed provisioning profile
         run: |

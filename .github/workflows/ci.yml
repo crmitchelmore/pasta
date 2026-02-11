@@ -81,6 +81,21 @@ jobs:
           echo "APP_DIR=$APP_DIR" >> $GITHUB_OUTPUT
           echo "==> Test bundle created"
       
+      - name: Validate release entitlements
+        run: |
+          # These entitlements cause SIGKILL on launch if not in provisioning profile
+          RESTRICTED_KEYS="aps-environment"
+          
+          for key in $RESTRICTED_KEYS; do
+            if grep -q "<key>${key}</key>" ".github/workflows/release.yml"; then
+              echo "ERROR: release.yml contains restricted entitlement '${key}'."
+              echo "This will cause 'The application can't be opened' on user machines."
+              echo "Remove it or update the provisioning profile first."
+              exit 1
+            fi
+          done
+          echo "✓ No restricted entitlements found in release workflow"
+      
       - name: Verify bundle structure
         run: |
           set -e
