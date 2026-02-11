@@ -199,12 +199,13 @@ public final class SyncManager: ObservableObject {
             saveChangeToken(token)
         }
         
+        let modifiedCount = modifiedEntries.count
         await MainActor.run {
             lastSyncDate = Date()
-            syncedEntryCount += modifiedEntries.count
+            syncedEntryCount += modifiedCount
         }
         
-        logger.info("Fetched \(modifiedEntries.count) modified, \(deletedIDs.count) deleted")
+        logger.info("Fetched \(modifiedCount) modified, \(deletedIDs.count) deleted")
         return (modifiedEntries, deletedIDs)
     }
     
