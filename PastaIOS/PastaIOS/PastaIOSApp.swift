@@ -4,7 +4,7 @@ import PastaSync
 
 @main
 struct PastaIOSApp: App {
-    @StateObject private var syncManager = SyncManager()
+    @StateObject private var syncManager = SyncManager(syncEnabled: false)
     @StateObject private var appState = AppState()
 
     var body: some Scene {

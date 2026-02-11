@@ -29,21 +29,19 @@ public final class SyncManager: ObservableObject {
     // UserDefaults keys for sync tokens
     private let changeTokenKey = "com.pasta.sync.changeToken"
     
-    public init(containerIdentifier: String = "iCloud.com.pasta.ios") {
+    /// Whether sync is enabled. Disabled when CloudKit entitlement is missing.
+    public let syncEnabled: Bool
+    
+    public init(containerIdentifier: String = "iCloud.com.pasta.ios", syncEnabled: Bool = true) {
         self.containerIdentifier = containerIdentifier
+        self.syncEnabled = syncEnabled
         self.recordMapper = RecordMapper()
     }
     
     /// Resolves the CloudKit container. Returns false if CloudKit is unavailable.
     private func resolveContainer() -> Bool {
+        guard syncEnabled else { return false }
         guard container == nil else { return true }
-        // Check iCloud availability before creating CKContainer.
-        // CKContainer(identifier:) crashes (SIGTRAP) if the CloudKit
-        // entitlement is missing, so we must guard first.
-        guard FileManager.default.ubiquityIdentityToken != nil else {
-            logger.info("iCloud not available, skipping sync")
-            return false
-        }
         container = CKContainer(identifier: containerIdentifier)
         database = container?.privateCloudDatabase
         return container != nil
