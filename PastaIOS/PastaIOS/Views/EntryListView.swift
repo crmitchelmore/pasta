@@ -7,6 +7,7 @@ struct EntryListView: View {
     @EnvironmentObject var appState: AppState
     @State private var selectedFilter: ContentType?
     @State private var isRefreshing = false
+    @State private var typeCounts: [ContentType: Int] = [:]
 
     private var displayedEntries: [ClipboardEntry] {
         appState.filteredEntries(contentType: selectedFilter)
@@ -17,6 +18,27 @@ struct EntryListView: View {
     }
 
     var body: some View {
+        entryList
+            .listStyle(.insetGrouped)
+            .navigationTitle("Clipboard History")
+            .navigationBarTitleDisplayMode(.large)
+            .refreshable {
+                await appState.performSync(syncManager: syncManager)
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    syncStatusView
+                }
+            }
+            .onChange(of: appState.entries.count) { _, _ in
+                updateTypeCounts(appState.entries)
+            }
+            .onAppear {
+                updateTypeCounts(appState.entries)
+            }
+    }
+
+    private var entryList: some View {
         List {
             filterChips
 
@@ -34,17 +56,14 @@ struct EntryListView: View {
                 }
             }
         }
-        .listStyle(.insetGrouped)
-        .navigationTitle("Clipboard History")
-        .navigationBarTitleDisplayMode(.large)
-        .refreshable {
-            await appState.performSync(syncManager: syncManager)
+    }
+
+    private func updateTypeCounts(_ entries: [ClipboardEntry]) {
+        var counts: [ContentType: Int] = [:]
+        for entry in entries {
+            counts[entry.contentType, default: 0] += 1
         }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                syncStatusView
-            }
-        }
+        typeCounts = counts
     }
 
     // MARK: - Filter Chips
@@ -52,13 +71,19 @@ struct EntryListView: View {
     private var filterChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                FilterChip(title: "All", isSelected: selectedFilter == nil) {
+                FilterChip(
+                    title: "All",
+                    count: appState.entries.count,
+                    isSelected: selectedFilter == nil
+                ) {
                     selectedFilter = nil
                 }
                 ForEach(availableTypes, id: \.self) { type in
                     FilterChip(
                         title: type.displayName,
                         icon: type.iconName,
+                        count: typeCounts[type],
+                        tintColor: type.tintColor,
                         isSelected: selectedFilter == type
                     ) {
                         selectedFilter = (selectedFilter == type) ? nil : type
@@ -69,11 +94,14 @@ struct EntryListView: View {
         }
         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
         .listRowBackground(Color.clear)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Content type filters")
     }
 
     private var availableTypes: [ContentType] {
-        let typesInEntries = Set(appState.entries.map(\.contentType))
-        return ContentType.allCases.filter { typesInEntries.contains($0) && $0 != .unknown }
+        typeCounts.keys
+            .filter { $0 != .unknown }
+            .sorted { (typeCounts[$0] ?? 0) > (typeCounts[$1] ?? 0) }
     }
 
     // MARK: - Empty State

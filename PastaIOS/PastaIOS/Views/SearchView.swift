@@ -11,6 +11,8 @@ struct SearchView: View {
 
     var body: some View {
         List {
+            filterChips
+
             if searchText.isEmpty {
                 recentSearchesSection
             } else if results.isEmpty {
@@ -32,6 +34,45 @@ struct SearchView: View {
         .onChange(of: selectedFilter) { _, _ in
             performSearch(query: searchText)
         }
+    }
+
+    // MARK: - Filter Chips
+
+    private var filterChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                FilterChip(
+                    title: "All Types",
+                    isSelected: selectedFilter == nil
+                ) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedFilter = nil
+                    }
+                }
+                ForEach(availableTypes, id: \.self) { type in
+                    FilterChip(
+                        title: type.displayName,
+                        icon: type.iconName,
+                        tintColor: type.tintColor,
+                        isSelected: selectedFilter == type
+                    ) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            selectedFilter = (selectedFilter == type) ? nil : type
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+        .listRowBackground(Color.clear)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Search type filters")
+    }
+
+    private var availableTypes: [ContentType] {
+        let typesInEntries = Set(appState.entries.map(\.contentType))
+        return ContentType.allCases.filter { typesInEntries.contains($0) && $0 != .unknown }
     }
 
     private var recentSearchesSection: some View {
