@@ -121,12 +121,11 @@ public final class SyncManager: ObservableObject {
         await MainActor.run { syncState = .syncing }
         defer { Task { @MainActor in syncState = .idle } }
         
-        var pushedCount = 0
         let batches = stride(from: 0, to: entries.count, by: batchSize).map {
             Array(entries[$0..<min($0 + batchSize, entries.count)])
         }
         
-        for batch in batches {
+        for (index, batch) in batches.enumerated() {
             let records = batch.map { recordMapper.record(from: $0, zoneID: Self.zoneID) }
             let operation = CKModifyRecordsOperation(recordsToSave: records)
             operation.savePolicy = .changedKeys
@@ -144,16 +143,17 @@ public final class SyncManager: ObservableObject {
                 database.add(operation)
             }
             
-            pushedCount += batch.count
-            let total = entries.count
+            let pushed = (index + 1) * batchSize < entries.count
+                ? (index + 1) * batchSize
+                : entries.count
             await MainActor.run {
-                syncedEntryCount = pushedCount
+                syncedEntryCount = pushed
             }
-            logger.info("Pushed batch of \(batch.count) entries (\(pushedCount)/\(total))")
+            logger.info("Pushed batch of \(batch.count) entries (\(pushed)/\(entries.count))")
         }
         
         await MainActor.run { lastSyncDate = Date() }
-        return pushedCount
+        return entries.count
     }
     
     /// Deletes an entry from CloudKit.
