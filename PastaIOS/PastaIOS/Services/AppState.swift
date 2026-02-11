@@ -22,23 +22,30 @@ final class AppState: ObservableObject {
 
     func initialise(syncManager: SyncManager) async {
         do {
+            database = try DatabaseManager(databaseURL: Self.databaseURL())
+            try loadEntries()
+        } catch {
+            logger.error("Database initialisation failed: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
+
+        // Attempt sync separately — CloudKit may be unavailable
+        do {
             let status = try await syncManager.checkAccountStatus()
             iCloudAvailable = (status == .available)
 
-            database = try DatabaseManager(databaseURL: Self.databaseURL())
-
-            try await syncManager.setupZone()
-            try await syncManager.registerSubscription()
-
-            await performSync(syncManager: syncManager)
-
-            try loadEntries()
-            isLoading = false
+            if iCloudAvailable {
+                try await syncManager.setupZone()
+                try await syncManager.registerSubscription()
+                await performSync(syncManager: syncManager)
+                try loadEntries()
+            }
         } catch {
-            logger.error("Initialisation failed: \(error.localizedDescription)")
-            errorMessage = error.localizedDescription
-            isLoading = false
+            logger.warning("CloudKit sync unavailable: \(error.localizedDescription)")
+            // Non-fatal — app works offline without sync
         }
+
+        isLoading = false
     }
 
     func performSync(syncManager: SyncManager) async {

@@ -16,10 +16,11 @@ public final class SyncManager: ObservableObject {
     @Published public private(set) var lastSyncDate: Date?
     @Published public private(set) var syncedEntryCount: Int = 0
     
-    private let container: CKContainer
-    private let database: CKDatabase
+    private var container: CKContainer?
+    private var database: CKDatabase?
     private let recordMapper: RecordMapper
     private let logger = Logger(subsystem: "com.pasta.sync", category: "SyncManager")
+    private let containerIdentifier: String
     
     // Zone for custom zone operations
     public static let zoneName = "PastaZone"
@@ -29,15 +30,23 @@ public final class SyncManager: ObservableObject {
     private let changeTokenKey = "com.pasta.sync.changeToken"
     
     public init(containerIdentifier: String = "iCloud.com.pasta.ios") {
-        self.container = CKContainer(identifier: containerIdentifier)
-        self.database = container.privateCloudDatabase
+        self.containerIdentifier = containerIdentifier
         self.recordMapper = RecordMapper()
+    }
+    
+    /// Resolves the CloudKit container. Returns false if CloudKit is unavailable.
+    private func resolveContainer() -> Bool {
+        guard container == nil else { return true }
+        container = CKContainer(identifier: containerIdentifier)
+        database = container?.privateCloudDatabase
+        return container != nil
     }
     
     // MARK: - Zone Setup
     
     /// Creates the custom record zone if it doesn't exist.
     public func setupZone() async throws {
+        guard resolveContainer(), let database else { return }
         let zone = CKRecordZone(zoneID: Self.zoneID)
         do {
             _ = try await database.save(zone)
@@ -54,12 +63,12 @@ public final class SyncManager: ObservableObject {
     
     /// Pushes a single entry to CloudKit.
     public func pushEntry(_ entry: ClipboardEntry) async throws {
+        guard resolveContainer(), let database else { return }
         let record = recordMapper.record(from: entry, zoneID: Self.zoneID)
         do {
             _ = try await database.save(record)
             logger.debug("Pushed entry \(entry.id.uuidString)")
         } catch let error as CKError where error.code == .serverRecordChanged {
-            // Record already exists with newer data — skip
             logger.info("Entry \(entry.id.uuidString) already exists with newer version, skipping")
         } catch {
             logger.error("Failed to push entry: \(error.localizedDescription)")
@@ -69,6 +78,7 @@ public final class SyncManager: ObservableObject {
     
     /// Pushes multiple entries to CloudKit in batches.
     public func pushEntries(_ entries: [ClipboardEntry], batchSize: Int = 200) async throws {
+        guard resolveContainer(), let database else { return }
         await MainActor.run { syncState = .syncing }
         defer { Task { @MainActor in syncState = .idle } }
         
@@ -100,6 +110,7 @@ public final class SyncManager: ObservableObject {
     
     /// Deletes an entry from CloudKit.
     public func deleteEntry(id: UUID) async throws {
+        guard resolveContainer(), let database else { return }
         let recordID = CKRecord.ID(recordName: id.uuidString, zoneID: Self.zoneID)
         try await database.deleteRecord(withID: recordID)
         logger.debug("Deleted entry \(id.uuidString) from CloudKit")
@@ -110,6 +121,7 @@ public final class SyncManager: ObservableObject {
     /// Fetches all changes since the last sync token.
     /// Returns new/modified entries and deleted entry IDs.
     public func fetchChanges() async throws -> (modified: [ClipboardEntry], deleted: [UUID]) {
+        guard resolveContainer(), let database else { return ([], []) }
         await MainActor.run { syncState = .syncing }
         defer { Task { @MainActor in syncState = .idle } }
         
@@ -188,6 +200,7 @@ public final class SyncManager: ObservableObject {
     
     /// Registers for push notifications on record changes.
     public func registerSubscription() async throws {
+        guard resolveContainer(), let database else { return }
         let subscriptionID = "pasta-clipboard-changes"
         
         let subscription = CKDatabaseSubscription(subscriptionID: subscriptionID)
@@ -208,7 +221,8 @@ public final class SyncManager: ObservableObject {
     
     /// Checks if iCloud is available.
     public func checkAccountStatus() async throws -> CKAccountStatus {
-        try await container.accountStatus()
+        guard resolveContainer(), let container else { return .couldNotDetermine }
+        return try await container.accountStatus()
     }
     
     // MARK: - Token Persistence
