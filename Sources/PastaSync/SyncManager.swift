@@ -37,6 +37,13 @@ public final class SyncManager: ObservableObject {
     /// Resolves the CloudKit container. Returns false if CloudKit is unavailable.
     private func resolveContainer() -> Bool {
         guard container == nil else { return true }
+        // Check iCloud availability before creating CKContainer.
+        // CKContainer(identifier:) crashes (SIGTRAP) if the CloudKit
+        // entitlement is missing, so we must guard first.
+        guard FileManager.default.ubiquityIdentityToken != nil else {
+            logger.info("iCloud not available, skipping sync")
+            return false
+        }
         container = CKContainer(identifier: containerIdentifier)
         database = container?.privateCloudDatabase
         return container != nil
