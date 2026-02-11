@@ -55,7 +55,8 @@ let package = Package(
             name: "PastaUI",
             dependencies: [
                 "PastaCore",
-                "PastaDetectors"
+                "PastaDetectors",
+                "PastaSync"
             ]
         ),
         

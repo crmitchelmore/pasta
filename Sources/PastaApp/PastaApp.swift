@@ -26,6 +26,7 @@ struct PastaApp: App {
     var body: some Scene {
         Settings {
             SettingsView(
+                syncManager: BackgroundService.shared.syncManager,
                 checkForUpdates: { UpdaterManager.shared.checkForUpdates() },
                 automaticallyChecksForUpdates: Binding(
                     get: { UpdaterManager.shared.automaticallyChecksForUpdates },
@@ -532,6 +533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             window.title = "Pasta Settings"
             window.contentView = NSHostingView(rootView: SettingsView(
+                syncManager: BackgroundService.shared.syncManager,
                 checkForUpdates: { UpdaterManager.shared.checkForUpdates() },
                 automaticallyChecksForUpdates: Binding(
                     get: { UpdaterManager.shared.automaticallyChecksForUpdates },

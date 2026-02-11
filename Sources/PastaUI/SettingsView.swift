@@ -1,5 +1,6 @@
 import AppKit
 import PastaCore
+import PastaSync
 import SwiftUI
 
 public struct SettingsView: View {
@@ -37,11 +38,14 @@ public struct SettingsView: View {
     
     private let checkForUpdates: (() -> Void)?
     private let automaticallyChecksForUpdates: Binding<Bool>?
+    private let syncManager: SyncManager?
 
     public init(
+        syncManager: SyncManager? = nil,
         checkForUpdates: (() -> Void)? = nil,
         automaticallyChecksForUpdates: Binding<Bool>? = nil
     ) {
+        self.syncManager = syncManager
         self.checkForUpdates = checkForUpdates
         self.automaticallyChecksForUpdates = automaticallyChecksForUpdates
     }
@@ -82,6 +86,14 @@ public struct SettingsView: View {
             }
             .tag(SettingsTab.storage)
             
+            if let syncManager {
+                iCloudSettingsTab(syncManager: syncManager)
+                    .tabItem {
+                        Label("iCloud", systemImage: "icloud")
+                    }
+                    .tag(SettingsTab.iCloud)
+            }
+            
             ImportSettingsTab()
             .tabItem {
                 Label("Import", systemImage: "square.and.arrow.down")
@@ -110,7 +122,7 @@ public struct SettingsView: View {
     }
 
     private enum SettingsTab: Hashable {
-        case general, clipboard, storage, `import`, about, tipJar
+        case general, clipboard, storage, iCloud, `import`, about, tipJar
     }
 }
 
@@ -398,6 +410,133 @@ private struct StorageSettingsTab: View {
 
     private func format(bytes: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+}
+
+// MARK: - iCloud Settings Tab
+
+private struct iCloudSettingsTab: View {
+    @ObservedObject var syncManager: SyncManager
+    @State private var iCloudAvailable: Bool? = nil
+    @State private var isResetting = false
+
+    var body: some View {
+        Form {
+            Section {
+                HStack {
+                    Text("iCloud Status")
+                    Spacer()
+                    statusBadge
+                }
+
+                if let lastSync = syncManager.lastSyncDate {
+                    LabeledContent("Last Synced") {
+                        Text(lastSync, style: .relative)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                LabeledContent("Synced Entries") {
+                    Text("\(syncManager.syncedEntryCount)")
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Label("Status", systemImage: "icloud")
+            }
+
+            Section {
+                HStack {
+                    Text("Sync Now")
+                    Spacer()
+                    Button("Sync") {
+                        Task {
+                            try? await syncManager.setupZone()
+                            _ = try? await syncManager.fetchChanges()
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(syncManager.syncState == .syncing)
+                }
+
+                if case .error(let message) = syncManager.syncState {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                Text("Pasta syncs clipboard history via iCloud so you can access it on all your devices.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+            }
+
+            Section {
+                HStack {
+                    Spacer()
+                    Button("Reset Sync…", role: .destructive) {
+                        isResetting = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .controlSize(.small)
+                    Spacer()
+                }
+
+                Text("Clears the sync token and forces a full re-sync from iCloud.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Danger Zone", systemImage: "exclamationmark.triangle")
+            }
+        }
+        .formStyle(.grouped)
+        .task {
+            let status = try? await syncManager.checkAccountStatus()
+            iCloudAvailable = (status == .available)
+        }
+        .confirmationDialog(
+            "Reset sync data?",
+            isPresented: $isResetting,
+            titleVisibility: .visible
+        ) {
+            Button("Reset Sync", role: .destructive) {
+                syncManager.resetSync()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This clears the sync token and forces a full re-download from iCloud on next sync.")
+        }
+    }
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        switch iCloudAvailable {
+        case .some(true):
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(.green)
+                    .frame(width: 8, height: 8)
+                Text("Connected")
+                    .foregroundStyle(.green)
+            }
+        case .some(false):
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(.red)
+                    .frame(width: 8, height: 8)
+                Text("Unavailable")
+                    .foregroundStyle(.red)
+            }
+        case .none:
+            HStack(spacing: 4) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Checking…")
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
