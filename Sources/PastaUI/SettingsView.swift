@@ -41,17 +41,20 @@ public struct SettingsView: View {
     private let syncManager: SyncManager?
     private let allEntries: (() -> [ClipboardEntry])?
     private let markSynced: (([UUID]) -> Void)?
+    private let syncedCount: (() -> Int)?
 
     public init(
         syncManager: SyncManager? = nil,
         allEntries: (() -> [ClipboardEntry])? = nil,
         markSynced: (([UUID]) -> Void)? = nil,
+        syncedCount: (() -> Int)? = nil,
         checkForUpdates: (() -> Void)? = nil,
         automaticallyChecksForUpdates: Binding<Bool>? = nil
     ) {
         self.syncManager = syncManager
         self.allEntries = allEntries
         self.markSynced = markSynced
+        self.syncedCount = syncedCount
         self.checkForUpdates = checkForUpdates
         self.automaticallyChecksForUpdates = automaticallyChecksForUpdates
     }
@@ -93,7 +96,12 @@ public struct SettingsView: View {
             .tag(SettingsTab.storage)
             
             if let syncManager {
-                iCloudSettingsTab(syncManager: syncManager, allEntries: allEntries ?? { [] }, markSynced: markSynced)
+                iCloudSettingsTab(
+                    syncManager: syncManager,
+                    allEntries: allEntries ?? { [] },
+                    markSynced: markSynced,
+                    syncedCount: syncedCount ?? { 0 }
+                )
                     .tabItem {
                         Label("iCloud", systemImage: "icloud")
                     }
@@ -425,8 +433,10 @@ private struct iCloudSettingsTab: View {
     @ObservedObject var syncManager: SyncManager
     let allEntries: () -> [ClipboardEntry]
     let markSynced: (([UUID]) -> Void)?
+    let syncedCount: () -> Int
     @State private var iCloudAvailable: Bool? = nil
     @State private var isResetting = false
+    @State private var displayedSyncedCount: Int = 0
 
     var body: some View {
         Form {
@@ -445,8 +455,14 @@ private struct iCloudSettingsTab: View {
                 }
 
                 LabeledContent("Synced Entries") {
-                    Text("\(syncManager.syncedEntryCount)")
-                        .foregroundStyle(.secondary)
+                    if syncManager.syncState == .syncing && syncManager.totalEntriesToSync > 0 {
+                        Text("\(syncManager.syncedEntryCount) / \(syncManager.totalEntriesToSync)")
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    } else {
+                        Text("\(displayedSyncedCount)")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } header: {
                 Label("Status", systemImage: "icloud")
@@ -536,6 +552,14 @@ private struct iCloudSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear {
+            displayedSyncedCount = syncedCount()
+        }
+        .onChange(of: syncManager.syncState) { _, newState in
+            if newState == .idle {
+                displayedSyncedCount = syncedCount()
+            }
+        }
         .task {
             let status = try? await syncManager.checkAccountStatus()
             iCloudAvailable = (status == .available)

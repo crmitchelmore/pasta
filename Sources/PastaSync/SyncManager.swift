@@ -37,6 +37,7 @@ public final class SyncManager: ObservableObject {
     
     // UserDefaults keys for sync tokens
     private let changeTokenKey = "com.pasta.sync.changeToken"
+    private let lastSyncDateKey = "com.pasta.sync.lastSyncDate"
     
     /// Whether sync is enabled. Disabled when CloudKit entitlement is missing.
     public let syncEnabled: Bool
@@ -48,6 +49,7 @@ public final class SyncManager: ObservableObject {
         self.containerIdentifier = containerIdentifier
         self.syncEnabled = syncEnabled
         self.recordMapper = RecordMapper()
+        self.lastSyncDate = UserDefaults.standard.object(forKey: lastSyncDateKey) as? Date
     }
     
     /// Resolves the CloudKit container. Returns false if CloudKit is unavailable.
@@ -183,7 +185,10 @@ public final class SyncManager: ObservableObject {
             logger.info("Pushed batch of \(batch.count) entries (\(pushed)/\(entries.count))")
         }
         
-        await MainActor.run { lastSyncDate = Date() }
+        await MainActor.run {
+            lastSyncDate = Date()
+            UserDefaults.standard.set(lastSyncDate, forKey: lastSyncDateKey)
+        }
         return totalPushed
     }
     
@@ -269,6 +274,7 @@ public final class SyncManager: ObservableObject {
         let modifiedCount = modifiedEntries.count
         await MainActor.run {
             lastSyncDate = Date()
+            UserDefaults.standard.set(lastSyncDate, forKey: lastSyncDateKey)
             syncedEntryCount += modifiedCount
         }
         
@@ -324,6 +330,7 @@ public final class SyncManager: ObservableObject {
     /// Resets the sync state (clears token, forces full re-sync).
     public func resetSync() {
         UserDefaults.standard.removeObject(forKey: changeTokenKey)
+        UserDefaults.standard.removeObject(forKey: lastSyncDateKey)
         Task { @MainActor in
             syncedEntryCount = 0
             lastSyncDate = nil

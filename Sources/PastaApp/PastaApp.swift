@@ -31,6 +31,9 @@ struct PastaApp: App {
                 markSynced: { ids in
                     try? BackgroundService.shared.database.markSynced(ids: ids)
                 },
+                syncedCount: {
+                    (try? BackgroundService.shared.database.syncedCount()) ?? 0
+                },
                 checkForUpdates: { UpdaterManager.shared.checkForUpdates() },
                 automaticallyChecksForUpdates: Binding(
                     get: { UpdaterManager.shared.automaticallyChecksForUpdates },
@@ -541,6 +544,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 allEntries: { BackgroundService.shared.entries },
                 markSynced: { ids in
                     try? BackgroundService.shared.database.markSynced(ids: ids)
+                },
+                syncedCount: {
+                    (try? BackgroundService.shared.database.syncedCount()) ?? 0
                 },
                 checkForUpdates: { UpdaterManager.shared.checkForUpdates() },
                 automaticallyChecksForUpdates: Binding(
