@@ -449,22 +449,53 @@ private struct iCloudSettingsTab: View {
             }
 
             Section {
-                HStack {
-                    Text("Sync Now")
-                    Spacer()
-                    Button("Sync") {
-                        Task {
-                            try? await syncManager.setupZone()
-                            let entries = allEntries()
-                            if !entries.isEmpty {
-                                try? await syncManager.pushEntries(entries)
+                if syncManager.syncState == .syncing && syncManager.totalEntriesToSync > 50 {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Syncing \(syncManager.syncedEntryCount) of \(syncManager.totalEntriesToSync)")
+                                .font(.subheadline)
+                                .monospacedDigit()
+                            Spacer()
+                            Button("Cancel") {
+                                syncManager.cancelSync()
                             }
-                            _ = try? await syncManager.fetchChanges()
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                         }
+                        ProgressView(
+                            value: Double(syncManager.syncedEntryCount),
+                            total: Double(max(syncManager.totalEntriesToSync, 1))
+                        )
+                        .progressViewStyle(.linear)
+                        Text("Uploading clipboard history to iCloud. You can cancel and resume later.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(syncManager.syncState == .syncing)
+                    .padding(.vertical, 4)
+                } else if syncManager.syncState == .syncing {
+                    HStack {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Syncing…")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    HStack {
+                        Text("Sync Now")
+                        Spacer()
+                        Button("Sync") {
+                            Task {
+                                try? await syncManager.setupZone()
+                                let entries = allEntries()
+                                if !entries.isEmpty {
+                                    try? await syncManager.pushEntries(entries)
+                                }
+                                _ = try? await syncManager.fetchChanges()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
                 }
 
                 if case .error(let message) = syncManager.syncState {

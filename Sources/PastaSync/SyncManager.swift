@@ -16,6 +16,14 @@ public final class SyncManager: ObservableObject {
     @Published public private(set) var syncState: SyncState = .idle
     @Published public private(set) var lastSyncDate: Date?
     @Published public private(set) var syncedEntryCount: Int = 0
+    @Published public private(set) var totalEntriesToSync: Int = 0
+    
+    private var syncCancelled = false
+    
+    /// Cancel an in-progress bulk sync.
+    public func cancelSync() {
+        syncCancelled = true
+    }
     
     private var container: CKContainer?
     private var database: CKDatabase?
@@ -118,14 +126,30 @@ public final class SyncManager: ObservableObject {
     @discardableResult
     public func pushEntries(_ entries: [ClipboardEntry], batchSize: Int = 200) async throws -> Int {
         guard resolveContainer(), let database else { return 0 }
-        await MainActor.run { syncState = .syncing }
-        defer { Task { @MainActor in syncState = .idle } }
+        syncCancelled = false
+        await MainActor.run {
+            syncState = .syncing
+            syncedEntryCount = 0
+            totalEntriesToSync = entries.count
+        }
+        defer {
+            Task { @MainActor in
+                syncState = .idle
+                totalEntriesToSync = 0
+            }
+        }
         
         let batches = stride(from: 0, to: entries.count, by: batchSize).map {
             Array(entries[$0..<min($0 + batchSize, entries.count)])
         }
         
+        var totalPushed = 0
         for (index, batch) in batches.enumerated() {
+            if syncCancelled {
+                logger.info("Sync cancelled by user after \(totalPushed)/\(entries.count) entries")
+                break
+            }
+            
             let records = batch.map { recordMapper.record(from: $0, zoneID: Self.zoneID) }
             let operation = CKModifyRecordsOperation(recordsToSave: records)
             operation.savePolicy = .changedKeys
@@ -143,17 +167,15 @@ public final class SyncManager: ObservableObject {
                 database.add(operation)
             }
             
-            let pushed = (index + 1) * batchSize < entries.count
-                ? (index + 1) * batchSize
-                : entries.count
+            totalPushed = min((index + 1) * batchSize, entries.count)
             await MainActor.run {
-                syncedEntryCount = pushed
+                syncedEntryCount = totalPushed
             }
-            logger.info("Pushed batch of \(batch.count) entries (\(pushed)/\(entries.count))")
+            logger.info("Pushed batch of \(batch.count) entries (\(totalPushed)/\(entries.count))")
         }
         
         await MainActor.run { lastSyncDate = Date() }
-        return entries.count
+        return totalPushed
     }
     
     /// Deletes an entry from CloudKit.
