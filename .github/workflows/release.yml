@@ -448,6 +448,51 @@ jobs:
           
           echo "==> ✅ All verifications passed!"
       
+      - name: Launch smoke test (signed binary)
+        run: |
+          set -e
+          echo "==> Smoke test: launching the ACTUAL signed release binary..."
+          echo "    This catches AMFI, dyld, and code signing issues that"
+          echo "    codesign --verify and spctl --assess do NOT detect."
+          
+          # Launch with CloudKit disabled (CI has no iCloud account)
+          PASTA_CI=1 "${APP_DIR}/Contents/MacOS/PastaApp" 2> /tmp/release_launch_error.log &
+          APP_PID=$!
+          
+          # Wait for app to either crash or start
+          sleep 5
+          
+          # Check if still running
+          if kill -0 $APP_PID 2>/dev/null; then
+            echo "✓ App launched successfully and is running (PID $APP_PID)"
+            kill $APP_PID 2>/dev/null || true
+            wait $APP_PID 2>/dev/null || true
+          else
+            EXIT_CODE=0
+            wait $APP_PID 2>/dev/null || EXIT_CODE=$?
+            echo ""
+            echo "============================================================"
+            echo "ERROR: Release binary crashed or failed to launch!"
+            echo "============================================================"
+            echo ""
+            echo "Exit code: $EXIT_CODE"
+            echo ""
+            echo "Stderr:"
+            cat /tmp/release_launch_error.log || true
+            echo ""
+            echo "System log (AMFI/dyld/codesign):"
+            log show --last 30s --predicate 'process == "amfid" OR process == "syspolicyd" OR subsystem == "com.apple.MobileFileIntegrity" OR eventMessage CONTAINS "code signature"' 2>/dev/null | tail -20 || true
+            echo ""
+            echo "Common causes:"
+            echo "  - AMFI SIGKILL: restricted entitlement not in provisioning profile"
+            echo "  - dyld crash: framework signed with app entitlements"
+            echo "  - dyld crash: framework not copied to Contents/Frameworks"
+            echo "  - Code signature invalid: binary modified after signing"
+            exit 1
+          fi
+          
+          echo "==> Release smoke test PASSED!"
+      
       # ============================================================================
       # RELEASE
       # ============================================================================

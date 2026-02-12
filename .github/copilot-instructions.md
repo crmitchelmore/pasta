@@ -212,9 +212,71 @@ install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents
 
 **CI Smoke Test**: The CI workflow creates a test app bundle and verifies it can launch. This catches framework bundling issues before release.
 
+## Code Signing — Critical Rules
+
+These rules exist because we shipped **four broken releases** (v0.8.0–v0.9.2) that crashed on launch. `codesign --verify` and `spctl --assess` both PASS for all of these issues — only actually launching the binary catches them.
+
+### Rule 1: NEVER apply app entitlements to framework binaries
+```bash
+# WRONG — this will crash at launch with "code signature invalid"
+find "$APP_DIR" -type f -perm +111 | while read binary; do
+  codesign --entitlements entitlements.plist "$binary"  # ← DO NOT DO THIS
+done
+
+# CORRECT — sign frameworks WITHOUT entitlements, only main binary gets them
+# 1. Sign framework internals (no entitlements)
+find "$APP_DIR/Contents/Frameworks" -type f -perm +111 | while read binary; do
+  codesign --force --sign "$IDENTITY" --options runtime --timestamp "$binary"
+done
+# 2. Sign main binary WITH entitlements
+codesign --force --sign "$IDENTITY" --options runtime --timestamp \
+  --entitlements entitlements.plist "$APP_DIR/Contents/MacOS/PastaApp"
+```
+
+**Why**: dyld rejects frameworks that have restricted entitlements (iCloud, CloudKit, etc.) they weren't provisioned for. The error is `Library not loaded: code signature invalid`.
+
+### Rule 2: NEVER add restricted entitlements without updating the provisioning profile
+These entitlements require matching capabilities in the provisioning profile:
+- `aps-environment` — requires Push Notification capability
+- `com.apple.developer.icloud-services` — requires iCloud capability
+- `com.apple.developer.icloud-container-identifiers` — requires iCloud capability
+- `com.apple.application-identifier` — must match profile's application-identifier
+
+If a restricted entitlement is in the binary but not in the provisioning profile, **AMFI kills the app with SIGKILL on launch**. There is NO error message — the app just silently dies.
+
+### Rule 3: CloudKit requires `com.apple.application-identifier`
+Xcode adds this automatically, but manual `codesign` does not. Without it, CloudKit fails at runtime with `CKError 8 "Missing Entitlement"`. Format: `TeamID.BundleID` (e.g. `8X4ZN58TYH.com.pasta.clipboard`).
+
+### Rule 4: ALWAYS launch-test the signed binary
+Both CI and release workflows MUST launch the signed binary and verify it stays running for 5 seconds. This is the ONLY way to catch:
+- AMFI SIGKILL from restricted entitlements
+- dyld crashes from framework signing issues
+- Missing framework bundles
+
+`codesign --verify` and `spctl --assess` do NOT catch these issues.
+
+### Rule 5: CI smoke test uses ad-hoc signing with stripped entitlements
+CI has no Developer ID cert or provisioning profile. The CI smoke test:
+1. Strips restricted entitlements (iCloud, aps-environment) using plistlib
+2. Signs with ad-hoc identity (`--sign -`)
+3. Launches with `PASTA_CI=1` to disable CloudKit init
+
+The release workflow has its own separate launch test using the real Developer ID signature.
+
+### Entitlements source of truth
+All entitlements live in `Resources/release.entitlements` (committed). Both CI and release workflows reference this file. Never inline entitlements in workflow YAML.
+
+### Debugging "The application can't be opened"
+1. Check `log show` for `AMFI`, `code signature error`, `ASP: Security policy`
+2. Check crash reports in `~/Library/Logs/DiagnosticReports/`
+3. Run the binary directly: `/Applications/Pasta.app/Contents/MacOS/PastaApp`
+4. Check entitlements: `codesign --display --entitlements - /Applications/Pasta.app/Contents/MacOS/PastaApp`
+5. Check framework entitlements are clean: `codesign -d --entitlements - .../Sparkle.framework/Versions/B/Sparkle`
+
 ## Sparkle Auto-Updates
 
-- Feed URL: `https://github.com/crmitchelmore/pasta/releases/latest/download/appcast.xml`
+- Feed URL: `https://pasta-app.com/appcast.xml` (deployed to Cloudflare Pages)
 - The release workflow generates and uploads `appcast.xml` with EdDSA signatures
 - Keys are stored in GitHub Secrets: `SPARKLE_PUBLIC_KEY`, `SPARKLE_PRIVATE_KEY`
 - UpdaterManager wraps SPUStandardUpdaterController for SwiftUI integration
+- `sparkle:version` MUST match `CFBundleVersion` (build number); use `shortVersionString` for marketing version
