@@ -780,6 +780,7 @@ struct PanelContentView: View {
     @State private var preloadedEffectiveTypeCounts: [ContentType: Int]? = nil
     @State private var preloadedSourceAppCounts: [String: Int]? = nil
     @State private var preloadTask: Task<Void, Never>? = nil
+    @State private var filterTask: Task<Void, Never>? = nil
 
     @FocusState private var searchFocused: Bool
     @FocusState private var listFocused: Bool
@@ -883,22 +884,16 @@ struct PanelContentView: View {
                 // Keep preload cache warm so type switching is instant
                 schedulePreload(for: entries)
 
-                // Update displayed entries when source changes (new items, deletions)
-                // Always use applyFiltersToEntries with fresh entries - don't use stale preload cache
-                let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.isEmpty {
-                    displayedEntries = applyFiltersToEntries(entries)
-                } else {
-                    triggerSearchUpdate()
-                }
+                // Update displayed entries — uses preload cache if available, async filter otherwise
+                triggerSearchUpdate()
             }
             .onChange(of: searchQuery) { _, newQuery in
                 // Debounce search to avoid lag
                 searchDebounceTask?.cancel()
                 let trimmed = newQuery.trimmingCharacters(in: .whitespacesAndNewlines)
                 if trimmed.isEmpty {
-                    // Empty query - update immediately
-                    displayedEntries = preloadedEntriesForCurrentFilters() ?? applyFiltersToEntries(backgroundService.entries)
+                    // Empty query - restore filtered view (uses preload cache or async)
+                    triggerSearchUpdate()
                 } else {
                     // Debounce for typing - search runs on main actor after debounce
                     searchDebounceTask = Task { @MainActor in
@@ -1050,6 +1045,12 @@ struct PanelContentView: View {
                 preloadedEntriesByType = result.entriesByType
                 preloadedEffectiveTypeCounts = result.effectiveTypeCounts
                 preloadedSourceAppCounts = result.sourceAppCounts
+                
+                // Update display from fresh cache if applicable (resolves race with asyncFilterEntries)
+                if let cached = preloadedEntriesForCurrentFilters() {
+                    filterTask?.cancel()
+                    displayedEntries = cached
+                }
             }
         }
     }
@@ -1096,11 +1097,57 @@ struct PanelContentView: View {
     
     private func triggerSearchUpdate() {
         searchDebounceTask?.cancel()
+        filterTask?.cancel()
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            displayedEntries = preloadedEntriesForCurrentFilters() ?? applyFiltersToEntries(backgroundService.entries)
+            if let cached = preloadedEntriesForCurrentFilters() {
+                displayedEntries = cached
+            } else {
+                asyncFilterEntries()
+            }
         } else {
             performSearch(query: trimmed)
+        }
+    }
+    
+    /// Run entry filtering off the main thread to avoid UI hangs on large datasets
+    private func asyncFilterEntries() {
+        filterTask?.cancel()
+        let entries = backgroundService.entries
+        let typeFilter = contentTypeFilter
+        let srcFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let domainFilter = urlDomainFilter
+        
+        filterTask = Task {
+            let result = await Task.detached(priority: .userInitiated) { () -> [ClipboardEntry] in
+                var out = entries
+                
+                if let typeFilter {
+                    if MetadataParser.extractableTypes.contains(typeFilter) {
+                        out = out.filter { $0.containsType(typeFilter) }
+                    } else {
+                        out = out.filter { $0.contentType == typeFilter }
+                    }
+                }
+                
+                if !srcFilter.isEmpty {
+                    out = out.filter { entry in
+                        entry.sourceApp?.localizedCaseInsensitiveContains(srcFilter) == true
+                    }
+                }
+                
+                if typeFilter == .url, let domainFilter {
+                    let detector = URLDetector()
+                    out = out.filter { entry in
+                        Set(detector.detect(in: entry.content).map(\.domain)).contains(domainFilter)
+                    }
+                }
+                
+                return Array(out.prefix(200))
+            }.value
+            
+            guard !Task.isCancelled else { return }
+            displayedEntries = result
         }
     }
     
@@ -1131,9 +1178,9 @@ struct PanelContentView: View {
             searchService = SearchService(database: database)
         }
         
-        // Initialize preload cache + displayed entries
+        // Initialize preload cache + displayed entries (async to avoid main thread blocking)
         schedulePreload(for: backgroundService.entries)
-        displayedEntries = preloadedEntriesForCurrentFilters() ?? applyFiltersToEntries(backgroundService.entries)
+        triggerSearchUpdate()
         
         if selectedEntryID == nil {
             selectedEntryID = displayedEntries.first?.id
