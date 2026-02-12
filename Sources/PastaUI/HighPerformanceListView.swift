@@ -15,6 +15,7 @@ public struct ClipboardRowData: Equatable {
     public let isLarge: Bool
     public let isExtracted: Bool
     public let parentEntryId: UUID?
+    public let isSynced: Bool
     
     public init(from entry: ClipboardEntry) {
         self.id = entry.id
@@ -27,6 +28,7 @@ public struct ClipboardRowData: Equatable {
         self.isLarge = entry.content.utf8.count > 10 * 1024
         self.isExtracted = entry.isExtracted
         self.parentEntryId = entry.parentEntryId
+        self.isSynced = entry.isSynced
     }
 }
 
@@ -292,6 +294,7 @@ private final class ClipboardCellView: NSTableCellView {
     private let badgeView = NSTextField(labelWithString: "")
     private let largeIndicator = NSImageView()
     private let extractedIndicator = NSImageView()
+    private let syncIndicator = NSImageView()
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -354,6 +357,14 @@ private final class ClipboardCellView: NSTableCellView {
         largeIndicator.setContentHuggingPriority(.required, for: .horizontal)
         addSubview(largeIndicator)
         
+        // Sync indicator (subtle cloud)
+        syncIndicator.translatesAutoresizingMaskIntoConstraints = false
+        syncIndicator.image = NSImage(systemSymbolName: "icloud.fill", accessibilityDescription: "Synced to iCloud")
+        syncIndicator.contentTintColor = .tertiaryLabelColor
+        syncIndicator.setContentHuggingPriority(.required, for: .horizontal)
+        syncIndicator.toolTip = "Synced to iCloud"
+        addSubview(syncIndicator)
+        
         // Layout
         NSLayoutConstraint.activate([
             iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
@@ -381,7 +392,12 @@ private final class ClipboardCellView: NSTableCellView {
             
             metadataLabel.leadingAnchor.constraint(equalTo: badgeView.trailingAnchor, constant: 8),
             metadataLabel.centerYAnchor.constraint(equalTo: badgeView.centerYAnchor),
-            metadataLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            
+            syncIndicator.leadingAnchor.constraint(equalTo: metadataLabel.trailingAnchor, constant: 6),
+            syncIndicator.centerYAnchor.constraint(equalTo: metadataLabel.centerYAnchor),
+            syncIndicator.widthAnchor.constraint(equalToConstant: 12),
+            syncIndicator.heightAnchor.constraint(equalToConstant: 10),
+            syncIndicator.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
         ])
     }
     
@@ -415,6 +431,9 @@ private final class ClipboardCellView: NSTableCellView {
         
         // Large indicator
         largeIndicator.isHidden = !row.isLarge
+        
+        // Sync indicator
+        syncIndicator.isHidden = !row.isSynced
     }
 }
 

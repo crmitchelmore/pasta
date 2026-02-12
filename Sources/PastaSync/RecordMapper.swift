@@ -77,7 +77,8 @@ public struct RecordMapper {
             copyCount: copyCount,
             sourceApp: sourceApp,
             metadata: metadata,
-            parentEntryId: parentEntryId
+            parentEntryId: parentEntryId,
+            isSynced: true
         )
     }
     

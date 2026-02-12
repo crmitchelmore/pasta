@@ -40,15 +40,18 @@ public struct SettingsView: View {
     private let automaticallyChecksForUpdates: Binding<Bool>?
     private let syncManager: SyncManager?
     private let allEntries: (() -> [ClipboardEntry])?
+    private let markSynced: (([UUID]) -> Void)?
 
     public init(
         syncManager: SyncManager? = nil,
         allEntries: (() -> [ClipboardEntry])? = nil,
+        markSynced: (([UUID]) -> Void)? = nil,
         checkForUpdates: (() -> Void)? = nil,
         automaticallyChecksForUpdates: Binding<Bool>? = nil
     ) {
         self.syncManager = syncManager
         self.allEntries = allEntries
+        self.markSynced = markSynced
         self.checkForUpdates = checkForUpdates
         self.automaticallyChecksForUpdates = automaticallyChecksForUpdates
     }
@@ -90,7 +93,7 @@ public struct SettingsView: View {
             .tag(SettingsTab.storage)
             
             if let syncManager {
-                iCloudSettingsTab(syncManager: syncManager, allEntries: allEntries ?? { [] })
+                iCloudSettingsTab(syncManager: syncManager, allEntries: allEntries ?? { [] }, markSynced: markSynced)
                     .tabItem {
                         Label("iCloud", systemImage: "icloud")
                     }
@@ -421,6 +424,7 @@ private struct StorageSettingsTab: View {
 private struct iCloudSettingsTab: View {
     @ObservedObject var syncManager: SyncManager
     let allEntries: () -> [ClipboardEntry]
+    let markSynced: (([UUID]) -> Void)?
     @State private var iCloudAvailable: Bool? = nil
     @State private var isResetting = false
 
@@ -484,11 +488,12 @@ private struct iCloudSettingsTab: View {
                         Text("Sync Now")
                         Spacer()
                         Button("Sync") {
+                            let markCallback = markSynced
                             Task {
                                 try? await syncManager.setupZone()
                                 let entries = allEntries()
                                 if !entries.isEmpty {
-                                    try? await syncManager.pushEntries(entries)
+                                    try? await syncManager.pushEntries(entries, onBatchSynced: markCallback)
                                 }
                                 _ = try? await syncManager.fetchChanges()
                             }

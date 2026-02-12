@@ -57,6 +57,8 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
     public var metadata: String?
     /// ID of the parent entry if this was extracted from another entry.
     public var parentEntryId: UUID?
+    /// Whether this entry has been synced to iCloud.
+    public var isSynced: Bool
 
     /// Whether this entry was extracted from a parent entry.
     public var isExtracted: Bool { parentEntryId != nil }
@@ -78,7 +80,8 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
         copyCount: Int = 1,
         sourceApp: String? = nil,
         metadata: String? = nil,
-        parentEntryId: UUID? = nil
+        parentEntryId: UUID? = nil,
+        isSynced: Bool = false
     ) {
         self.id = id
         self.content = content
@@ -90,6 +93,7 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
         self.sourceApp = sourceApp
         self.metadata = metadata
         self.parentEntryId = parentEntryId
+        self.isSynced = isSynced
     }
 
     public func encode(to container: inout PersistenceContainer) {
@@ -103,6 +107,7 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
         container["sourceApp"] = sourceApp
         container["metadata"] = metadata
         container["parentEntryId"] = parentEntryId?.uuidString
+        container["isSynced"] = isSynced
     }
 
     static func sha256Hex(_ string: String) -> String {

@@ -123,8 +123,13 @@ public final class SyncManager: ObservableObject {
     
     /// Pushes multiple entries to CloudKit in batches.
     /// Returns the number of entries successfully pushed.
+    /// The `onBatchSynced` callback receives the IDs of each successfully pushed batch.
     @discardableResult
-    public func pushEntries(_ entries: [ClipboardEntry], batchSize: Int = 200) async throws -> Int {
+    public func pushEntries(
+        _ entries: [ClipboardEntry],
+        batchSize: Int = 200,
+        onBatchSynced: (([UUID]) -> Void)? = nil
+    ) async throws -> Int {
         guard resolveContainer(), let database else { return 0 }
         syncCancelled = false
         await MainActor.run {
@@ -170,6 +175,8 @@ public final class SyncManager: ObservableObject {
             
             totalPushed = min((index + 1) * batchSize, entries.count)
             let pushed = totalPushed
+            let batchIDs = batch.map { $0.id }
+            onBatchSynced?(batchIDs)
             await MainActor.run {
                 syncedEntryCount = pushed
             }

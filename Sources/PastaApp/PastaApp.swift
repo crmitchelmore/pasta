@@ -28,6 +28,9 @@ struct PastaApp: App {
             SettingsView(
                 syncManager: BackgroundService.shared.syncManager,
                 allEntries: { BackgroundService.shared.entries },
+                markSynced: { ids in
+                    try? BackgroundService.shared.database.markSynced(ids: ids)
+                },
                 checkForUpdates: { UpdaterManager.shared.checkForUpdates() },
                 automaticallyChecksForUpdates: Binding(
                     get: { UpdaterManager.shared.automaticallyChecksForUpdates },
@@ -536,6 +539,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.contentView = NSHostingView(rootView: SettingsView(
                 syncManager: BackgroundService.shared.syncManager,
                 allEntries: { BackgroundService.shared.entries },
+                markSynced: { ids in
+                    try? BackgroundService.shared.database.markSynced(ids: ids)
+                },
                 checkForUpdates: { UpdaterManager.shared.checkForUpdates() },
                 automaticallyChecksForUpdates: Binding(
                     get: { UpdaterManager.shared.automaticallyChecksForUpdates },

@@ -255,10 +255,18 @@ final class BackgroundService: ObservableObject {
                     // Push to CloudKit (fire-and-forget)
                     if !insertedEntries.isEmpty {
                         let syncManager = self.syncManager
+                        let db = self.database
                         let entriesToPush = insertedEntries
                         Task.detached(priority: .utility) {
+                            var syncedIDs: [UUID] = []
                             for entry in entriesToPush {
-                                try? await syncManager.pushEntry(entry)
+                                do {
+                                    try await syncManager.pushEntry(entry)
+                                    syncedIDs.append(entry.id)
+                                } catch {}
+                            }
+                            if !syncedIDs.isEmpty {
+                                try? db.markSynced(ids: syncedIDs)
                             }
                         }
                     }
@@ -325,10 +333,18 @@ final class BackgroundService: ObservableObject {
                     // Push to CloudKit (fire-and-forget)
                     if !insertedScreenshots.isEmpty {
                         let syncManager = self.syncManager
+                        let db = self.database
                         let screenshotsToPush = insertedScreenshots
                         Task.detached(priority: .utility) {
+                            var syncedIDs: [UUID] = []
                             for entry in screenshotsToPush {
-                                try? await syncManager.pushEntry(entry)
+                                do {
+                                    try await syncManager.pushEntry(entry)
+                                    syncedIDs.append(entry.id)
+                                } catch {}
+                            }
+                            if !syncedIDs.isEmpty {
+                                try? db.markSynced(ids: syncedIDs)
                             }
                         }
                     }
