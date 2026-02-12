@@ -146,7 +146,8 @@ public final class SyncManager: ObservableObject {
         var totalPushed = 0
         for (index, batch) in batches.enumerated() {
             if syncCancelled {
-                logger.info("Sync cancelled by user after \(totalPushed)/\(entries.count) entries")
+                let cancelledAt = totalPushed
+                logger.info("Sync cancelled by user after \(cancelledAt)/\(entries.count) entries")
                 break
             }
             
@@ -168,10 +169,11 @@ public final class SyncManager: ObservableObject {
             }
             
             totalPushed = min((index + 1) * batchSize, entries.count)
+            let pushed = totalPushed
             await MainActor.run {
-                syncedEntryCount = totalPushed
+                syncedEntryCount = pushed
             }
-            logger.info("Pushed batch of \(batch.count) entries (\(totalPushed)/\(entries.count))")
+            logger.info("Pushed batch of \(batch.count) entries (\(pushed)/\(entries.count))")
         }
         
         await MainActor.run { lastSyncDate = Date() }
