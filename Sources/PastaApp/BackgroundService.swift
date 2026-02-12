@@ -131,12 +131,16 @@ final class BackgroundService: ObservableObject {
     }
     
     func refresh() {
-        // Use maxEntries setting, or 10,000 as a reasonable default for display
+        let db = self.database
         let displayLimit = UserDefaults.standard.integer(forKey: Defaults.maxEntries)
         let limit = displayLimit > 0 ? displayLimit : 10_000
-        let latest = (try? database.fetchRecent(limit: limit)) ?? []
-        PastaLogger.ui.debug("Refreshed entries: \(latest.count) items")
-        self.entries = latest
+        Task {
+            let latest = await Task.detached(priority: .userInitiated) {
+                (try? db.fetchRecent(limit: limit)) ?? []
+            }.value
+            self.entries = latest
+            PastaLogger.ui.debug("Refreshed entries: \(latest.count) items")
+        }
     }
     
     private func startPruneTimer() {
@@ -154,10 +158,9 @@ final class BackgroundService: ObservableObject {
         let db = self.database
         let storage = self.imageStorage
         
-        // Use Task instead of Task.detached to maintain actor isolation
         Task {
-            // Run database operations on a background thread
-            await Task.detached {
+            // Run all database/file operations off the main thread
+            await Task.detached(priority: .utility) {
                 if retentionDays > 0 {
                     do {
                         let paths = try db.pruneOlderThan(days: retentionDays)
@@ -173,8 +176,8 @@ final class BackgroundService: ObservableObject {
                 }
             }.value
             
-            // Back on MainActor
-            self.enforceMaxEntriesLimit()
+            // enforceMaxEntriesLimit is already async and runs off main thread
+            await self.enforceMaxEntriesLimit()
             self.refresh()
         }
     }
@@ -373,17 +376,21 @@ final class BackgroundService: ObservableObject {
         }
     }
     
-    private func enforceMaxEntriesLimit() {
+    private func enforceMaxEntriesLimit() async {
         let maxEntries = UserDefaults.standard.integer(forKey: Defaults.maxEntries)
         guard maxEntries > 0 else { return }
 
-        guard let imagePaths = try? database.pruneToMaxEntries(maxEntries) else { return }
-        if !imagePaths.isEmpty {
-            PastaLogger.database.debug("Pruned \(imagePaths.count) images due to max entries limit")
-        }
-        for path in imagePaths {
-            try? imageStorage.deleteImage(path: path)
-        }
+        let db = self.database
+        let storage = self.imageStorage
+        await Task.detached(priority: .utility) {
+            guard let imagePaths = try? db.pruneToMaxEntries(maxEntries) else { return }
+            if !imagePaths.isEmpty {
+                PastaLogger.database.debug("Pruned \(imagePaths.count) images due to max entries limit")
+            }
+            for path in imagePaths {
+                try? storage.deleteImage(path: path)
+            }
+        }.value
     }
     
     /// Result of enriching a clipboard entry with detected content types.
