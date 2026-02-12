@@ -132,6 +132,31 @@ func updateContent<Content: View>(_ content: Content) {
 }
 ```
 
+### Database Migrations — Backfill Rule
+When adding a new column that tracks state (e.g. `isSynced`, `isArchived`), always add a
+follow-up migration that backfills existing rows based on current system state. New columns
+default to their initial value, which may be incorrect for pre-existing data.
+
+```swift
+// BAD: only adds column, existing entries all get isSynced = false
+migrator.registerMigration("addIsSynced") { db in
+    try db.alter(table: "clipboard_entries") { t in
+        t.add(column: "isSynced", .boolean).notNull().defaults(to: false)
+    }
+}
+
+// GOOD: adds column THEN backfills based on known state
+migrator.registerMigration("backfillIsSynced") { db in
+    try db.execute(sql: "UPDATE clipboard_entries SET isSynced = 1 WHERE isSynced = 0")
+}
+```
+
+### Persisting User-Visible State
+Any state shown in the UI that should survive app restart MUST be persisted:
+- Counts/statistics → derive from database queries, not in-memory counters
+- Timestamps (e.g. "Last Synced") → persist to UserDefaults
+- Never use `@Published var` as the sole store for data the user expects to see on relaunch
+
 ### Global Hotkeys
 Use the HotKey library (Carbon-based) with a fallback global NSEvent monitor:
 - Carbon hotkeys work without accessibility permissions but need a proper app bundle
