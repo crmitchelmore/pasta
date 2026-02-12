@@ -154,6 +154,14 @@ public final class DatabaseManager {
             }
         }
 
+        migrator.registerMigration("backfillIsSynced") { db in
+            // All entries that existed before isSynced was added were already
+            // bulk-pushed to CloudKit — mark them as synced.
+            try db.execute(
+                sql: "UPDATE \(ClipboardEntry.databaseTableName) SET isSynced = 1 WHERE isSynced = 0"
+            )
+        }
+
         return migrator
     }
 
