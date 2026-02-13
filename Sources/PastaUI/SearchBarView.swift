@@ -133,8 +133,8 @@ public struct SearchBarView: View {
 private struct SettingsButton: NSViewRepresentable {
     let onTap: () -> Void
     
-    func makeNSView(context: Context) -> NSButton {
-        let button = NSButton()
+    func makeNSView(context: Context) -> HoverButton {
+        let button = HoverButton()
         button.bezelStyle = .regularSquare
         button.isBordered = false
         button.wantsLayer = true
@@ -153,20 +153,10 @@ private struct SettingsButton: NSViewRepresentable {
         button.action = #selector(Coordinator.buttonClicked)
         button.toolTip = "Settings (⌘,)"
         
-        // Add hover tracking
-        let trackingArea = NSTrackingArea(
-            rect: .zero,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-            owner: context.coordinator,
-            userInfo: ["button": button]
-        )
-        button.addTrackingArea(trackingArea)
-        
         return button
     }
     
-    func updateNSView(_ nsView: NSButton, context: Context) {
-        // Keep using the same semi-transparent color
+    func updateNSView(_ nsView: HoverButton, context: Context) {
         nsView.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
     }
     
@@ -184,19 +174,36 @@ private struct SettingsButton: NSViewRepresentable {
         @objc func buttonClicked() {
             onTap()
         }
+    }
+    
+    /// NSButton subclass that owns its own tracking area for hover effects,
+    /// avoiding crashes from dangling Coordinator references during NSAlert modal loops.
+    final class HoverButton: NSButton {
+        private var hoverTrackingArea: NSTrackingArea?
         
-        @objc func mouseEntered(with event: NSEvent) {
-            if let button = event.trackingArea?.userInfo?["button"] as? NSButton {
-                button.contentTintColor = .labelColor
-                button.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.1).cgColor
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let existing = hoverTrackingArea {
+                removeTrackingArea(existing)
             }
+            let area = NSTrackingArea(
+                rect: bounds,
+                options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(area)
+            hoverTrackingArea = area
         }
         
-        @objc func mouseExited(with event: NSEvent) {
-            if let button = event.trackingArea?.userInfo?["button"] as? NSButton {
-                button.contentTintColor = .secondaryLabelColor
-                button.layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-            }
+        override func mouseEntered(with event: NSEvent) {
+            contentTintColor = .labelColor
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.1).cgColor
+        }
+        
+        override func mouseExited(with event: NSEvent) {
+            contentTintColor = .secondaryLabelColor
+            layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
         }
     }
 }
