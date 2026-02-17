@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import KeyboardShortcuts
 import SwiftUI
 
@@ -17,7 +18,8 @@ struct ShortcutRecorderView: View {
                     .foregroundStyle(.secondary)
                     .frame(minWidth: 120)
             } else if let shortcut = currentShortcut {
-                Text(shortcut.description)
+                Text(shortcut.displayString)
+                    .font(.system(.body, design: .rounded))
                     .frame(minWidth: 120)
             } else {
                 Text("None")
@@ -73,7 +75,6 @@ struct ShortcutRecorderView: View {
 
     private func startRecording() {
         isRecording = true
-        // Temporarily disable the shortcut while recording
         KeyboardShortcuts.disable(name)
 
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
@@ -85,7 +86,7 @@ struct ShortcutRecorderView: View {
                 return nil
             }
 
-            // Require at least one modifier key (Cmd, Ctrl, Option, or Shift)
+            // Require at least one modifier key
             guard !modifiers.intersection([.command, .control, .option, .shift]).isEmpty else {
                 return nil
             }
@@ -108,6 +109,83 @@ struct ShortcutRecorderView: View {
         if isRecording {
             isRecording = false
             KeyboardShortcuts.enable(name)
+        }
+    }
+}
+
+// MARK: - Safe display string (avoids Bundle.module / .localized)
+
+extension KeyboardShortcuts.Shortcut {
+    /// Display string built without triggering Bundle.module lookups.
+    var displayString: String {
+        var parts: [String] = []
+        let mods = modifiers
+        if mods.contains(.control) { parts.append("⌃") }
+        if mods.contains(.option) { parts.append("⌥") }
+        if mods.contains(.shift) { parts.append("⇧") }
+        if mods.contains(.command) { parts.append("⌘") }
+        parts.append(keyString(for: carbonKeyCode))
+        return parts.joined()
+    }
+
+    private func keyString(for keyCode: Int) -> String {
+        switch keyCode {
+        case 36: return "↩"
+        case 48: return "⇥"
+        case 49: return "Space"
+        case 51: return "⌫"
+        case 53: return "⎋"
+        case 71: return "⎋"
+        case 76: return "⌤"
+        case 115: return "↖"
+        case 116: return "⇞"
+        case 117: return "⌦"
+        case 119: return "↘"
+        case 121: return "⇟"
+        case 123: return "←"
+        case 124: return "→"
+        case 125: return "↓"
+        case 126: return "↑"
+        case 122: return "F1"
+        case 120: return "F2"
+        case 99: return "F3"
+        case 118: return "F4"
+        case 96: return "F5"
+        case 97: return "F6"
+        case 98: return "F7"
+        case 100: return "F8"
+        case 101: return "F9"
+        case 109: return "F10"
+        case 103: return "F11"
+        case 111: return "F12"
+        default:
+            // Use the key character from the current keyboard layout
+            let source = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
+            if let layoutData = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) {
+                let data = Unmanaged<CFData>.fromOpaque(layoutData).takeUnretainedValue() as Data
+                var deadKeyState: UInt32 = 0
+                var chars = [UniChar](repeating: 0, count: 4)
+                var length: Int = 0
+                data.withUnsafeBytes { ptr in
+                    let layoutPtr = ptr.bindMemory(to: UCKeyboardLayout.self).baseAddress!
+                    UCKeyTranslate(
+                        layoutPtr,
+                        UInt16(keyCode),
+                        UInt16(kUCKeyActionDisplay),
+                        0,
+                        UInt32(LMGetKbdType()),
+                        UInt32(kUCKeyTranslateNoDeadKeysBit),
+                        &deadKeyState,
+                        chars.count,
+                        &length,
+                        &chars
+                    )
+                }
+                if length > 0 {
+                    return String(utf16CodeUnits: chars, count: length).uppercased()
+                }
+            }
+            return "Key\(keyCode)"
         }
     }
 }
