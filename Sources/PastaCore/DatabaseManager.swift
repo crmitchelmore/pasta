@@ -2,7 +2,7 @@ import Foundation
 import GRDB
 import os.log
 
-public final class DatabaseManager {
+public final class DatabaseManager: @unchecked Sendable {
     private let dbQueue: DatabaseQueue
 
     public init(databaseURL: URL = DatabaseManager.defaultDatabaseURL()) throws {

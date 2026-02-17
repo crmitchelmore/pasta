@@ -31,6 +31,7 @@ public final class QuickSearchManager: ObservableObject {
     private var allEntries: [ClipboardEntry] = []
     private var entriesSubscription: AnyCancellable?
     private var searchDebounceTask: Task<Void, Never>?
+    private var searchTask: Task<Void, Never>?
     
     // Database reference for FTS5 search
     private var database: DatabaseManager?
@@ -131,6 +132,7 @@ public final class QuickSearchManager: ObservableObject {
     /// Called when query or filter changes - debounced search with immediate text display
     public func searchQueryChanged() {
         searchDebounceTask?.cancel()
+        searchTask?.cancel()
         
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         
@@ -189,32 +191,44 @@ public final class QuickSearchManager: ObservableObject {
         }
         
         selectedIndex = 0
-        
-        // Use FTS5 for blazing fast search (runs in SQLite's optimized C engine)
-        if let database = database {
-            do {
-                let startTime = CFAbsoluteTimeGetCurrent()
-                let matches = try database.searchFTS(query: trimmed, contentType: selectedFilter, limit: 20)
-                let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
-                PastaLogger.search.debug("FTS5 search '\(trimmed)': \(matches.count) results in \(String(format: "%.1f", elapsed))ms")
-                results = matches
-            } catch {
-                PastaLogger.search.error("FTS5 search failed: \(error.localizedDescription)")
-                // Fallback to simple contains search
-                fallbackSearch(trimmed)
+
+        let querySnapshot = trimmed
+        let filterSnapshot = selectedFilter
+        let dbSnapshot = database
+        let entriesSnapshot = allEntries
+
+        searchTask?.cancel()
+        searchTask = Task {
+            let searchResult = await Task.detached(priority: .userInitiated) { () -> [ClipboardEntry] in
+                if let dbSnapshot {
+                    do {
+                        let startTime = CFAbsoluteTimeGetCurrent()
+                        let matches = try dbSnapshot.searchFTS(query: querySnapshot, contentType: filterSnapshot, limit: 20)
+                        let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
+                        PastaLogger.search.debug("FTS5 search '\(querySnapshot)': \(matches.count) results in \(String(format: "%.1f", elapsed))ms")
+                        return matches
+                    } catch {
+                        PastaLogger.search.error("FTS5 search failed: \(error.localizedDescription)")
+                    }
+                }
+
+                return Self.fallbackMatches(query: querySnapshot, entries: entriesSnapshot, filter: filterSnapshot)
+            }.result
+
+            guard !Task.isCancelled else { return }
+            guard query.trimmingCharacters(in: .whitespacesAndNewlines) == querySnapshot else { return }
+            guard selectedFilter == filterSnapshot else { return }
+            if case .success(let result) = searchResult {
+                results = result
             }
-        } else {
-            // Fallback to simple contains search if database not available
-            fallbackSearch(trimmed)
         }
     }
     
-    private func fallbackSearch(_ query: String) {
+    private nonisolated static func fallbackMatches(query: String, entries: [ClipboardEntry], filter: ContentType?) -> [ClipboardEntry] {
         let lower = query.lowercased()
-        var filtered = allEntries.filter { $0.content.lowercased().contains(lower) }
-        if let filter = selectedFilter {
-            filtered = filtered.filter { $0.contentType == filter }
+        let filtered = entries.lazy.filter {
+            $0.content.lowercased().contains(lower) && (filter == nil || $0.contentType == filter)
         }
-        results = Array(filtered.prefix(20))
+        return Array(filtered.prefix(20))
     }
 }
