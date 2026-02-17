@@ -705,7 +705,12 @@ private struct QuickSearchRow: View {
 
 // MARK: - Image Thumbnail
 
-private let thumbnailCache = NSCache<NSString, NSImage>()
+private let thumbnailCache: NSCache<NSString, NSImage> = {
+    let cache = NSCache<NSString, NSImage>()
+    cache.countLimit = 300
+    cache.totalCostLimit = 64 * 1024 * 1024
+    return cache
+}()
 
 private struct ImageThumbnail: View {
     let path: String
@@ -754,7 +759,8 @@ private struct ImageThumbnail: View {
         Task.detached(priority: .userInitiated) {
             let thumbnail = Self.generateThumbnail(from: imagePath, maxPixelSize: pixelSize)
             if let thumbnail {
-                thumbnailCache.setObject(thumbnail, forKey: cacheKey)
+                let cost = Int(pixelSize * pixelSize * 4)
+                thumbnailCache.setObject(thumbnail, forKey: cacheKey, cost: cost)
             }
             await MainActor.run {
                 if loadedPath == imagePath {

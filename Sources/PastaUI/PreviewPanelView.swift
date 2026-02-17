@@ -514,7 +514,7 @@ struct ImagePreview: View {
         loadedPath = imagePath
         image = nil
         DispatchQueue.global(qos: .userInitiated).async {
-            let loaded = NSImage(contentsOfFile: imagePath)
+            let loaded = DownsampledImageLoader.load(path: imagePath, maxPixelSize: 1600)
             DispatchQueue.main.async {
                 // Only update if path hasn't changed
                 if loadedPath == imagePath {
@@ -650,13 +650,34 @@ private struct FilePreview: View {
             if isImage && preview.exists && image == nil {
                 let path = preview.path
                 DispatchQueue.global(qos: .userInitiated).async {
-                    let loaded = NSImage(contentsOfFile: path)
+                    let loaded = DownsampledImageLoader.load(path: path, maxPixelSize: 1200)
                     DispatchQueue.main.async {
                         self.image = loaded
                     }
                 }
             }
         }
+    }
+}
+
+private enum DownsampledImageLoader {
+    static func load(path: String, maxPixelSize: CGFloat) -> NSImage? {
+        let url = URL(fileURLWithPath: path) as CFURL
+        guard let source = CGImageSourceCreateWithURL(url, nil) else {
+            return NSImage(contentsOfFile: path)
+        }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return NSImage(contentsOfFile: path)
+        }
+
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 }
 
