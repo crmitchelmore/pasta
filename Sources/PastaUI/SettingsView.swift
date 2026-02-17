@@ -133,7 +133,7 @@ public struct SettingsView: View {
             }
             .tag(SettingsTab.tipJar)
         }
-        .frame(width: 520, height: 500)
+        .frame(width: 620, height: 500)
         .padding(.top, 8)
         .withAppearance()
         .tint(PastaTheme.accent)
