@@ -7,6 +7,7 @@ public struct FilterSidebarView: View {
 
     private let effectiveTypeCountsOverride: [ContentType: Int]?
     private let sourceAppCountsOverride: [String: Int]?
+    private let domainCountsOverride: [String: Int]?
 
     @Binding private var selectedContentType: ContentType?
     @Binding private var selectedURLDomain: String?
@@ -21,6 +22,7 @@ public struct FilterSidebarView: View {
         entries: [ClipboardEntry],
         effectiveTypeCounts: [ContentType: Int]? = nil,
         sourceAppCounts: [String: Int]? = nil,
+        domainCounts: [String: Int]? = nil,
         selectedContentType: Binding<ContentType?>,
         selectedURLDomain: Binding<String?>,
         selection: Binding<FilterSelection?>
@@ -28,6 +30,7 @@ public struct FilterSidebarView: View {
         self.entries = entries
         effectiveTypeCountsOverride = effectiveTypeCounts
         sourceAppCountsOverride = sourceAppCounts
+        domainCountsOverride = domainCounts
         _selectedContentType = selectedContentType
         _selectedURLDomain = selectedURLDomain
         _selection = selection
@@ -108,7 +111,7 @@ public struct FilterSidebarView: View {
                 }
             }
 
-            let hasAnyURLs = entries.contains { $0.contentType == .url }
+            let hasAnyURLs = !domainCounts.isEmpty || entries.contains { $0.contentType == .url }
             if hasAnyURLs {
                 Section {
                     DisclosureGroup("Domains", isExpanded: $showDomains) {
@@ -258,6 +261,10 @@ public struct FilterSidebarView: View {
     }
 
     private var domainCounts: [String: Int] {
+        if let domainCountsOverride {
+            return domainCountsOverride
+        }
+
         let detector = URLDetector()
         var counts: [String: Int] = [:]
 

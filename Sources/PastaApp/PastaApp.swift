@@ -799,6 +799,7 @@ struct PanelContentView: View {
     @State private var preloadedEntriesByType: [ContentType?: [ClipboardEntry]] = [:]
     @State private var preloadedEffectiveTypeCounts: [ContentType: Int]? = nil
     @State private var preloadedSourceAppCounts: [String: Int]? = nil
+    @State private var preloadedDomainCounts: [String: Int]? = nil
     @State private var preloadTask: Task<Void, Never>? = nil
     @State private var filterTask: Task<Void, Never>? = nil
 
@@ -852,6 +853,7 @@ struct PanelContentView: View {
                 entries: backgroundService.entries,
                 effectiveTypeCounts: preloadedEffectiveTypeCounts,
                 sourceAppCounts: preloadedSourceAppCounts,
+                domainCounts: preloadedDomainCounts,
                 selectedContentType: $contentTypeFilter,
                 selectedURLDomain: $urlDomainFilter,
                 selection: $filterSelection
@@ -987,7 +989,7 @@ struct PanelContentView: View {
         let snapshot = entries
 
         preloadTask = Task {
-            let result = await Task.detached(priority: .utility) { () -> (entriesByType: [ContentType?: [ClipboardEntry]], effectiveTypeCounts: [ContentType: Int], sourceAppCounts: [String: Int]) in
+            let result = await Task.detached(priority: .utility) { () -> (entriesByType: [ContentType?: [ClipboardEntry]], effectiveTypeCounts: [ContentType: Int], sourceAppCounts: [String: Int], domainCounts: [String: Int]) in
                 func filePathIsImage(_ metadata: String?) -> Bool {
                     guard let meta = metadata,
                           let data = meta.data(using: .utf8),
@@ -1005,11 +1007,19 @@ struct PanelContentView: View {
 
                 var counts: [ContentType: Int] = [:]
                 var sourceAppCounts: [String: Int] = [:]
+                var domainCounts: [String: Int] = [:]
+                let urlDetector = URLDetector()
 
                 for entry in snapshot {
                     counts[entry.contentType, default: 0] += 1
                     let app = entry.sourceApp ?? "Unknown"
                     sourceAppCounts[app, default: 0] += 1
+                    if entry.contentType == .url {
+                        let domains = Set(urlDetector.detect(in: entry.content).map(\.domain))
+                        for domain in domains {
+                            domainCounts[domain, default: 0] += 1
+                        }
+                    }
                 }
 
                 let imageFilePathCount = snapshot.reduce(0) { acc, entry in
@@ -1058,13 +1068,14 @@ struct PanelContentView: View {
                     out[type] = matches
                 }
 
-                return (out, counts, sourceAppCounts)
+                return (out, counts, sourceAppCounts, domainCounts)
             }.value
 
             await MainActor.run {
                 preloadedEntriesByType = result.entriesByType
                 preloadedEffectiveTypeCounts = result.effectiveTypeCounts
                 preloadedSourceAppCounts = result.sourceAppCounts
+                preloadedDomainCounts = result.domainCounts
                 
                 // Update display from fresh cache if applicable (resolves race with asyncFilterEntries)
                 if let cached = preloadedEntriesForCurrentFilters() {
