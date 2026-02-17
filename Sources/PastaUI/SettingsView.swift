@@ -42,6 +42,7 @@ public struct SettingsView: View {
     private let allEntries: (() -> [ClipboardEntry])?
     private let markSynced: (([UUID]) -> Void)?
     private let syncedCount: (() -> Int)?
+    private let onHotKeyChange: ((PastaHotKey) -> Void)?
 
     public init(
         syncManager: SyncManager? = nil,
@@ -49,7 +50,8 @@ public struct SettingsView: View {
         markSynced: (([UUID]) -> Void)? = nil,
         syncedCount: (() -> Int)? = nil,
         checkForUpdates: (() -> Void)? = nil,
-        automaticallyChecksForUpdates: Binding<Bool>? = nil
+        automaticallyChecksForUpdates: Binding<Bool>? = nil,
+        onHotKeyChange: ((PastaHotKey) -> Void)? = nil
     ) {
         self.syncManager = syncManager
         self.allEntries = allEntries
@@ -57,6 +59,7 @@ public struct SettingsView: View {
         self.syncedCount = syncedCount
         self.checkForUpdates = checkForUpdates
         self.automaticallyChecksForUpdates = automaticallyChecksForUpdates
+        self.onHotKeyChange = onHotKeyChange
     }
 
     public var body: some View {
@@ -64,7 +67,8 @@ public struct SettingsView: View {
             GeneralSettingsTab(
                 launchAtLogin: $launchAtLogin,
                 appMode: $appMode,
-                appearance: $appearance
+                appearance: $appearance,
+                onHotKeyChange: onHotKeyChange
             )
             .tabItem {
                 Label("General", systemImage: "gearshape")
@@ -146,6 +150,7 @@ private struct GeneralSettingsTab: View {
     @Binding var launchAtLogin: Bool
     @Binding var appMode: String
     @Binding var appearance: String
+    var onHotKeyChange: ((PastaHotKey) -> Void)?
 
     var body: some View {
         Form {
@@ -153,7 +158,12 @@ private struct GeneralSettingsTab: View {
                 HStack {
                     Text("Open Pasta")
                     Spacer()
-                    ShortcutRecorderView(name: .openPasta)
+                    ShortcutRecorderView(
+                        hotKey: PastaHotKey.load(),
+                        onShortcutChange: { newHotKey in
+                            onHotKeyChange?(newHotKey)
+                        }
+                    )
                 }
             } header: {
                 Label("Keyboard Shortcut", systemImage: "keyboard")
@@ -881,7 +891,6 @@ private struct AboutSettingsTab: View {
                     
                     DependencyRow(name: "Sparkle", version: "2.6.0+", url: "https://sparkle-project.org", description: "Auto-update framework")
                     DependencyRow(name: "GRDB", version: "6.24+", url: "https://github.com/groue/GRDB.swift", description: "SQLite toolkit")
-                    DependencyRow(name: "KeyboardShortcuts", version: "2.2+", url: "https://github.com/sindresorhus/KeyboardShortcuts", description: "Customisable global hotkeys")
                 }
             } header: {
                 Label("Dependencies", systemImage: "shippingbox")

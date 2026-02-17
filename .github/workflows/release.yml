@@ -16,7 +16,7 @@ env:
 jobs:
   build-and-release:
     name: Build, Sign, Notarize & Release
-    runs-on: macos-15  # macOS Sequoia required for Swift 6.1+ (KeyboardShortcuts dependency)
+    runs-on: macos-15
     
     steps:
       # ============================================================================
@@ -83,12 +83,6 @@ jobs:
           if [ -d "Sources/PastaApp/Resources" ]; then
             cp -R Sources/PastaApp/Resources/* "$APP_DIR/Contents/Resources/" || true
           fi
-          
-          # Copy SPM resource bundles (e.g. KeyboardShortcuts localised strings)
-          find .build/arm64-apple-macosx/release -maxdepth 1 -name "*.bundle" | while read bundle; do
-            echo "==> Copying SPM resource bundle: $(basename "$bundle")"
-            cp -R "$bundle" "$APP_DIR/Contents/Resources/"
-          done
           
           # Copy app icon to Resources
           cp "Resources/DMG/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"

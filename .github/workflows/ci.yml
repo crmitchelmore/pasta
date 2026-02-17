@@ -51,12 +51,6 @@ jobs:
           cp -R "$SPARKLE_PATH" "$APP_DIR/Contents/Frameworks/"
           echo "==> Copied Sparkle from $SPARKLE_PATH"
           
-          # Copy SPM resource bundles (e.g. KeyboardShortcuts localised strings)
-          find .build/arm64-apple-macosx/release -maxdepth 1 -name "*.bundle" | while read bundle; do
-            echo "==> Copying SPM resource bundle: $(basename "$bundle")"
-            cp -R "$bundle" "$APP_DIR/Contents/Resources/"
-          done
-          
           # Fix rpath (same as release.yml)
           install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/PastaApp"
           
@@ -186,20 +180,6 @@ jobs:
             exit 1
           fi
           echo "✓ Sparkle.framework exists"
-          
-          # Note: KeyboardShortcuts bundles localised strings via SPM resources
-          # Verify the resource bundle was copied
-          if [ ! -d "$APP_DIR/Contents/Resources" ]; then
-            echo "ERROR: Resources directory not found!"
-            exit 1
-          fi
-          echo "✓ Resources directory exists"
-          
-          if ! ls "$APP_DIR/Contents/Resources/"*KeyboardShortcuts*.bundle > /dev/null 2>&1; then
-            echo "ERROR: KeyboardShortcuts resource bundle not found!"
-            exit 1
-          fi
-          echo "✓ KeyboardShortcuts resource bundle exists"
           
           # Check rpath
           echo "==> Verifying rpath:"

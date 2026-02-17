@@ -1,5 +1,4 @@
 import AppKit
-import KeyboardShortcuts
 import Sentry
 import SwiftUI
 import os.log
@@ -38,7 +37,10 @@ struct PastaApp: App {
                 automaticallyChecksForUpdates: Binding(
                     get: { UpdaterManager.shared.automaticallyChecksForUpdates },
                     set: { UpdaterManager.shared.automaticallyChecksForUpdates = $0 }
-                )
+                ),
+                onHotKeyChange: { [weak appDelegate] newHotKey in
+                    appDelegate?.registerHotKey()
+                }
             )
             .frame(minWidth: 450, minHeight: 400)
         }
@@ -58,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var quickSearchController: QuickSearchController?
     private var statusItem: NSStatusItem?
     private var defaultsObserver: NSObjectProtocol?
+    private let hotKeyManager = CarbonHotKeyManager()
     private var settingsWindow: NSWindow?
 
     private enum Defaults {
@@ -117,12 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panelController?.show()
         
         // Setup hotkey to toggle quick search (user-customisable, default ⌃⌘V)
-        KeyboardShortcuts.onKeyUp(for: .openPasta) { [weak self] in
-            PastaLogger.app.debug("Hotkey triggered, toggling quick search")
-            Task { @MainActor in
-                self?.toggleQuickSearch()
-            }
-        }
+        registerHotKey()
         
         PastaLogger.app.info("Pasta app initialized successfully")
     }
@@ -164,6 +162,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             )
         }
+    }
+
+    func registerHotKey() {
+        let hotKey = PastaHotKey.load()
+        hotKeyManager.onHotKey = { [weak self] in
+            PastaLogger.app.debug("Hotkey triggered, toggling quick search")
+            Task { @MainActor in
+                self?.toggleQuickSearch()
+            }
+        }
+        hotKeyManager.register(hotKey)
     }
     
     private func setupCommandHandlers() {
