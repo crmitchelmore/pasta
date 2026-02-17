@@ -3,6 +3,9 @@ import Foundation
 import os.log
 import PastaCore
 import PastaSync
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Manages app-level state: local database, sync orchestration, and entry loading.
 @MainActor
@@ -15,6 +18,7 @@ final class AppState: ObservableObject {
 
     private var database: DatabaseManager?
     private let logger = Logger(subsystem: "com.pasta.ios", category: "AppState")
+    private var lastObservedPasteboardChangeCount: Int?
 
     init() {
         self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
@@ -45,7 +49,53 @@ final class AppState: ObservableObject {
             // Non-fatal — app works offline without sync
         }
 
+        await captureCurrentClipboardIfNeeded(syncManager: syncManager)
+
         isLoading = false
+    }
+
+    func captureCurrentClipboardIfNeeded(syncManager: SyncManager) async {
+        #if canImport(UIKit)
+        guard let database else { return }
+        guard UIPasteboard.general.hasStrings else { return }
+        guard let clipboardString = UIPasteboard.general.string else { return }
+        guard !clipboardString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let changeCount = UIPasteboard.general.changeCount
+        if lastObservedPasteboardChangeCount == changeCount {
+            return
+        }
+
+        let entry = ClipboardEntry(
+            content: clipboardString,
+            contentType: inferredContentType(for: clipboardString),
+            sourceApp: "iOS Pasteboard"
+        )
+
+        do {
+            let alreadyExists = try database.existsWithHash(entry.contentHash)
+            lastObservedPasteboardChangeCount = changeCount
+            guard !alreadyExists else { return }
+
+            try database.insert(entry, deduplicate: true)
+
+            if iCloudAvailable {
+                do {
+                    try await syncManager.setupZone()
+                    try await syncManager.pushEntry(entry)
+                    try database.markSynced(ids: [entry.id])
+                } catch {
+                    logger.warning("Clipboard capture push failed: \(error.localizedDescription)")
+                }
+            }
+
+            try loadEntries()
+            logger.info("Captured current clipboard on app activation")
+        } catch {
+            logger.error("Failed to capture current clipboard: \(error.localizedDescription)")
+            errorMessage = "Clipboard capture failed: \(error.localizedDescription)"
+        }
+        #endif
     }
 
     func performSync(syncManager: SyncManager) async {
@@ -91,6 +141,16 @@ final class AppState: ObservableObject {
     func completeOnboarding() {
         hasCompletedOnboarding = true
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+    }
+
+    private func inferredContentType(for content: String) -> ContentType {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = URL(string: trimmed),
+           let scheme = url.scheme?.lowercased(),
+           ["http", "https", "ftp"].contains(scheme) {
+            return .url
+        }
+        return .text
     }
 
     static func databaseURL() -> URL {
