@@ -1,5 +1,4 @@
 import AppKit
-import KeyboardShortcuts
 import PastaCore
 import PastaSync
 import SwiftUI
@@ -154,7 +153,7 @@ private struct GeneralSettingsTab: View {
                 HStack {
                     Text("Open Pasta")
                     Spacer()
-                    KeyboardShortcuts.Recorder("", name: .openPasta)
+                    ShortcutRecorderView(name: .openPasta)
                 }
             } header: {
                 Label("Keyboard Shortcut", systemImage: "keyboard")
