@@ -98,6 +98,20 @@ public struct QuickSearchView: View {
                                 resultsList
                             }
                         }
+
+                        if !isPreviewVisible && !manager.results.isEmpty {
+                            Divider().opacity(0.3)
+                            HStack(spacing: 4) {
+                                Text("→")
+                                    .font(.system(.caption, design: .rounded).weight(.medium))
+                                Text("Preview")
+                                    .font(.caption)
+                            }
+                            .foregroundStyle(.secondary.opacity(0.6))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
+                        }
                     }
                     
                     // Command feedback
