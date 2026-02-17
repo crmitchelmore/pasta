@@ -468,7 +468,7 @@ private struct MonospaceText: View {
     }
 }
 
-private struct ImagePreview: View {
+struct ImagePreview: View {
     let path: String
 
     @State private var image: NSImage?
