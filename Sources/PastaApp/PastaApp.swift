@@ -801,6 +801,7 @@ struct PanelContentView: View {
     @State private var preloadedSourceAppCounts: [String: Int]? = nil
     @State private var preloadTask: Task<Void, Never>? = nil
     @State private var filterTask: Task<Void, Never>? = nil
+    @State private var searchTask: Task<Void, Never>? = nil
 
     @FocusState private var searchFocused: Bool
     @FocusState private var listFocused: Bool
@@ -915,7 +916,7 @@ struct PanelContentView: View {
                     // Empty query - restore filtered view (uses preload cache or async)
                     triggerSearchUpdate()
                 } else {
-                    // Debounce for typing - search runs on main actor after debounce
+                    // Debounce for typing before background search work
                     searchDebounceTask = Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 25_000_000) // 25ms debounce
                         guard !Task.isCancelled else { return }
@@ -1083,41 +1084,10 @@ struct PanelContentView: View {
         return preloadedEntriesByType[contentTypeFilter]
     }
 
-    private func applyFiltersToEntries(_ input: [ClipboardEntry]) -> [ClipboardEntry] {
-        var out = input
-        
-        // Apply type filter - include entries that CONTAIN the type in metadata, not just primary type
-        if let contentTypeFilter {
-            if MetadataParser.extractableTypes.contains(contentTypeFilter) {
-                // For extractable types, include entries that contain the type in metadata
-                out = out.filter { $0.containsType(contentTypeFilter) }
-            } else {
-                // For non-extractable types, use primary type only
-                out = out.filter { $0.contentType == contentTypeFilter }
-            }
-        }
-        
-        let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if !sourceFilter.isEmpty {
-            out = out.filter { entry in
-                entry.sourceApp?.localizedCaseInsensitiveContains(sourceFilter) == true
-            }
-        }
-        
-        if contentTypeFilter == .url, let urlDomainFilter {
-            let detector = URLDetector()
-            out = out.filter { entry in
-                Set(detector.detect(in: entry.content).map(\.domain)).contains(urlDomainFilter)
-            }
-        }
-        
-        // Limit AFTER filtering to avoid processing thousands on main thread
-        return Array(out.prefix(200))
-    }
-    
     private func triggerSearchUpdate() {
         searchDebounceTask?.cancel()
         filterTask?.cancel()
+        searchTask?.cancel()
         let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             if let cached = preloadedEntriesForCurrentFilters() {
@@ -1128,6 +1098,38 @@ struct PanelContentView: View {
         } else {
             performSearch(query: trimmed)
         }
+    }
+
+    private static func filterEntries(
+        _ input: [ClipboardEntry],
+        contentTypeFilter: ContentType?,
+        sourceFilter: String,
+        urlDomainFilter: String?
+    ) -> [ClipboardEntry] {
+        var out = input
+
+        if let contentTypeFilter {
+            if MetadataParser.extractableTypes.contains(contentTypeFilter) {
+                out = out.filter { $0.containsType(contentTypeFilter) }
+            } else {
+                out = out.filter { $0.contentType == contentTypeFilter }
+            }
+        }
+
+        if !sourceFilter.isEmpty {
+            out = out.filter { entry in
+                entry.sourceApp?.localizedCaseInsensitiveContains(sourceFilter) == true
+            }
+        }
+
+        if contentTypeFilter == .url, let urlDomainFilter {
+            let detector = URLDetector()
+            out = out.filter { entry in
+                Set(detector.detect(in: entry.content).map(\.domain)).contains(urlDomainFilter)
+            }
+        }
+
+        return Array(out.prefix(200))
     }
     
     /// Run entry filtering off the main thread to avoid UI hangs on large datasets
@@ -1140,30 +1142,12 @@ struct PanelContentView: View {
         
         filterTask = Task {
             let result = await Task.detached(priority: .userInitiated) { () -> [ClipboardEntry] in
-                var out = entries
-                
-                if let typeFilter {
-                    if MetadataParser.extractableTypes.contains(typeFilter) {
-                        out = out.filter { $0.containsType(typeFilter) }
-                    } else {
-                        out = out.filter { $0.contentType == typeFilter }
-                    }
-                }
-                
-                if !srcFilter.isEmpty {
-                    out = out.filter { entry in
-                        entry.sourceApp?.localizedCaseInsensitiveContains(srcFilter) == true
-                    }
-                }
-                
-                if typeFilter == .url, let domainFilter {
-                    let detector = URLDetector()
-                    out = out.filter { entry in
-                        Set(detector.detect(in: entry.content).map(\.domain)).contains(domainFilter)
-                    }
-                }
-                
-                return Array(out.prefix(200))
+                Self.filterEntries(
+                    entries,
+                    contentTypeFilter: typeFilter,
+                    sourceFilter: srcFilter,
+                    urlDomainFilter: domainFilter
+                )
             }.value
             
             guard !Task.isCancelled else { return }
@@ -1176,16 +1160,33 @@ struct PanelContentView: View {
             displayedEntries = []
             return
         }
-        
-        do {
-            let matches = try service.search(
-                query: query,
-                contentType: contentTypeFilter,
-                limit: 200
-            )
-            displayedEntries = applyFiltersToEntries(matches.map { $0.entry })
-        } catch {
-            displayedEntries = []
+
+        searchTask?.cancel()
+        let typeFilter = contentTypeFilter
+        let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let domainFilter = urlDomainFilter
+
+        searchTask = Task {
+            let result = await Task.detached(priority: .userInitiated) { () -> [ClipboardEntry] in
+                do {
+                    let matches = try service.search(
+                        query: query,
+                        contentType: typeFilter,
+                        limit: 200
+                    )
+                    return Self.filterEntries(
+                        matches.map { $0.entry },
+                        contentTypeFilter: typeFilter,
+                        sourceFilter: sourceFilter,
+                        urlDomainFilter: domainFilter
+                    )
+                } catch {
+                    return []
+                }
+            }.value
+
+            guard !Task.isCancelled else { return }
+            displayedEntries = result
         }
     }
 
