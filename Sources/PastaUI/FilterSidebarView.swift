@@ -111,7 +111,7 @@ public struct FilterSidebarView: View {
                 }
             }
 
-            let hasAnyURLs = !domainCounts.isEmpty || entries.contains { $0.contentType == .url }
+            let hasAnyURLs = domainCountsOverride.map { !$0.isEmpty } ?? entries.contains { $0.contentType == .url }
             if hasAnyURLs {
                 Section {
                     DisclosureGroup("Domains", isExpanded: $showDomains) {
