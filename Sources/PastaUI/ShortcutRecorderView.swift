@@ -5,16 +5,13 @@ import SwiftUI
 /// A SwiftUI view that lets the user record a keyboard shortcut.
 /// Uses NSEvent local monitoring — no third-party dependencies or Bundle.module.
 struct ShortcutRecorderView: View {
-    /// Callback fired when the user records a new shortcut.
-    let onShortcutChange: (PastaHotKey) -> Void
     @State private var currentHotKey: PastaHotKey
     @State private var isRecording = false
     @State private var pendingModifiers: PastaHotKey.ModifierSet = []
     @State private var eventMonitor: Any?
 
-    init(hotKey: PastaHotKey, onShortcutChange: @escaping (PastaHotKey) -> Void) {
+    init(hotKey: PastaHotKey) {
         self._currentHotKey = State(initialValue: hotKey)
-        self.onShortcutChange = onShortcutChange
     }
 
     var body: some View {
@@ -31,7 +28,7 @@ struct ShortcutRecorderView: View {
                 Button {
                     currentHotKey = .defaultHotKey
                     currentHotKey.save()
-                    onShortcutChange(currentHotKey)
+                    NotificationCenter.default.post(name: .pastaHotKeyDidChange, object: nil)
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
                         .font(.caption)
@@ -78,6 +75,9 @@ struct ShortcutRecorderView: View {
         isRecording = true
         pendingModifiers = []
 
+        // Pause the global hotkey so the key event reaches our monitor
+        NotificationCenter.default.post(name: .pastaHotKeyShouldPause, object: nil)
+
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
             // Track modifier-only presses
             if KeyCodeMapping.modifierKeyCodes.contains(event.keyCode) {
@@ -101,7 +101,6 @@ struct ShortcutRecorderView: View {
             let hotKey = PastaHotKey(keyCode: event.keyCode, modifiers: modifiers)
             currentHotKey = hotKey
             hotKey.save()
-            onShortcutChange(hotKey)
             stopRecording()
             return nil
         }
@@ -112,9 +111,22 @@ struct ShortcutRecorderView: View {
             NSEvent.removeMonitor(monitor)
             eventMonitor = nil
         }
-        isRecording = false
-        pendingModifiers = []
+        if isRecording {
+            isRecording = false
+            pendingModifiers = []
+        }
+        // Re-register the hotkey (possibly with new key)
+        NotificationCenter.default.post(name: .pastaHotKeyDidChange, object: nil)
     }
+}
+
+// MARK: - Hotkey lifecycle notifications
+
+public extension Notification.Name {
+    /// Posted when the hotkey should be temporarily unregistered (e.g. during recording).
+    static let pastaHotKeyShouldPause = Notification.Name("pasta.hotKeyShouldPause")
+    /// Posted when the hotkey configuration changed and should be re-registered.
+    static let pastaHotKeyDidChange = Notification.Name("pasta.hotKeyDidChange")
 }
 
 #endif

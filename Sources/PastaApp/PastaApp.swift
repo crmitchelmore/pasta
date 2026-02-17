@@ -37,10 +37,7 @@ struct PastaApp: App {
                 automaticallyChecksForUpdates: Binding(
                     get: { UpdaterManager.shared.automaticallyChecksForUpdates },
                     set: { UpdaterManager.shared.automaticallyChecksForUpdates = $0 }
-                ),
-                onHotKeyChange: { [weak appDelegate] newHotKey in
-                    appDelegate?.registerHotKey()
-                }
+                )
             )
             .frame(minWidth: 450, minHeight: 400)
         }
@@ -61,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var defaultsObserver: NSObjectProtocol?
     private let hotKeyManager = CarbonHotKeyManager()
+    private var hotKeyPauseObserver: NSObjectProtocol?
+    private var hotKeyChangeObserver: NSObjectProtocol?
     private var settingsWindow: NSWindow?
 
     private enum Defaults {
@@ -121,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Setup hotkey to toggle quick search (user-customisable, default ⌃⌘V)
         registerHotKey()
+        observeHotKeyNotifications()
         
         PastaLogger.app.info("Pasta app initialized successfully")
     }
@@ -173,6 +173,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         hotKeyManager.register(hotKey)
+    }
+
+    private func observeHotKeyNotifications() {
+        hotKeyPauseObserver = NotificationCenter.default.addObserver(
+            forName: .pastaHotKeyShouldPause, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.hotKeyManager.unregister()
+        }
+        hotKeyChangeObserver = NotificationCenter.default.addObserver(
+            forName: .pastaHotKeyDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.registerHotKey()
+        }
     }
     
     private func setupCommandHandlers() {

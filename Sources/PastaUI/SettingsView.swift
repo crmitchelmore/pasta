@@ -42,7 +42,6 @@ public struct SettingsView: View {
     private let allEntries: (() -> [ClipboardEntry])?
     private let markSynced: (([UUID]) -> Void)?
     private let syncedCount: (() -> Int)?
-    private let onHotKeyChange: ((PastaHotKey) -> Void)?
 
     public init(
         syncManager: SyncManager? = nil,
@@ -50,8 +49,7 @@ public struct SettingsView: View {
         markSynced: (([UUID]) -> Void)? = nil,
         syncedCount: (() -> Int)? = nil,
         checkForUpdates: (() -> Void)? = nil,
-        automaticallyChecksForUpdates: Binding<Bool>? = nil,
-        onHotKeyChange: ((PastaHotKey) -> Void)? = nil
+        automaticallyChecksForUpdates: Binding<Bool>? = nil
     ) {
         self.syncManager = syncManager
         self.allEntries = allEntries
@@ -59,7 +57,6 @@ public struct SettingsView: View {
         self.syncedCount = syncedCount
         self.checkForUpdates = checkForUpdates
         self.automaticallyChecksForUpdates = automaticallyChecksForUpdates
-        self.onHotKeyChange = onHotKeyChange
     }
 
     public var body: some View {
@@ -67,8 +64,7 @@ public struct SettingsView: View {
             GeneralSettingsTab(
                 launchAtLogin: $launchAtLogin,
                 appMode: $appMode,
-                appearance: $appearance,
-                onHotKeyChange: onHotKeyChange
+                appearance: $appearance
             )
             .tabItem {
                 Label("General", systemImage: "gearshape")
@@ -150,7 +146,6 @@ private struct GeneralSettingsTab: View {
     @Binding var launchAtLogin: Bool
     @Binding var appMode: String
     @Binding var appearance: String
-    var onHotKeyChange: ((PastaHotKey) -> Void)?
 
     var body: some View {
         Form {
@@ -159,10 +154,7 @@ private struct GeneralSettingsTab: View {
                     Text("Open Pasta")
                     Spacer()
                     ShortcutRecorderView(
-                        hotKey: PastaHotKey.load(),
-                        onShortcutChange: { newHotKey in
-                            onHotKeyChange?(newHotKey)
-                        }
+                        hotKey: PastaHotKey.load()
                     )
                 }
             } header: {
