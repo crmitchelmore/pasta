@@ -142,6 +142,44 @@ final class BackgroundService: ObservableObject {
             PastaLogger.ui.debug("Refreshed entries: \(latest.count) items")
         }
     }
+
+    private func refreshAfterInsert(insertedCount: Int) async {
+        guard insertedCount > 0 else { return }
+
+        let displayLimitSetting = UserDefaults.standard.integer(forKey: Defaults.maxEntries)
+        let displayLimit = displayLimitSetting > 0 ? displayLimitSetting : 10_000
+        let headLimit = min(displayLimit, max(100, insertedCount * 4))
+        let db = self.database
+
+        let latestHead = await Task.detached(priority: .userInitiated) {
+            (try? db.fetchRecent(limit: headLimit)) ?? []
+        }.value
+
+        guard !latestHead.isEmpty else {
+            refresh()
+            return
+        }
+
+        var seen = Set<UUID>()
+        var merged: [ClipboardEntry] = []
+        merged.reserveCapacity(min(displayLimit, latestHead.count + entries.count))
+
+        for entry in latestHead {
+            guard seen.insert(entry.id).inserted else { continue }
+            merged.append(entry)
+        }
+
+        for entry in entries {
+            guard seen.insert(entry.id).inserted else { continue }
+            merged.append(entry)
+            if merged.count >= displayLimit {
+                break
+            }
+        }
+
+        entries = merged
+        PastaLogger.ui.debug("Incrementally refreshed entries: \(entries.count) items")
+    }
     
     private func startPruneTimer() {
         // Prune every hour
@@ -272,8 +310,8 @@ final class BackgroundService: ObservableObject {
                     }
 
                     await self.enforceMaxEntriesLimit()
+                    await self.refreshAfterInsert(insertedCount: insertedEntries.count)
                     await MainActor.run {
-                        self.refresh()
                         self.provideFeedback(for: result.primaryEntry)
                     }
                 }
@@ -350,8 +388,8 @@ final class BackgroundService: ObservableObject {
                     }
 
                     await self.enforceMaxEntriesLimit()
+                    await self.refreshAfterInsert(insertedCount: insertedScreenshots.count)
                     await MainActor.run {
-                        self.refresh()
                         self.provideFeedback(for: result.primaryEntry)
                     }
                 }
