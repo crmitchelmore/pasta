@@ -16,7 +16,7 @@ env:
 jobs:
   build-and-release:
     name: Build, Sign, Notarize & Release
-    runs-on: macos-14  # macOS Sonoma required for Swift 5.9+ and macOS 14 target
+    runs-on: macos-15  # macOS Sequoia required for Swift 6.1+ (KeyboardShortcuts dependency)
     
     steps:
       # ============================================================================

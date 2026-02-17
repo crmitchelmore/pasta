@@ -9,7 +9,7 @@ on:
 jobs:
   test:
     name: Build & Test
-    runs-on: macos-14
+    runs-on: macos-15
     
     steps:
       - name: Checkout code
@@ -236,7 +236,7 @@ jobs:
     name: Auto Version & Release
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: write
     
