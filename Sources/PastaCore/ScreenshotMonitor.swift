@@ -72,6 +72,7 @@ public final class ScreenshotMonitor {
     // Fallback polling
     private var pollTimer: Timer?
     private let pollInterval: TimeInterval
+    private let processingQueue = DispatchQueue(label: "com.pasta.screenshot.processing", qos: .utility)
 
     private static let allowedExtensions: Set<String> = ["png", "heic", "jpg", "jpeg", "tiff", "tif"]
     
@@ -170,7 +171,7 @@ public final class ScreenshotMonitor {
             return false
         }
         
-        FSEventStreamSetDispatchQueue(stream, DispatchQueue.main)
+        FSEventStreamSetDispatchQueue(stream, processingQueue)
         
         if FSEventStreamStart(stream) {
             eventStream = stream
@@ -209,7 +210,10 @@ public final class ScreenshotMonitor {
     
     private func startPolling() {
         pollTimer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
-            self?.pollOnce()
+            guard let self else { return }
+            self.processingQueue.async { [weak self] in
+                self?.pollOnce()
+            }
         }
     }
     
@@ -315,8 +319,10 @@ public final class ScreenshotMonitor {
         )
 
         PastaLogger.clipboard.info("Captured screenshot: \(url.lastPathComponent)")
-        subject.send(entry)
         seenPaths.insert(path)
+        DispatchQueue.main.async { [weak self] in
+            self?.subject.send(entry)
+        }
     }
 
     private func resolveDirectoryURL() -> URL? {
