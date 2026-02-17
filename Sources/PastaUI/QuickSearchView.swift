@@ -37,7 +37,7 @@ public struct QuickSearchView: View {
         QuickSearchKeyHandler(
             onArrowUp: { manager.moveSelection(by: -1) },
             onArrowDown: { manager.moveSelection(by: 1) },
-            onArrowRight: { if !manager.isCommandMode && !manager.query.isEmpty { isPreviewVisible = true } },
+            onArrowRight: { if !manager.isCommandMode { isPreviewVisible = true } },
             onArrowLeft: { isPreviewVisible = false },
             onReturn: { handleReturn() },
             onEscape: {
@@ -610,11 +610,16 @@ private struct QuickSearchRow: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            // Type icon
-            Image(systemName: entry.contentType.systemImageName)
-                .font(.title3)
-                .foregroundStyle(entry.contentType.tint)
-                .frame(width: 28)
+            // Type icon or image thumbnail
+            if (entry.contentType == .image || entry.contentType == .screenshot),
+               let imagePath = entry.imagePath {
+                ImageThumbnail(path: imagePath, size: 36)
+            } else {
+                Image(systemName: entry.contentType.systemImageName)
+                    .font(.title3)
+                    .foregroundStyle(entry.contentType.tint)
+                    .frame(width: 28)
+            }
             
             // Content preview
             VStack(alignment: .leading, spacing: 2) {
@@ -673,7 +678,88 @@ private struct QuickSearchRow: View {
     private var previewText: String {
         let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
         let singleLine = trimmed.components(separatedBy: .newlines).joined(separator: " ")
-        return singleLine.isEmpty ? "(empty)" : String(singleLine.prefix(100))
+        if singleLine.isEmpty {
+            switch entry.contentType {
+            case .image: return "Image"
+            case .screenshot: return "Screenshot"
+            default: return "(empty)"
+            }
+        }
+        return String(singleLine.prefix(100))
+    }
+}
+
+// MARK: - Image Thumbnail
+
+private let thumbnailCache = NSCache<NSString, NSImage>()
+
+private struct ImageThumbnail: View {
+    let path: String
+    let size: CGFloat
+    @State private var image: NSImage?
+    @State private var loadedPath: String = ""
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(width: size, height: size)
+            }
+        }
+        .onAppear {
+            loadImageIfNeeded()
+        }
+        .onChange(of: path) { _, newPath in
+            loadImage(from: newPath)
+        }
+    }
+
+    private func loadImageIfNeeded() {
+        guard loadedPath != path else { return }
+        loadImage(from: path)
+    }
+
+    private func loadImage(from imagePath: String) {
+        loadedPath = imagePath
+        let cacheKey = NSString(string: imagePath)
+
+        if let cached = thumbnailCache.object(forKey: cacheKey) {
+            image = cached
+            return
+        }
+
+        image = nil
+        let pixelSize = size * 2 // retina
+        Task.detached(priority: .userInitiated) {
+            let thumbnail = Self.generateThumbnail(from: imagePath, maxPixelSize: pixelSize)
+            if let thumbnail {
+                thumbnailCache.setObject(thumbnail, forKey: cacheKey)
+            }
+            await MainActor.run {
+                if loadedPath == imagePath {
+                    image = thumbnail
+                }
+            }
+        }
+    }
+
+    private static func generateThumbnail(from path: String, maxPixelSize: CGFloat) -> NSImage? {
+        let url = URL(fileURLWithPath: path) as CFURL
+        guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 }
 
@@ -686,10 +772,15 @@ private struct QuickSearchMicroRow: View {
     
     var body: some View {
         VStack(spacing: 4) {
-            // Content type icon
-            Image(systemName: entry.contentType.systemImageName)
-                .font(.title3)
-                .foregroundStyle(entry.contentType.tint)
+            // Content type icon or image thumbnail
+            if (entry.contentType == .image || entry.contentType == .screenshot),
+               let imagePath = entry.imagePath {
+                ImageThumbnail(path: imagePath, size: 32)
+            } else {
+                Image(systemName: entry.contentType.systemImageName)
+                    .font(.title3)
+                    .foregroundStyle(entry.contentType.tint)
+            }
             
             // App name (abbreviated)
             if let app = entry.sourceApp?.appDisplayName {
@@ -722,6 +813,8 @@ private struct QuickSearchPreviewPanel: View {
     let entry: ClipboardEntry
     
     var body: some View {
+        let isImageEntry = (entry.contentType == .image || entry.contentType == .screenshot) && entry.imagePath != nil
+
         VStack(alignment: .leading, spacing: 0) {
             // Header with metadata
             HStack(spacing: 8) {
@@ -749,8 +842,8 @@ private struct QuickSearchPreviewPanel: View {
                 
                 Spacer()
                 
-                // Character count badge
-                Text("\(entry.content.count.formatted()) chars")
+                // Character count badge or "Image" badge
+                Text(isImageEntry ? "Image" : "\(entry.content.count.formatted()) chars")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
@@ -765,11 +858,16 @@ private struct QuickSearchPreviewPanel: View {
             
             // Scrollable content
             ScrollView {
-                Text(entry.content)
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
+                if let imagePath = entry.imagePath, isImageEntry {
+                    ImagePreview(path: imagePath)
+                        .padding(16)
+                } else {
+                    Text(entry.content)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                }
             }
             
             Divider()
