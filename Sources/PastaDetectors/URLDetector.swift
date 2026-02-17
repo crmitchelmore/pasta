@@ -20,6 +20,9 @@ public struct URLDetector {
 
     public init() {}
 
+    private static let linkDetector: NSDataDetector? =
+        try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
     public func detect(in text: String) -> [Detection] {
         let decodedText = URLDetector.urlDecoded(text)
 
@@ -44,7 +47,7 @@ public struct URLDetector {
     }
 
     private static func detectURLs(in text: String) -> [Detection] {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+        guard let detector = linkDetector else {
             return []
         }
 
