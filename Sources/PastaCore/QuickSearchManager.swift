@@ -199,7 +199,7 @@ public final class QuickSearchManager: ObservableObject {
 
         searchTask?.cancel()
         searchTask = Task {
-            let result = await Task.detached(priority: .userInitiated) { () -> [ClipboardEntry] in
+            let searchResult = await Task.detached(priority: .userInitiated) { () -> [ClipboardEntry] in
                 if let dbSnapshot {
                     do {
                         let startTime = CFAbsoluteTimeGetCurrent()
@@ -213,20 +213,21 @@ public final class QuickSearchManager: ObservableObject {
                 }
 
                 return Self.fallbackMatches(query: querySnapshot, entries: entriesSnapshot, filter: filterSnapshot)
-            }.value
+            }.result
 
             guard !Task.isCancelled else { return }
             guard query.trimmingCharacters(in: .whitespacesAndNewlines) == querySnapshot else { return }
             guard selectedFilter == filterSnapshot else { return }
-            results = result
+            if case .success(let result) = searchResult {
+                results = result
+            }
         }
     }
     
     private nonisolated static func fallbackMatches(query: String, entries: [ClipboardEntry], filter: ContentType?) -> [ClipboardEntry] {
         let lower = query.lowercased()
-        var filtered = entries.filter { $0.content.lowercased().contains(lower) }
-        if let filter {
-            filtered = filtered.filter { $0.contentType == filter }
+        let filtered = entries.lazy.filter {
+            $0.content.lowercased().contains(lower) && (filter == nil || $0.contentType == filter)
         }
         return Array(filtered.prefix(20))
     }
