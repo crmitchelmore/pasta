@@ -29,6 +29,12 @@ final class BackgroundService: ObservableObject {
     
     private var cancellables: Set<AnyCancellable> = []
     private var pruneTimer: Timer?
+
+    private enum RefreshTuning {
+        static let fallbackDisplayLimit = 10_000
+        static let minHeadFetchLimit = 100
+        static let insertedCountMultiplier = 4
+    }
     
     private enum Defaults {
         static let maxEntries = "pasta.maxEntries"
@@ -132,8 +138,7 @@ final class BackgroundService: ObservableObject {
     
     func refresh() {
         let db = self.database
-        let displayLimit = UserDefaults.standard.integer(forKey: Defaults.maxEntries)
-        let limit = displayLimit > 0 ? displayLimit : 10_000
+        let limit = displayLimit
         Task {
             let latest = await Task.detached(priority: .userInitiated) {
                 (try? db.fetchRecent(limit: limit)) ?? []
@@ -143,13 +148,21 @@ final class BackgroundService: ObservableObject {
         }
     }
 
+    private var displayLimit: Int {
+        let configuredLimit = UserDefaults.standard.integer(forKey: Defaults.maxEntries)
+        return configuredLimit > 0 ? configuredLimit : RefreshTuning.fallbackDisplayLimit
+    }
+
     private func refreshAfterInsert(insertedCount: Int) async {
         guard insertedCount > 0 else { return }
 
-        let displayLimitSetting = UserDefaults.standard.integer(forKey: Defaults.maxEntries)
-        let displayLimit = displayLimitSetting > 0 ? displayLimitSetting : 10_000
-        let headLimit = min(displayLimit, max(100, insertedCount * 4))
+        let displayLimit = self.displayLimit
+        let headLimit = min(
+            displayLimit,
+            max(RefreshTuning.minHeadFetchLimit, insertedCount * RefreshTuning.insertedCountMultiplier)
+        )
         let db = self.database
+        let currentEntries = entries
 
         let latestHead = await Task.detached(priority: .userInitiated) {
             (try? db.fetchRecent(limit: headLimit)) ?? []
@@ -160,22 +173,26 @@ final class BackgroundService: ObservableObject {
             return
         }
 
-        var seen = Set<UUID>()
-        var merged: [ClipboardEntry] = []
-        merged.reserveCapacity(min(displayLimit, latestHead.count + entries.count))
+        let merged = await Task.detached(priority: .userInitiated) {
+            var seen = Set<UUID>()
+            var merged: [ClipboardEntry] = []
+            merged.reserveCapacity(min(displayLimit, latestHead.count + currentEntries.count))
 
-        for entry in latestHead {
-            guard seen.insert(entry.id).inserted else { continue }
-            merged.append(entry)
-        }
-
-        for entry in entries {
-            guard seen.insert(entry.id).inserted else { continue }
-            merged.append(entry)
-            if merged.count >= displayLimit {
-                break
+            for entry in latestHead {
+                guard seen.insert(entry.id).inserted else { continue }
+                merged.append(entry)
             }
-        }
+
+            for entry in currentEntries {
+                guard seen.insert(entry.id).inserted else { continue }
+                merged.append(entry)
+                if merged.count >= displayLimit {
+                    break
+                }
+            }
+
+            return merged
+        }.value
 
         entries = merged
         PastaLogger.ui.debug("Incrementally refreshed entries: \(entries.count) items")
