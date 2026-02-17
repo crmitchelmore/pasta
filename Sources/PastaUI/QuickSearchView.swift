@@ -757,9 +757,9 @@ private struct ImageThumbnail: View {
         image = nil
         let pixelSize = size * 2 // retina
         Task.detached(priority: .userInitiated) {
-            let thumbnail = Self.generateThumbnail(from: imagePath, maxPixelSize: pixelSize)
+            let thumbnail = ImageDownsampler.load(path: imagePath, maxPixelSize: pixelSize)
             if let thumbnail {
-                let cost = Int(pixelSize * pixelSize * 4)
+                let cost = Int(thumbnail.size.width * thumbnail.size.height * 4)
                 thumbnailCache.setObject(thumbnail, forKey: cacheKey, cost: cost)
             }
             await MainActor.run {
@@ -768,18 +768,6 @@ private struct ImageThumbnail: View {
                 }
             }
         }
-    }
-
-    private static func generateThumbnail(from path: String, maxPixelSize: CGFloat) -> NSImage? {
-        let url = URL(fileURLWithPath: path) as CFURL
-        guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-        ]
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 }
 
