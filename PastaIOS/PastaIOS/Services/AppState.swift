@@ -19,6 +19,9 @@ final class AppState: ObservableObject {
     private var database: DatabaseManager?
     private let logger = Logger(subsystem: "com.pasta.ios", category: "AppState")
     private var lastObservedPasteboardChangeCount: Int?
+    private var isSyncInProgress = false
+    private var isClipboardCaptureInProgress = false
+    private var isActivationPipelineRunning = false
 
     init() {
         self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
@@ -54,8 +57,24 @@ final class AppState: ObservableObject {
         isLoading = false
     }
 
+    func handleAppDidBecomeActive(syncManager: SyncManager) async {
+        guard !isActivationPipelineRunning else { return }
+        isActivationPipelineRunning = true
+        defer { isActivationPipelineRunning = false }
+
+        if iCloudAvailable {
+            await performSync(syncManager: syncManager)
+        }
+
+        await captureCurrentClipboardIfNeeded(syncManager: syncManager)
+    }
+
     func captureCurrentClipboardIfNeeded(syncManager: SyncManager) async {
         #if canImport(UIKit)
+        guard !isClipboardCaptureInProgress else { return }
+        isClipboardCaptureInProgress = true
+        defer { isClipboardCaptureInProgress = false }
+
         guard let database,
               UIPasteboard.general.hasStrings,
               let clipboardString = UIPasteboard.general.string,
@@ -69,28 +88,34 @@ final class AppState: ObservableObject {
 
         let entry = ClipboardEntry(
             content: clipboardString,
-            contentType: inferredContentType(for: clipboardString),
+            contentType: .text,
             sourceApp: "iOS Pasteboard"
         )
 
         do {
             let alreadyExists = try database.existsWithHash(entry.contentHash)
-            lastObservedPasteboardChangeCount = changeCount
-            guard !alreadyExists else { return }
+            if alreadyExists {
+                lastObservedPasteboardChangeCount = changeCount
+                return
+            }
 
             try database.insert(entry, deduplicate: false)
+            lastObservedPasteboardChangeCount = changeCount
+
+            var persistedEntry = entry
 
             if iCloudAvailable {
                 do {
-                    try await syncManager.setupZone()
                     try await syncManager.pushEntry(entry)
                     try database.markSynced(ids: [entry.id])
+                    persistedEntry.isSynced = true
                 } catch {
                     logger.warning("Clipboard capture push failed: \(error.localizedDescription)")
                 }
             }
 
-            try loadEntries()
+            entries.removeAll { $0.id == persistedEntry.id }
+            entries.insert(persistedEntry, at: 0)
             logger.info("Captured current clipboard on app activation")
         } catch {
             logger.error("Failed to capture current clipboard: \(error.localizedDescription)")
@@ -101,6 +126,9 @@ final class AppState: ObservableObject {
 
     func performSync(syncManager: SyncManager) async {
         guard let database else { return }
+        guard !isSyncInProgress else { return }
+        isSyncInProgress = true
+        defer { isSyncInProgress = false }
         do {
             let changes = try await syncManager.fetchChanges()
 
@@ -142,17 +170,6 @@ final class AppState: ObservableObject {
     func completeOnboarding() {
         hasCompletedOnboarding = true
         UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
-    }
-
-    private func inferredContentType(for content: String) -> ContentType {
-        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let url = URL(string: trimmed),
-           url.host != nil,
-           let scheme = url.scheme?.lowercased(),
-           ["http", "https", "ftp"].contains(scheme) {
-            return .url
-        }
-        return .text
     }
 
     static func databaseURL() -> URL {
