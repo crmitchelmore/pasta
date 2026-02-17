@@ -181,7 +181,7 @@ jobs:
           fi
           echo "✓ Sparkle.framework exists"
           
-          # Note: HotKey library (used for global shortcuts) has no resource bundle
+          # Note: KeyboardShortcuts bundles localised strings via SPM resources
           # Only check that Resources directory exists
           if [ ! -d "$APP_DIR/Contents/Resources" ]; then
             echo "ERROR: Resources directory not found!"
