@@ -56,10 +56,11 @@ final class AppState: ObservableObject {
 
     func captureCurrentClipboardIfNeeded(syncManager: SyncManager) async {
         #if canImport(UIKit)
-        guard let database else { return }
-        guard UIPasteboard.general.hasStrings else { return }
-        guard let clipboardString = UIPasteboard.general.string else { return }
-        guard !clipboardString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard let database,
+              UIPasteboard.general.hasStrings,
+              let clipboardString = UIPasteboard.general.string,
+              !clipboardString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
 
         let changeCount = UIPasteboard.general.changeCount
         if lastObservedPasteboardChangeCount == changeCount {
@@ -77,7 +78,7 @@ final class AppState: ObservableObject {
             lastObservedPasteboardChangeCount = changeCount
             guard !alreadyExists else { return }
 
-            try database.insert(entry, deduplicate: true)
+            try database.insert(entry, deduplicate: false)
 
             if iCloudAvailable {
                 do {
@@ -146,6 +147,7 @@ final class AppState: ObservableObject {
     private func inferredContentType(for content: String) -> ContentType {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         if let url = URL(string: trimmed),
+           url.host != nil,
            let scheme = url.scheme?.lowercased(),
            ["http", "https", "ftp"].contains(scheme) {
             return .url
