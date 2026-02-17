@@ -1129,7 +1129,7 @@ struct PanelContentView: View {
             }
         }
 
-        return Array(out.prefix(200))
+        return Array(out.prefix(Preload.limit))
     }
     
     /// Run entry filtering off the main thread to avoid UI hangs on large datasets
@@ -1137,7 +1137,7 @@ struct PanelContentView: View {
         filterTask?.cancel()
         let entries = backgroundService.entries
         let typeFilter = contentTypeFilter
-        let srcFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let srcFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines)
         let domainFilter = urlDomainFilter
         
         filterTask = Task {
@@ -1163,30 +1163,38 @@ struct PanelContentView: View {
 
         searchTask?.cancel()
         let typeFilter = contentTypeFilter
-        let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines)
         let domainFilter = urlDomainFilter
+        let searchContentType: ContentType?
+        if let typeFilter, MetadataParser.extractableTypes.contains(typeFilter) {
+            searchContentType = nil
+        } else {
+            searchContentType = typeFilter
+        }
 
-        searchTask = Task {
-            let result = await Task.detached(priority: .userInitiated) { () -> [ClipboardEntry] in
-                do {
-                    let matches = try service.search(
-                        query: query,
-                        contentType: typeFilter,
-                        limit: 200
-                    )
-                    return Self.filterEntries(
-                        matches.map { $0.entry },
-                        contentTypeFilter: typeFilter,
-                        sourceFilter: sourceFilter,
-                        urlDomainFilter: domainFilter
-                    )
-                } catch {
-                    return []
-                }
-            }.value
+        searchTask = Task(priority: .userInitiated) {
+            let result: [ClipboardEntry]
+            do {
+                let matches = try service.search(
+                    query: query,
+                    contentType: searchContentType,
+                    limit: Preload.limit
+                )
+                guard !Task.isCancelled else { return }
+                result = Self.filterEntries(
+                    matches.map { $0.entry },
+                    contentTypeFilter: typeFilter,
+                    sourceFilter: sourceFilter,
+                    urlDomainFilter: domainFilter
+                )
+            } catch {
+                result = []
+            }
 
             guard !Task.isCancelled else { return }
-            displayedEntries = result
+            await MainActor.run {
+                displayedEntries = result
+            }
         }
     }
 
