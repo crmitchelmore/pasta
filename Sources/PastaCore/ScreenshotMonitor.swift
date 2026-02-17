@@ -70,7 +70,7 @@ public final class ScreenshotMonitor {
     private var isRunning = false
     
     // Fallback polling
-    private var pollTimer: Timer?
+    private var pollTimer: DispatchSourceTimer?
     private let pollInterval: TimeInterval
     private let processingQueue = DispatchQueue(label: "com.pasta.screenshot.processing", qos: .utility)
 
@@ -103,6 +103,12 @@ public final class ScreenshotMonitor {
     }
 
     public func start() {
+        processingQueue.sync {
+            startLocked()
+        }
+    }
+
+    private func startLocked() {
         guard !isRunning else { return }
         isRunning = true
         captureStartTime = now().addingTimeInterval(-1)
@@ -128,6 +134,12 @@ public final class ScreenshotMonitor {
     }
 
     public func stop() {
+        processingQueue.sync {
+            stopLocked()
+        }
+    }
+
+    private func stopLocked() {
         isRunning = false
         stopFSEventsStream()
         stopPolling()
@@ -202,6 +214,7 @@ public final class ScreenshotMonitor {
     }
     
     private func handleFSEvent(path: String) {
+        guard isRunning else { return }
         let url = URL(fileURLWithPath: path)
         processFile(at: url)
     }
@@ -209,20 +222,23 @@ public final class ScreenshotMonitor {
     // MARK: - Polling fallback
     
     private func startPolling() {
-        pollTimer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.processingQueue.async { [weak self] in
-                self?.pollOnce()
-            }
+        let timer = DispatchSource.makeTimerSource(queue: processingQueue)
+        timer.schedule(deadline: .now() + pollInterval, repeating: pollInterval)
+        timer.setEventHandler { [weak self] in
+            self?.pollOnce()
         }
+        pollTimer = timer
+        timer.resume()
     }
     
     private func stopPolling() {
-        pollTimer?.invalidate()
+        pollTimer?.setEventHandler {}
+        pollTimer?.cancel()
         pollTimer = nil
     }
 
     private func pollOnce() {
+        guard isRunning else { return }
         guard let directoryURL = resolveDirectoryURL() else { return }
 
         if currentDirectoryURL?.path != directoryURL.path {
@@ -266,6 +282,7 @@ public final class ScreenshotMonitor {
     }
     
     private func processFile(at url: URL) {
+        guard isRunning else { return }
         let path = url.path
         if seenPaths.contains(path) { return }
         
@@ -318,11 +335,10 @@ public final class ScreenshotMonitor {
             timestamp: timestamp
         )
 
+        guard isRunning else { return }
         PastaLogger.clipboard.info("Captured screenshot: \(url.lastPathComponent)")
         seenPaths.insert(path)
-        DispatchQueue.main.async { [weak self] in
-            self?.subject.send(entry)
-        }
+        subject.send(entry)
     }
 
     private func resolveDirectoryURL() -> URL? {

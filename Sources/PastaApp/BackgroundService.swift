@@ -201,6 +201,7 @@ final class BackgroundService: ObservableObject {
             .store(in: &cancellables)
         
         clipboardMonitor.publisher
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] entry in
                 guard let self else { return }
                 
@@ -281,6 +282,7 @@ final class BackgroundService: ObservableObject {
             .store(in: &cancellables)
 
         screenshotMonitor.publisher
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] entry in
                 guard let self else { return }
                 
