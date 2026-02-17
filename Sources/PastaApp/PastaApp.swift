@@ -1,5 +1,5 @@
 import AppKit
-import HotKey
+import KeyboardShortcuts
 import Sentry
 import SwiftUI
 import os.log
@@ -59,7 +59,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var defaultsObserver: NSObjectProtocol?
     private var settingsWindow: NSWindow?
-    private var hotKey: HotKey?
 
     private enum Defaults {
         static let appMode = "pasta.appMode"
@@ -117,9 +116,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Show the main window on launch
         panelController?.show()
         
-        // Setup hotkey to toggle quick search using HotKey (Cmd+Ctrl+V)
-        hotKey = HotKey(key: .v, modifiers: [.control, .command])
-        hotKey?.keyUpHandler = { [weak self] in
+        // Setup hotkey to toggle quick search (user-customisable, default ⌃⌘V)
+        KeyboardShortcuts.onKeyUp(for: .openPasta) { [weak self] in
             PastaLogger.app.debug("Hotkey triggered, toggling quick search")
             Task { @MainActor in
                 self?.toggleQuickSearch()
