@@ -705,7 +705,12 @@ private struct QuickSearchRow: View {
 
 // MARK: - Image Thumbnail
 
-private let thumbnailCache = NSCache<NSString, NSImage>()
+private let thumbnailCache: NSCache<NSString, NSImage> = {
+    let cache = NSCache<NSString, NSImage>()
+    cache.countLimit = 300
+    cache.totalCostLimit = 64 * 1024 * 1024
+    return cache
+}()
 
 private struct ImageThumbnail: View {
     let path: String
@@ -752,9 +757,10 @@ private struct ImageThumbnail: View {
         image = nil
         let pixelSize = size * 2 // retina
         Task.detached(priority: .userInitiated) {
-            let thumbnail = Self.generateThumbnail(from: imagePath, maxPixelSize: pixelSize)
+            let thumbnail = ImageDownsampler.load(path: imagePath, maxPixelSize: pixelSize)
             if let thumbnail {
-                thumbnailCache.setObject(thumbnail, forKey: cacheKey)
+                let cost = Int(thumbnail.size.width * thumbnail.size.height * 4)
+                thumbnailCache.setObject(thumbnail, forKey: cacheKey, cost: cost)
             }
             await MainActor.run {
                 if loadedPath == imagePath {
@@ -762,18 +768,6 @@ private struct ImageThumbnail: View {
                 }
             }
         }
-    }
-
-    private static func generateThumbnail(from path: String, maxPixelSize: CGFloat) -> NSImage? {
-        let url = URL(fileURLWithPath: path) as CFURL
-        guard let source = CGImageSourceCreateWithURL(url, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-        ]
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 }
 

@@ -64,9 +64,22 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
     public var isExtracted: Bool { parentEntryId != nil }
 
     public var contentHash: String {
-        if (contentType == .image || contentType == .screenshot), let data = rawData {
-            return ClipboardEntry.sha256Hex(data)
+        if contentType == .image || contentType == .screenshot {
+            if let imagePath {
+                let basename = URL(fileURLWithPath: imagePath)
+                    .deletingPathExtension()
+                    .lastPathComponent
+                    .lowercased()
+                if ClipboardEntry.isSHA256Hex(basename) {
+                    return basename
+                }
+            }
+
+            if let data = rawData {
+                return ClipboardEntry.sha256Hex(data)
+            }
         }
+
         return ClipboardEntry.sha256Hex(content)
     }
 
@@ -118,5 +131,9 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
     static func sha256Hex(_ data: Data) -> String {
         let digest = SHA256.hash(data: data)
         return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func isSHA256Hex(_ value: String) -> Bool {
+        value.count == 64 && value.allSatisfy { $0.isHexDigit }
     }
 }

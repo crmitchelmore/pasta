@@ -514,7 +514,7 @@ struct ImagePreview: View {
         loadedPath = imagePath
         image = nil
         DispatchQueue.global(qos: .userInitiated).async {
-            let loaded = NSImage(contentsOfFile: imagePath)
+            let loaded = DownsampledImageLoader.load(path: imagePath, maxPixelSize: 1600)
             DispatchQueue.main.async {
                 // Only update if path hasn't changed
                 if loadedPath == imagePath {
@@ -650,13 +650,19 @@ private struct FilePreview: View {
             if isImage && preview.exists && image == nil {
                 let path = preview.path
                 DispatchQueue.global(qos: .userInitiated).async {
-                    let loaded = NSImage(contentsOfFile: path)
+                    let loaded = DownsampledImageLoader.load(path: path, maxPixelSize: 1200)
                     DispatchQueue.main.async {
                         self.image = loaded
                     }
                 }
             }
         }
+    }
+}
+
+private enum DownsampledImageLoader {
+    static func load(path: String, maxPixelSize: CGFloat) -> NSImage? {
+        ImageDownsampler.load(path: path, maxPixelSize: maxPixelSize) ?? NSImage(contentsOfFile: path)
     }
 }
 
