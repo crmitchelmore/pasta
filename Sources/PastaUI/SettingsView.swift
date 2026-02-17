@@ -1,4 +1,5 @@
 import AppKit
+import KeyboardShortcuts
 import PastaCore
 import PastaSync
 import SwiftUI
@@ -153,9 +154,7 @@ private struct GeneralSettingsTab: View {
                 HStack {
                     Text("Open Pasta")
                     Spacer()
-                    Text("⌃⌘V")
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundColor(.secondary)
+                    KeyboardShortcuts.Recorder("", name: .openPasta)
                 }
             } header: {
                 Label("Keyboard Shortcut", systemImage: "keyboard")
@@ -883,7 +882,7 @@ private struct AboutSettingsTab: View {
                     
                     DependencyRow(name: "Sparkle", version: "2.6.0+", url: "https://sparkle-project.org", description: "Auto-update framework")
                     DependencyRow(name: "GRDB", version: "6.24+", url: "https://github.com/groue/GRDB.swift", description: "SQLite toolkit")
-                    DependencyRow(name: "HotKey", version: "0.2+", url: "https://github.com/soffes/HotKey", description: "Global hotkeys")
+                    DependencyRow(name: "KeyboardShortcuts", version: "2.2+", url: "https://github.com/sindresorhus/KeyboardShortcuts", description: "Customisable global hotkeys")
                 }
             } header: {
                 Label("Dependencies", systemImage: "shippingbox")
