@@ -500,7 +500,75 @@ jobs:
       - name: Generate release notes
         id: release_notes
         run: |
+          set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
+          CURRENT_TAG="${GITHUB_REF_NAME}"
+          REPO="${{ github.repository }}"
+          PREVIOUS_TAG=$(git tag -l 'v*' --sort=-v:refname | grep -Fxv "$CURRENT_TAG" | head -1 || true)
+          
+          if [ -n "$PREVIOUS_TAG" ]; then
+            RANGE="${PREVIOUS_TAG}..${CURRENT_TAG}"
+            COMPARE_URL="https://github.com/${REPO}/compare/${PREVIOUS_TAG}...${CURRENT_TAG}"
+          else
+            RANGE="$CURRENT_TAG"
+            COMPARE_URL=""
+          fi
+          
+          COMMIT_LINES=$(git log "$RANGE" --pretty=format:'%H|%h|%s' --no-merges || true)
+          
+          cat > detailed_changes.md <<EOF
+          ### Changelog
+          EOF
+          
+          if [ -n "$PREVIOUS_TAG" ]; then
+            echo "- Compare: [${PREVIOUS_TAG}...${CURRENT_TAG}](${COMPARE_URL})" >> detailed_changes.md
+          fi
+          echo "" >> detailed_changes.md
+          
+          append_section() {
+            local title="$1"
+            local regex="$2"
+            local section_count=0
+            
+            while IFS='|' read -r full_sha short_sha subject; do
+              [ -n "${full_sha:-}" ] || continue
+              if [[ "$subject" =~ $regex ]]; then
+                if [ "$section_count" -eq 0 ]; then
+                  echo "#### ${title}" >> detailed_changes.md
+                fi
+                section_count=$((section_count + 1))
+                
+                echo "- ${subject} ([\`${short_sha}\`](https://github.com/${REPO}/commit/${full_sha}))" >> detailed_changes.md
+                
+                body_lines=$(git show -s --format=%b "$full_sha" | sed '/^[[:space:]]*$/d' | head -n 2 || true)
+                if [ -n "$body_lines" ]; then
+                  while IFS= read -r body_line; do
+                    [ -n "$body_line" ] && echo "  - ${body_line}" >> detailed_changes.md
+                  done <<< "$body_lines"
+                fi
+                
+                file_list=$(git show --name-only --pretty="" "$full_sha" | sed '/^[[:space:]]*$/d' | head -n 6 || true)
+                if [ -n "$file_list" ]; then
+                  formatted_files=$(echo "$file_list" | awk '{printf "%s`%s`", (NR==1?"":", "), $0}')
+                  echo "  - Files: ${formatted_files}" >> detailed_changes.md
+                fi
+              fi
+            done <<< "$COMMIT_LINES"
+            
+            if [ "$section_count" -gt 0 ]; then
+              echo "" >> detailed_changes.md
+            fi
+          }
+          
+          append_section "New features" '^feat(\(.+\))?:'
+          append_section "Bug fixes" '^fix(\(.+\))?:'
+          append_section "Performance improvements" '^perf(\(.+\))?:'
+          append_section "Other changes" '^(refactor|build|ci|docs|test|chore|style)(\(.+\))?:'
+          
+          if ! grep -q "^#### " detailed_changes.md; then
+            echo "- No detailed commit breakdown was detected for this tag range." >> detailed_changes.md
+            echo "" >> detailed_changes.md
+          fi
           
           cat > release_notes.md <<EOF
           # Pasta ${VERSION}
@@ -548,10 +616,10 @@ jobs:
           spctl --assess --type execute --verbose /Applications/Pasta.app
           \`\`\`
           
-          ### Changelog
+          EOF
           
-          See commit history for detailed changes.
-          
+          cat detailed_changes.md >> release_notes.md
+          cat >> release_notes.md <<EOF
           ---
           
           **SHA-256 Checksum:**
