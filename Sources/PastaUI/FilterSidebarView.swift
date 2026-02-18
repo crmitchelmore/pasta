@@ -1,5 +1,4 @@
 import PastaCore
-import PastaDetectors
 import SwiftUI
 
 public struct FilterSidebarView: View {
@@ -17,6 +16,9 @@ public struct FilterSidebarView: View {
     @State private var showSourceApps: Bool = true
     @State private var showAllTypes: Bool = false
     @State private var showAllApps: Bool = false
+    @State private var fallbackTypeCounts: [ContentType: Int] = [:]
+    @State private var fallbackSourceAppCounts: [String: Int] = [:]
+    @State private var fallbackCountsTask: Task<Void, Never>? = nil
 
     public init(
         entries: [ClipboardEntry],
@@ -111,7 +113,7 @@ public struct FilterSidebarView: View {
                 }
             }
 
-            let hasAnyURLs = domainCountsOverride.map { !$0.isEmpty } ?? entries.contains { $0.contentType == .url }
+            let hasAnyURLs = domainCountsOverride.map { !$0.isEmpty } ?? (effectiveTypeCounts[.url, default: 0] > 0)
             if hasAnyURLs {
                 Section {
                     DisclosureGroup("Domains", isExpanded: $showDomains) {
@@ -137,7 +139,17 @@ public struct FilterSidebarView: View {
             }
         }
         .listStyle(.sidebar)
-        .onAppear { syncSelectionFromBindings() }
+        .onAppear {
+            syncSelectionFromBindings()
+            scheduleFallbackCountsRebuild()
+        }
+        .onDisappear {
+            fallbackCountsTask?.cancel()
+            fallbackCountsTask = nil
+        }
+        .onChange(of: entriesChangeToken) { _, _ in
+            scheduleFallbackCountsRebuild()
+        }
         .onChange(of: selection) { _, newValue in
             applySelection(newValue)
         }
@@ -149,47 +161,24 @@ public struct FilterSidebarView: View {
         }
     }
 
-    private var typeCounts: [ContentType: Int] {
-        var counts: [ContentType: Int] = [:]
-        for entry in entries {
-            counts[entry.contentType, default: 0] += 1
+    private var entriesChangeToken: Int {
+        var hasher = Hasher()
+        hasher.combine(entries.count)
+        if let first = entries.first?.id {
+            hasher.combine(first)
         }
-        return counts
+        if let last = entries.last?.id {
+            hasher.combine(last)
+        }
+        return hasher.finalize()
     }
     
-    /// Returns type counts including entries that contain a type in metadata (not just primary type)
+    /// Returns precomputed type counts (off-main) to keep sidebar interactions responsive.
     private var effectiveTypeCounts: [ContentType: Int] {
         if let effectiveTypeCountsOverride {
             return effectiveTypeCountsOverride
         }
-
-        var counts = typeCounts
-        
-        // Count file paths that are images and add to image count
-        let imageFilePathCount = entries.filter { entry in
-            guard entry.contentType == .filePath else { return false }
-            return filePathIsImage(entry)
-        }.count
-        
-        if imageFilePathCount > 0 {
-            counts[.image, default: 0] += imageFilePathCount
-        }
-        
-        // For extractable types, also count entries that CONTAIN items of that type in metadata
-        // but don't have that as their primary type
-        for type in MetadataParser.extractableTypes {
-            let containsCount = entries.filter { entry in
-                // Don't double-count entries that already have this as primary type
-                guard entry.contentType != type else { return false }
-                return MetadataParser.containsType(type, in: entry.metadata)
-            }.count
-            
-            if containsCount > 0 {
-                counts[type, default: 0] += containsCount
-            }
-        }
-        
-        return counts
+        return fallbackTypeCounts
     }
     
     private var sortedContentTypes: [(type: ContentType, count: Int)] {
@@ -205,31 +194,13 @@ public struct FilterSidebarView: View {
         sortedContentTypes.contains { $0.count == 0 }
     }
     
-    private func filePathIsImage(_ entry: ClipboardEntry) -> Bool {
-        guard let meta = entry.metadata,
-              let data = meta.data(using: .utf8),
-              let dict = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-              let paths = dict["filePaths"] as? [[String: Any]],
-              let first = paths.first,
-              let fileType = first["fileType"] as? String
-        else { return false }
-        
-        return fileType == "image"
-    }
-    
     // MARK: - Source App Counts
-    
+
     private var sourceAppCounts: [String: Int] {
         if let sourceAppCountsOverride {
             return sourceAppCountsOverride
         }
-
-        var counts: [String: Int] = [:]
-        for entry in entries {
-            let app = entry.sourceApp ?? "Unknown"
-            counts[app, default: 0] += 1
-        }
-        return counts
+        return fallbackSourceAppCounts
     }
     
     private var sortedSourceApps: [(app: String, displayName: String, count: Int)] {
@@ -264,18 +235,8 @@ public struct FilterSidebarView: View {
         if let domainCountsOverride {
             return domainCountsOverride
         }
-
-        let detector = URLDetector()
-        var counts: [String: Int] = [:]
-
-        for entry in entries where entry.contentType == .url {
-            let domains = Set(detector.detect(in: entry.content).map(\.domain))
-            for d in domains {
-                counts[d, default: 0] += 1
-            }
-        }
-
-        return counts
+        // Domain extraction is intentionally done off-main by callers and supplied via overrides.
+        return [:]
     }
 
     private var sortedDomains: [(domain: String, count: Int)] {
@@ -350,5 +311,31 @@ public struct FilterSidebarView: View {
 
     private func typeTitle(_ type: ContentType) -> String {
         type.displayTitle
+    }
+
+    private func scheduleFallbackCountsRebuild() {
+        fallbackCountsTask?.cancel()
+        let snapshot = entries
+
+        fallbackCountsTask = Task {
+            let result = await Task.detached(priority: .utility) { () -> ([ContentType: Int], [String: Int]) in
+                var typeCounts: [ContentType: Int] = [:]
+                var appCounts: [String: Int] = [:]
+
+                for entry in snapshot {
+                    typeCounts[entry.contentType, default: 0] += 1
+                    let app = entry.sourceApp ?? "Unknown"
+                    appCounts[app, default: 0] += 1
+                }
+
+                return (typeCounts, appCounts)
+            }.value
+
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                fallbackTypeCounts = result.0
+                fallbackSourceAppCounts = result.1
+            }
+        }
     }
 }

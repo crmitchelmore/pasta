@@ -2,6 +2,7 @@ import AppKit
 import PastaCore
 import PastaSync
 import SwiftUI
+import UniformTypeIdentifiers
 
 public struct SettingsView: View {
     private enum Defaults {
@@ -614,6 +615,8 @@ private struct ImportSettingsTab: View {
     @State private var importResults: [ClipboardApp: ImportResult] = [:]
     @State private var isImporting: ClipboardApp? = nil
     @State private var importProgress: ImportProgress? = nil
+    @State private var isExporting: Bool = false
+    @State private var exportSummary: String? = nil
     @State private var showError: Bool = false
     @State private var errorMessage: String = ""
     
@@ -623,6 +626,37 @@ private struct ImportSettingsTab: View {
                 Text("Import clipboard history from other apps. Duplicate entries will be skipped automatically.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+            }
+
+            Section {
+                HStack {
+                    Text("Export current history")
+                    Spacer()
+
+                    if isExporting {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Button("Export My Data…") {
+                            exportData()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(isImporting != nil)
+                    }
+                }
+
+                if let exportSummary {
+                    Text(exportSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("Creates a JSON backup of all clipboard entries, including metadata.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Backup", systemImage: "square.and.arrow.up")
             }
             
             Section {
@@ -676,6 +710,48 @@ private struct ImportSettingsTab: View {
                     showError = true
                     isImporting = nil
                     importProgress = nil
+                }
+            }
+        }
+    }
+
+    private static let exportDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        return formatter
+    }()
+
+    private func exportData() {
+        let panel = NSSavePanel()
+        panel.title = "Export Pasta Data"
+        panel.prompt = "Export"
+        panel.canCreateDirectories = true
+        panel.allowedContentTypes = [UTType.json]
+        panel.nameFieldStringValue = "pasta-export-\(Self.exportDateFormatter.string(from: Date())).json"
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else {
+            return
+        }
+
+        isExporting = true
+        exportSummary = nil
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let database = try DatabaseManager()
+                let imageStorage = try ImageStorageManager()
+                let importService = ImportService(database: database, imageStorage: imageStorage)
+                let result = try importService.exportAllEntries(to: destinationURL)
+
+                DispatchQueue.main.async {
+                    exportSummary = "Exported \(result.exported) entries to \(result.fileURL.lastPathComponent)"
+                    isExporting = false
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    errorMessage = error.localizedDescription
+                    showError = true
+                    isExporting = false
                 }
             }
         }

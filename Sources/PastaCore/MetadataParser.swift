@@ -64,6 +64,28 @@ public struct MetadataParser {
         }
     }
 
+    private static func marker(for type: ContentType) -> String? {
+        switch type {
+        case .email: return "\"emails\""
+        case .url: return "\"urls\""
+        case .phoneNumber: return "\"phoneNumbers\""
+        case .ipAddress: return "\"ipAddresses\""
+        case .uuid: return "\"uuids\""
+        case .hash: return "\"hashes\""
+        case .apiKey: return "\"apiKeys\""
+        case .jwt: return "\"jwt\""
+        case .envVar, .envVarBlock: return "\"env\""
+        case .filePath: return "\"filePaths\""
+        case .shellCommand: return "\"shellCommands\""
+        default: return nil
+        }
+    }
+
+    private static func metadataMayContain(_ type: ContentType, in metadata: String) -> Bool {
+        guard let marker = marker(for: type) else { return false }
+        return metadata.contains(marker)
+    }
+
     private static func containedTypesBitmask(in metadata: String) -> UInt64 {
         let key = metadata as NSString
         if let cached = containsTypeCache.object(forKey: key) {
@@ -101,8 +123,10 @@ public struct MetadataParser {
     /// Check if an entry's metadata contains items of a given type
     public static func containsType(_ type: ContentType, in metadata: String?) -> Bool {
         guard let metadata else { return false }
-        let mask = containedTypesBitmask(in: metadata)
         let bit = bit(for: type)
+        guard bit != 0 else { return false }
+        guard metadataMayContain(type, in: metadata) else { return false }
+        let mask = containedTypesBitmask(in: metadata)
         return (mask & bit) != 0
     }
     
@@ -157,6 +181,35 @@ public struct MetadataParser {
         values.append(contentsOf: extractFilePaths(from: dict))
         values.append(contentsOf: extractShellCommands(from: dict))
         
+        return values
+    }
+
+    /// Extract detected values from metadata up to a maximum count.
+    public static func extractAllValues(from metadata: String?, limit: Int) -> [ExtractedValue] {
+        guard limit > 0 else { return [] }
+        guard let metadata = metadata, let dict = parseJSON(metadata) else { return [] }
+
+        var values: [ExtractedValue] = []
+        values.reserveCapacity(min(limit, 64))
+
+        func appendLimited(_ newValues: [ExtractedValue]) {
+            guard values.count < limit else { return }
+            let remaining = limit - values.count
+            values.append(contentsOf: newValues.prefix(remaining))
+        }
+
+        appendLimited(extractEmails(from: dict))
+        appendLimited(extractURLs(from: dict))
+        appendLimited(extractPhoneNumbers(from: dict))
+        appendLimited(extractIPAddresses(from: dict))
+        appendLimited(extractUUIDs(from: dict))
+        appendLimited(extractHashes(from: dict))
+        appendLimited(extractAPIKeys(from: dict, limit: max(0, limit - values.count)))
+        appendLimited(extractJWTs(from: dict))
+        appendLimited(extractEnvVars(from: dict, blockOnly: false))
+        appendLimited(extractFilePaths(from: dict))
+        appendLimited(extractShellCommands(from: dict))
+
         return values
     }
     
@@ -265,14 +318,24 @@ public struct MetadataParser {
         }
     }
     
-    private static func extractAPIKeys(from dict: [String: Any]) -> [ExtractedValue] {
+    private static func extractAPIKeys(from dict: [String: Any], limit: Int? = nil) -> [ExtractedValue] {
         guard let items = dict["apiKeys"] as? [[String: Any]] else { return [] }
-        return items.compactMap { item in
-            guard let key = item["key"] as? String else { return nil }
+
+        var values: [ExtractedValue] = []
+        values.reserveCapacity(limit.map { min($0, items.count) } ?? items.count)
+
+        for item in items {
+            guard let key = item["key"] as? String else { continue }
             let provider = item["provider"] as? String
             let display = provider.map { "\($0): \(key)" } ?? key
-            return ExtractedValue(type: .apiKey, value: key, displayValue: display)
+            values.append(ExtractedValue(type: .apiKey, value: key, displayValue: display))
+
+            if let limit, values.count >= limit {
+                break
+            }
         }
+
+        return values
     }
     
     private static func extractJWTs(from dict: [String: Any]) -> [ExtractedValue] {

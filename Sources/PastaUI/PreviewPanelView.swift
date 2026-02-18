@@ -32,9 +32,7 @@ public struct PreviewPanelView: View {
                         }
                         
                         // Show extracted items (emails, URLs, etc.) if present
-                        if let extractedItems = extractedItems(from: entry), !extractedItems.isEmpty {
-                            ExtractedItemsSection(items: extractedItems)
-                        }
+                        ExtractedItemsSection(entry: entry)
 
                         SectionBox(title: "Content") {
                             if (entry.contentType == .image || entry.contentType == .screenshot), let imagePath = entry.imagePath {
@@ -307,17 +305,6 @@ public struct PreviewPanelView: View {
         return obj as? [String: Any]
     }
     
-    // MARK: - Extracted Items
-    
-    fileprivate func extractedItems(from entry: ClipboardEntry) -> [ExtractedItem]? {
-        let extracted = entry.allExtractedValues
-        guard !extracted.isEmpty else { return nil }
-
-        return extracted.map {
-            ExtractedItem(type: $0.type, value: $0.value, displayValue: $0.displayValue)
-        }
-    }
-
     private func prettyPrintedJSON(_ json: String?) -> String? {
         guard let json else { return nil }
         guard let data = json.data(using: .utf8) else { return nil }
@@ -331,16 +318,91 @@ public struct PreviewPanelView: View {
 // MARK: - Extracted Items Section
 
 private struct ExtractedItemsSection: View {
-    let items: [PreviewPanelView.ExtractedItem]
+    private static let maxVisibleItems = 200
+
+    let entry: ClipboardEntry
+
+    @State private var items: [PreviewPanelView.ExtractedItem] = []
+    @State private var hasMore: Bool = false
+    @State private var isLoading: Bool = false
+    @State private var loadTask: Task<Void, Never>? = nil
     
     var body: some View {
-        SectionBox(title: "Detected Items") {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 8)], alignment: .leading, spacing: 8) {
-                ForEach(items) { item in
-                    ExtractedItemRow(item: item)
+        Group {
+            if isLoading || !items.isEmpty {
+                SectionBox(title: "Detected Items") {
+                    if isLoading && items.isEmpty {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 8)], alignment: .leading, spacing: 8) {
+                        ForEach(items) { item in
+                            ExtractedItemRow(item: item)
+                        }
+                    }
+
+                    if hasMore {
+                        Text("Showing the first \(Self.maxVisibleItems) detected items for performance.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
+        .onAppear {
+            loadItems()
+        }
+        .onChange(of: entry.id) { _, _ in
+            loadItems()
+        }
+        .onDisappear {
+            loadTask?.cancel()
+            loadTask = nil
+        }
+    }
+
+    private func loadItems() {
+        loadTask?.cancel()
+        items = []
+        hasMore = false
+
+        guard entry.metadata != nil else {
+            isLoading = false
+            return
+        }
+
+        isLoading = true
+        let snapshot = entry
+
+        loadTask = Task {
+            let result = await Task.detached(priority: .utility) { () -> ([ExtractedItemPayload], Bool) in
+                let extracted = MetadataParser.extractAllValues(
+                    from: snapshot.metadata,
+                    limit: Self.maxVisibleItems + 1
+                )
+                let limited = extracted.prefix(Self.maxVisibleItems).map {
+                    ExtractedItemPayload(type: $0.type, value: $0.value, displayValue: $0.displayValue)
+                }
+                return (Array(limited), extracted.count > Self.maxVisibleItems)
+            }.value
+
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                items = result.0.map {
+                    PreviewPanelView.ExtractedItem(type: $0.type, value: $0.value, displayValue: $0.displayValue)
+                }
+                hasMore = result.1
+                isLoading = false
+            }
+        }
+    }
+
+    private struct ExtractedItemPayload: Sendable {
+        let type: ContentType
+        let value: String
+        let displayValue: String
     }
 }
 

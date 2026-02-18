@@ -92,6 +92,12 @@ public struct ImportProgress: Sendable {
     }
 }
 
+/// Result of an export operation
+public struct ExportResult {
+    public let exported: Int
+    public let fileURL: URL
+}
+
 /// Service for importing clipboard history from other apps
 public final class ImportService {
     private let database: DatabaseManager
@@ -127,6 +133,31 @@ public final class ImportService {
     /// Import from a specific clipboard app (convenience method without progress)
     public func importFrom(_ app: ClipboardApp) throws -> ImportResult {
         try importFrom(app) { _ in }
+    }
+
+    /// Export all clipboard history to a JSON file.
+    public func exportAllEntries(to fileURL: URL) throws -> ExportResult {
+        struct ExportPayload: Codable {
+            let formatVersion: Int
+            let exportedAt: Date
+            let entries: [ClipboardEntry]
+        }
+
+        let entries = try database.fetchAll()
+        let payload = ExportPayload(
+            formatVersion: 1,
+            exportedAt: Date(),
+            entries: entries
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(payload)
+        try data.write(to: fileURL, options: .atomic)
+
+        PastaLogger.database.info("Exported \(entries.count) entries to \(fileURL.path)")
+        return ExportResult(exported: entries.count, fileURL: fileURL)
     }
     
     // MARK: - Alfred Import
