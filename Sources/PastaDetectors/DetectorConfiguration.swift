@@ -71,6 +71,231 @@ public enum BuiltInDetectorKind: String, Codable, CaseIterable, Identifiable, Se
     }
 }
 
+public extension BuiltInDetectorKind {
+    func builtInPatterns(for strictness: DetectorStrictness) -> [String] {
+        switch self {
+        case .phoneNumber:
+            return PhoneNumberDetector.builtInPatterns(for: strictness)
+        case .email:
+            return Self.emailPatterns(for: strictness)
+        case .url:
+            return Self.urlPatterns(for: strictness)
+        case .ipAddress:
+            return Self.ipAddressPatterns(for: strictness)
+        case .uuid:
+            return Self.uuidPatterns(for: strictness)
+        case .hash:
+            return Self.hashPatterns(for: strictness)
+        case .jwt:
+            return Self.jwtPatterns(for: strictness)
+        case .apiKey:
+            return Self.apiKeyPatterns(for: strictness)
+        case .filePath:
+            return Self.filePathPatterns(for: strictness)
+        case .envVar:
+            return Self.envVarPatterns(for: strictness)
+        case .shellCommand:
+            return Self.shellCommandPatterns(for: strictness)
+        }
+    }
+
+    private static func emailPatterns(for strictness: DetectorStrictness) -> [String] {
+        switch strictness {
+        case .strict, .medium:
+            return [
+                #"(?i)(?<![A-Z0-9._%+\-])([A-Z0-9](?:[A-Z0-9._%+\-]{0,62}[A-Z0-9])?)@([A-Z0-9](?:[A-Z0-9\-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9\-]{0,61}[A-Z0-9])?)+)(?![A-Z0-9_%+\-])"#
+            ]
+        case .lax:
+            return [
+                #"(?i)(?<![A-Z0-9._%+\-])([A-Z0-9](?:[A-Z0-9._%+\-]{0,62}[A-Z0-9])?)@([A-Z0-9](?:[A-Z0-9\-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9\-]{0,61}[A-Z0-9])?)*)(?![A-Z0-9_%+\-])"#
+            ]
+        }
+    }
+
+    private static func urlPatterns(for strictness: DetectorStrictness) -> [String] {
+        switch strictness {
+        case .strict:
+            return [
+                #"(?i)\b(https://[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+(?:/[^\s<>'"]*)?)"#
+            ]
+        case .medium:
+            return [
+                #"(?i)\b((?:https?|ftp)://[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?)+(?:/[^\s<>'"]*)?)"#
+            ]
+        case .lax:
+            return [
+                #"(?i)\b((?:https?|ftp)://[A-Z0-9._:-]+(?:/[^\s<>'"]*)?)"#
+            ]
+        }
+    }
+
+    private static func ipAddressPatterns(for strictness: DetectorStrictness) -> [String] {
+        switch strictness {
+        case .strict, .medium, .lax:
+            return [
+                #"(?<![0-9])((?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})(?![0-9])"#,
+                #"(?i)(?<![0-9a-f])((?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,5}(?::[0-9a-f]{1,4}){1,2}|(?:[0-9a-f]{1,4}:){1,4}(?::[0-9a-f]{1,4}){1,3}|(?:[0-9a-f]{1,4}:){1,3}(?::[0-9a-f]{1,4}){1,4}|(?:[0-9a-f]{1,4}:){1,2}(?::[0-9a-f]{1,4}){1,5}|[0-9a-f]{1,4}:(?::[0-9a-f]{1,4}){1,6}|:(?::[0-9a-f]{1,4}){1,7}|fe80:(?::[0-9a-f]{0,4}){0,4}%[0-9a-z]+|::(?:ffff(?::0{1,4}){0,1}:){0,1}(?:\d{1,3}\.){3}\d{1,3}|(?:[0-9a-f]{1,4}:){1,4}:(?:\d{1,3}\.){3}\d{1,3})(?![0-9a-f])"#
+            ]
+        }
+    }
+
+    private static func uuidPatterns(for strictness: DetectorStrictness) -> [String] {
+        switch strictness {
+        case .strict, .medium, .lax:
+            return [
+                #"(?i)(?<![0-9a-f])([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?![0-9a-f])"#
+            ]
+        }
+    }
+
+    private static func hashPatterns(for strictness: DetectorStrictness) -> [String] {
+        switch strictness {
+        case .strict:
+            return [
+                #"(?i)(?<![0-9a-f])([0-9a-f]{56}|[0-9a-f]{64}|[0-9a-f]{96}|[0-9a-f]{128})(?![0-9a-f])"#,
+                #"(?<![A-Za-z0-9+/=])([A-Za-z0-9+/]{86}={0,2}|[A-Za-z0-9+/]{128}={0,2}|[A-Za-z0-9+/]{171}={0,2})(?![A-Za-z0-9+/=])"#
+            ]
+        case .medium:
+            return [
+                #"(?i)(?<![0-9a-f])([0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{56}|[0-9a-f]{64}|[0-9a-f]{96}|[0-9a-f]{128})(?![0-9a-f])"#,
+                #"(?<![A-Za-z0-9+/=])([A-Za-z0-9+/]{43}={0,2}|[A-Za-z0-9+/]{86}={0,2}|[A-Za-z0-9+/]{128}={0,2}|[A-Za-z0-9+/]{171}={0,2})(?![A-Za-z0-9+/=])"#
+            ]
+        case .lax:
+            return [
+                #"(?i)(?<![0-9a-f])([0-9a-f]{24,128})(?![0-9a-f])"#,
+                #"(?<![A-Za-z0-9+/=])([A-Za-z0-9+/]{32,}={0,2})(?![A-Za-z0-9+/=])"#
+            ]
+        }
+    }
+
+    private static func jwtPatterns(for strictness: DetectorStrictness) -> [String] {
+        switch strictness {
+        case .strict, .medium, .lax:
+            return [
+                #"(?<![A-Za-z0-9_\-])([A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)(?![A-Za-z0-9_\-])"#
+            ]
+        }
+    }
+
+    private static func apiKeyPatterns(for strictness: DetectorStrictness) -> [String] {
+        let core: [String] = [
+            #"sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20}"#,
+            #"sk-proj-[a-zA-Z0-9\-_]{80,180}"#,
+            #"sk-[a-zA-Z0-9]{48}"#,
+            #"sk-ant-api03-[a-zA-Z0-9\-_]{93}"#,
+            #"sk-ant-[a-zA-Z0-9\-_]{40,100}"#,
+            #"AIza[0-9A-Za-z\-_]{35}"#,
+            #"AKIA[0-9A-Z]{16}"#,
+            #"(?<![A-Za-z0-9/+])[A-Za-z0-9/+=]{40}(?![A-Za-z0-9/+=])"#,
+            #"ghp_[a-zA-Z0-9]{36}"#,
+            #"github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}"#,
+            #"gho_[a-zA-Z0-9]{36}"#,
+            #"ghu_[a-zA-Z0-9]{36}"#,
+            #"ghr_[a-zA-Z0-9]{36}"#,
+            #"sk_live_[a-zA-Z0-9]{24,}"#,
+            #"sk_test_[a-zA-Z0-9]{24,}"#,
+            #"pk_live_[a-zA-Z0-9]{24,}"#,
+            #"rk_live_[a-zA-Z0-9]{24,}"#,
+            #"xoxb-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24}"#,
+            #"xoxp-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24}"#,
+            #"xapp-[0-9]-[A-Z0-9]+-[0-9]+-[a-zA-Z0-9]+"#,
+            #"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[a-zA-Z0-9]+"#,
+            #"SK[a-f0-9]{32}"#,
+            #"AC[a-f0-9]{32}"#,
+            #"SG\.[a-zA-Z0-9\-_]{22}\.[a-zA-Z0-9\-_]{43}"#,
+            #"key-[a-f0-9]{32}"#,
+            #"npm_[a-zA-Z0-9]{36}"#,
+            #"pypi-[a-zA-Z0-9\-_]{100,}"#,
+            #"dop_v1_[a-f0-9]{64}"#,
+            #"doo_v1_[a-f0-9]{64}"#,
+            #"[MN][A-Za-z\d]{23,}\.[\w-]{6}\.[\w-]{27}"#,
+            #"https://discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+"#,
+            #"AAAA[A-Za-z0-9_-]{7}:[A-Za-z0-9_-]{140}"#,
+            #"lin_api_[a-zA-Z0-9]{40}"#,
+            #"sbp_[a-f0-9]{40}"#,
+            #"r8_[a-zA-Z0-9]{37}"#,
+            #"hf_[a-zA-Z0-9]{34}"#,
+            #"pk\.[a-zA-Z0-9]{60,}"#,
+            #"sk\.[a-zA-Z0-9]{60,}"#,
+            #"pscale_tkn_[a-zA-Z0-9_]+"#,
+        ]
+        let bearer: [String] = [
+            #"Bearer\s+[a-zA-Z0-9\-_\.]{20,}"#
+        ]
+        let generic: [String] = [
+            #"(?i)api[_-]?key['":\s=]+['"]?([a-zA-Z0-9\-_]{20,})['"]?"#,
+            #"(?i)secret[_-]?key['":\s=]+['"]?([a-zA-Z0-9\-_]{20,})['"]?"#,
+            #"(?i)access[_-]?token['":\s=]+['"]?([a-zA-Z0-9\-_]{20,})['"]?"#,
+        ]
+
+        switch strictness {
+        case .strict:
+            return core
+        case .medium:
+            return core + bearer
+        case .lax:
+            return core + bearer + generic
+        }
+    }
+
+    private static func filePathPatterns(for strictness: DetectorStrictness) -> [String] {
+        switch strictness {
+        case .strict:
+            return [
+                #"(?i)(?<![A-Z0-9_])([A-Z]:\\[^\s\"'<>|]+|[A-Z]:/[^\s\"'<>|]+)"#,
+                #"(?<![A-Za-z]:)(?<![A-Za-z0-9_\-])((?:~|/)(?:[^\s\"']+))"#
+            ]
+        case .medium:
+            return [
+                #"(?i)(?<![A-Z0-9_])([A-Z]:\\[^\s\"'<>|]+|[A-Z]:/[^\s\"'<>|]+)"#,
+                #"(?<![A-Za-z]:)(?<![A-Za-z0-9_\-])((?:~|\.{1,2})?/(?:[^\s\"']+))"#
+            ]
+        case .lax:
+            return [
+                #"(?i)(?<![A-Z0-9_])([A-Z]:\\[^\s\"'<>|]+|[A-Z]:/[^\s\"'<>|]+)"#,
+                #"(?<![A-Za-z0-9_\-])((?:~|\.{1,2})?/(?:[^\s\"']+)|[A-Za-z0-9._-]+/[A-Za-z0-9._/\-]+)"#
+            ]
+        }
+    }
+
+    private static func envVarPatterns(for strictness: DetectorStrictness) -> [String] {
+        switch strictness {
+        case .strict:
+            return [
+                #"(?m)^\s*(?:export\s+)?([A-Z_][A-Z0-9_]*)\s*=\s*(.+)\s*$"#
+            ]
+        case .medium:
+            return [
+                #"(?m)^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)\s*$"#
+            ]
+        case .lax:
+            return [
+                #"(?m)^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*(.+)\s*$"#
+            ]
+        }
+    }
+
+    private static func shellCommandPatterns(for strictness: DetectorStrictness) -> [String] {
+        switch strictness {
+        case .strict:
+            return [
+                #"(?m)^\s*[\$>]\s*([A-Za-z][A-Za-z0-9._/-]*(?:\s+[^;\n]+)?)\s*$"#,
+                #"(?m)^\s*(?:sudo\s+)?([A-Za-z][A-Za-z0-9._/-]*(?:\s+--?[A-Za-z0-9][A-Za-z0-9._-]*)+(?:\s+[^;\n]+)?)\s*$"#
+            ]
+        case .medium:
+            return [
+                #"(?m)^\s*([A-Za-z][A-Za-z0-9._/-]*(?:\s+[^;\n]+)?)\s*$"#,
+                #"(?m)^\s*([^\n]+(?:\|[^\n]+)+)\s*$"#
+            ]
+        case .lax:
+            return [
+                #"(?m)^\s*([^\n]+(?:&&|\|\||\|)[^\n]+)\s*$"#,
+                #"(?m)^\s*([A-Za-z0-9._/-]+\s+[^=\n]+)\s*$"#
+            ]
+        }
+    }
+}
+
 public struct DetectorRuleConfig: Codable, Equatable, Sendable {
     public var isEnabled: Bool
     public var strictnessOverride: DetectorStrictnessOverride

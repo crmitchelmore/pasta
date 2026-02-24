@@ -35,4 +35,30 @@ final class DetectorConfigurationTests: XCTestCase {
         XCTAssertEqual(loaded.rule(for: .phoneNumber).cleanedPatterns, [#"ext-(\d+)"#])
         XCTAssertEqual(loaded.customDetectors.first?.name, "Ticket")
     }
+
+    func testBuiltInRegexPresetsExistForEveryDetectorAndStrictness() {
+        for detector in BuiltInDetectorKind.allCases {
+            for strictness in DetectorStrictness.allCases {
+                XCTAssertFalse(
+                    detector.builtInPatterns(for: strictness).isEmpty,
+                    "\(detector.rawValue) missing presets for \(strictness.rawValue)"
+                )
+            }
+        }
+    }
+
+    func testStrictnessSensitiveDetectorsExposeDifferentPresetSets() {
+        XCTAssertNotEqual(
+            BuiltInDetectorKind.phoneNumber.builtInPatterns(for: .strict),
+            BuiltInDetectorKind.phoneNumber.builtInPatterns(for: .lax)
+        )
+        XCTAssertNotEqual(
+            BuiltInDetectorKind.url.builtInPatterns(for: .strict),
+            BuiltInDetectorKind.url.builtInPatterns(for: .lax)
+        )
+        XCTAssertNotEqual(
+            BuiltInDetectorKind.apiKey.builtInPatterns(for: .strict),
+            BuiltInDetectorKind.apiKey.builtInPatterns(for: .lax)
+        )
+    }
 }

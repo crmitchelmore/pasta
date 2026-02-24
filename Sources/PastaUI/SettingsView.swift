@@ -335,6 +335,7 @@ private struct DetectionRulesSettingsTab: View {
     @State private var advancedDetector: BuiltInDetectorKind? = nil
     @State private var advancedEnabledDraft: Bool = false
     @State private var advancedPatternsDraft: String = ""
+    @State private var advancedSelectedStrictness: DetectorStrictness = .medium
 
     @State private var editingCustomDetector: CustomDetectorDefinition? = nil
     @State private var newCustomName: String = ""
@@ -384,6 +385,10 @@ private struct DetectionRulesSettingsTab: View {
                             }
                         }
                         .pickerStyle(.menu)
+
+                        Text("Effective profile: \(effectiveStrictnessSummary(for: detector))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
 
                         if rule.useAdvancedPatterns, !rule.cleanedPatterns.isEmpty {
                             HStack(spacing: 8) {
@@ -586,10 +591,10 @@ private struct DetectionRulesSettingsTab: View {
     private func openAdvancedEditor(for detector: BuiltInDetectorKind) {
         let rule = configuration.rule(for: detector)
         advancedEnabledDraft = rule.useAdvancedPatterns
+        advancedSelectedStrictness = configuration.strictness(for: detector)
         let configuredPatterns = rule.cleanedPatterns
         if configuredPatterns.isEmpty {
-            let strictness = configuration.strictness(for: detector)
-            let defaults = defaultAdvancedPatterns(for: detector, strictness: strictness)
+            let defaults = defaultAdvancedPatterns(for: detector, strictness: advancedSelectedStrictness)
             advancedPatternsDraft = defaults.joined(separator: "\n")
         } else {
             advancedPatternsDraft = configuredPatterns.joined(separator: "\n")
@@ -601,7 +606,30 @@ private struct DetectionRulesSettingsTab: View {
         NavigationStack {
             Form {
                 Section {
-                    Toggle("Use advanced regex", isOn: $advancedEnabledDraft)
+                    LabeledContent("Selected detector") {
+                        Text(detector.title)
+                            .font(.callout.weight(.semibold))
+                    }
+                    LabeledContent("Selected profile") {
+                        Text(effectiveStrictnessSummary(for: detector))
+                            .font(.callout.weight(.semibold))
+                    }
+
+                    if configuration.rule(for: detector).cleanedPatterns.isEmpty {
+                        Text("Default regex presets for this profile are loaded automatically.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Showing your saved advanced regex for this detector.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Label("Current Selection", systemImage: "scope")
+                }
+
+                Section {
+                    Toggle("Use advanced regex overrides", isOn: $advancedEnabledDraft)
 
                     TextEditor(text: $advancedPatternsDraft)
                         .font(.system(.body, design: .monospaced))
@@ -609,7 +637,13 @@ private struct DetectionRulesSettingsTab: View {
                         .scrollContentBackground(.hidden)
                         .background(Color(nsColor: .textBackgroundColor).opacity(0.6))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .disabled(!advancedEnabledDraft)
+
+                    Button("Reset to \(advancedSelectedStrictness.displayName) defaults") {
+                        advancedPatternsDraft = defaultAdvancedPatterns(for: detector, strictness: advancedSelectedStrictness)
+                            .joined(separator: "\n")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
 
                     Text("One regex per line. If a capture group exists, group 1 is used as the extracted value.")
                         .font(.caption)
@@ -618,14 +652,20 @@ private struct DetectionRulesSettingsTab: View {
                     Label(detector.title, systemImage: "slider.horizontal.3")
                 }
 
-                if advancedEnabledDraft {
-                    let result = RegexPerformanceEvaluator.evaluate(patterns: parsedPatterns(from: advancedPatternsDraft))
+                let parsedPatternList = parsedPatterns(from: advancedPatternsDraft)
+                if !parsedPatternList.isEmpty {
+                    let result = RegexPerformanceEvaluator.evaluate(patterns: parsedPatternList)
                     Section {
                         HStack(spacing: 8) {
                             Text("Performance")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             performanceBadge(result)
+                        }
+                        if !advancedEnabledDraft {
+                            Text("Enable advanced regex overrides to apply these patterns.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
                         Text(result.details)
                             .font(.caption2)
@@ -638,7 +678,7 @@ private struct DetectionRulesSettingsTab: View {
                     }
                 }
             }
-            .navigationTitle("Advanced Regex")
+            .navigationTitle("Advanced Regex - \(detector.title)")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -688,11 +728,17 @@ private struct DetectionRulesSettingsTab: View {
     }
 
     private func defaultAdvancedPatterns(for detector: BuiltInDetectorKind, strictness: DetectorStrictness) -> [String] {
-        switch detector {
-        case .phoneNumber:
-            return PhoneNumberDetector.builtInPatterns(for: strictness)
-        default:
-            return []
+        detector.builtInPatterns(for: strictness)
+    }
+
+    private func effectiveStrictnessSummary(for detector: BuiltInDetectorKind) -> String {
+        let rule = configuration.rule(for: detector)
+        let effective = configuration.strictness(for: detector).displayName
+        switch rule.strictnessOverride {
+        case .inherit:
+            return "Inherit (\(configuration.globalStrictness.displayName))"
+        case .lax, .medium, .strict:
+            return effective
         }
     }
 
