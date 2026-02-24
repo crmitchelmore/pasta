@@ -564,7 +564,14 @@ private struct DetectionRulesSettingsTab: View {
     private func openAdvancedEditor(for detector: BuiltInDetectorKind) {
         let rule = configuration.rule(for: detector)
         advancedEnabledDraft = rule.useAdvancedPatterns
-        advancedPatternsDraft = rule.advancedPatterns.joined(separator: "\n")
+        let configuredPatterns = rule.cleanedPatterns
+        if configuredPatterns.isEmpty {
+            let strictness = configuration.strictness(for: detector)
+            let defaults = defaultAdvancedPatterns(for: detector, strictness: strictness)
+            advancedPatternsDraft = defaults.joined(separator: "\n")
+        } else {
+            advancedPatternsDraft = configuredPatterns.joined(separator: "\n")
+        }
         advancedDetector = detector
     }
 
@@ -656,6 +663,15 @@ private struct DetectionRulesSettingsTab: View {
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    private func defaultAdvancedPatterns(for detector: BuiltInDetectorKind, strictness: DetectorStrictness) -> [String] {
+        switch detector {
+        case .phoneNumber:
+            return PhoneNumberDetector.builtInPatterns(for: strictness)
+        default:
+            return []
+        }
     }
 
     private func addCustomDetector() {

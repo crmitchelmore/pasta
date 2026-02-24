@@ -13,6 +13,17 @@ public struct PhoneNumberDetector {
 
     public init() {}
 
+    public static func builtInPatterns(for strictness: DetectorStrictness) -> [String] {
+        switch strictness {
+        case .strict:
+            return PatternSet.strict
+        case .medium:
+            return PatternSet.medium
+        case .lax:
+            return PatternSet.lax
+        }
+    }
+
     private enum PatternSet {
         static let strict: [String] = [
             #"(?<!\d)(?:\+\d{1,3}[\s.-]?)?(?:\(\d{2,4}\)|\d{2,4})[\s.-]\d{3,4}[\s.-]\d{3,4}(?!\d)"#,
@@ -39,11 +50,7 @@ public struct PhoneNumberDetector {
         if usesAdvancedPatterns {
             candidatePatterns = advancedPatterns
         } else {
-            switch strictness {
-            case .strict: candidatePatterns = PatternSet.strict
-            case .medium: candidatePatterns = PatternSet.medium
-            case .lax: candidatePatterns = PatternSet.lax
-            }
+            candidatePatterns = Self.builtInPatterns(for: strictness)
         }
 
         var candidates: [String] = []

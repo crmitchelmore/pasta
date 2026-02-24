@@ -38,4 +38,15 @@ final class PhoneNumberDetectorTests: XCTestCase {
 
         XCTAssertEqual(detections.map(\.phoneNumber), ["90210"])
     }
+
+    func testBuiltInPatternsVaryByStrictness() {
+        let strict = PhoneNumberDetector.builtInPatterns(for: .strict)
+        let medium = PhoneNumberDetector.builtInPatterns(for: .medium)
+        let lax = PhoneNumberDetector.builtInPatterns(for: .lax)
+
+        XCTAssertFalse(strict.isEmpty)
+        XCTAssertFalse(medium.isEmpty)
+        XCTAssertFalse(lax.isEmpty)
+        XCTAssertNotEqual(strict, lax)
+    }
 }
