@@ -33,34 +33,40 @@ public struct OnboardingView: View {
     
     private let featureTips: [FeatureTip] = [
         FeatureTip(
-            icon: "clock.arrow.circlepath",
-            title: "Clipboard History",
-            description: "Everything you copy is saved and searchable. Never lose that link again.",
+            icon: "exclamationmark.bubble",
+            title: "Command Mode",
+            description: "Type ! in Quick Search to run commands like clear history ranges, pause capture, and open settings.",
             accent: Color(red: 1.0, green: 0.45, blue: 0.35)
         ),
         FeatureTip(
-            icon: "magnifyingglass",
-            title: "Instant Search",
-            description: "Find any clip in milliseconds. Just start typing.",
+            icon: "rectangle.and.text.magnifyingglass",
+            title: "Preview + Quick Actions",
+            description: "Use → to open preview, Return to paste, and ⌘⌫ to delete without leaving the keyboard.",
             accent: Color(red: 0.35, green: 0.65, blue: 0.95)
+        ),
+        FeatureTip(
+            icon: "line.3.horizontal.decrease.circle",
+            title: "Search + Filters",
+            description: "Search by text, then narrow results with sidebar filters for type, app, and URL domain.",
+            accent: Color(red: 0.55, green: 0.78, blue: 0.25)
         ),
         FeatureTip(
             icon: "keyboard",
             title: "Quick Paste",
-            description: "Press ⌃⌘V, pick a clip, hit Return. Pasted instantly.",
-            accent: Color(red: 0.55, green: 0.78, blue: 0.25)
-        ),
-        FeatureTip(
-            icon: "iphone.and.arrow.right.inward",
-            title: "Continuity Sync",
-            description: "Copies from your iPhone appear automatically via Handoff.",
+            description: "Press ⌃⌘V, select a clip, and hit Return. Use ⌘1-⌘9 for instant slot pasting.",
             accent: Color(red: 0.75, green: 0.45, blue: 0.95)
         ),
         FeatureTip(
             icon: "tag",
             title: "Smart Detection",
-            description: "URLs, emails, code, colors — automatically tagged and organized.",
+            description: "URLs, emails, code, API keys, and more are auto-detected so filters and previews stay useful.",
             accent: Color(red: 0.94, green: 0.74, blue: 0.18)
+        ),
+        FeatureTip(
+            icon: "iphone.and.arrow.right.inward",
+            title: "Continuity Sync",
+            description: "Copies from your iPhone can appear automatically via Handoff and iCloud sync.",
+            accent: Color(red: 0.64, green: 0.56, blue: 0.94)
         )
     ]
 
@@ -443,6 +449,9 @@ public struct OnboardingView: View {
             VStack(spacing: 12) {
                 quickRefRow(keys: "⌃⌘V", action: "Open Pasta")
                 quickRefRow(keys: "↩︎", action: "Paste selected")
+                quickRefRow(keys: "!", action: "Enter command mode")
+                quickRefRow(keys: "→", action: "Open preview panel")
+                quickRefRow(keys: "⌘1-⌘9", action: "Quick paste by slot")
                 quickRefRow(keys: "⌘⌫", action: "Delete clip")
                 quickRefRow(keys: "esc", action: "Close")
             }
@@ -452,6 +461,11 @@ public struct OnboardingView: View {
                     .fill(.ultraThinMaterial)
             }
             .frame(maxWidth: 260)
+
+            Text("You can reopen this walkthrough from Settings → General anytime.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
             
             Spacer()
         }
@@ -463,7 +477,7 @@ public struct OnboardingView: View {
             Text(keys)
                 .font(.system(size: 12, weight: .medium, design: .monospaced))
                 .foregroundStyle(.secondary)
-                .frame(width: 50, alignment: .leading)
+                .frame(width: 74, alignment: .leading)
             
             Text(action)
                 .font(.system(size: 13))

@@ -45,6 +45,7 @@ public struct SettingsView: View {
     
     private let checkForUpdates: (() -> Void)?
     private let automaticallyChecksForUpdates: Binding<Bool>?
+    private let openWalkthrough: (() -> Void)?
     private let syncManager: SyncManager?
     private let allEntries: (() -> [ClipboardEntry])?
     private let markSynced: (([UUID]) -> Void)?
@@ -55,6 +56,7 @@ public struct SettingsView: View {
         allEntries: (() -> [ClipboardEntry])? = nil,
         markSynced: (([UUID]) -> Void)? = nil,
         syncedCount: (() -> Int)? = nil,
+        openWalkthrough: (() -> Void)? = nil,
         checkForUpdates: (() -> Void)? = nil,
         automaticallyChecksForUpdates: Binding<Bool>? = nil
     ) {
@@ -62,6 +64,7 @@ public struct SettingsView: View {
         self.allEntries = allEntries
         self.markSynced = markSynced
         self.syncedCount = syncedCount
+        self.openWalkthrough = openWalkthrough
         self.checkForUpdates = checkForUpdates
         self.automaticallyChecksForUpdates = automaticallyChecksForUpdates
     }
@@ -71,7 +74,8 @@ public struct SettingsView: View {
             GeneralSettingsTab(
                 launchAtLogin: $launchAtLogin,
                 appMode: $appMode,
-                appearance: $appearance
+                appearance: $appearance,
+                onReplayWalkthrough: openWalkthrough
             )
             .tabItem {
                 Label("General", systemImage: "gearshape")
@@ -160,6 +164,7 @@ private struct GeneralSettingsTab: View {
     @Binding var launchAtLogin: Bool
     @Binding var appMode: String
     @Binding var appearance: String
+    let onReplayWalkthrough: (() -> Void)?
 
     var body: some View {
         Form {
@@ -217,6 +222,23 @@ private struct GeneralSettingsTab: View {
                     .foregroundStyle(.secondary)
             } header: {
                 Label("Appearance", systemImage: "circle.lefthalf.filled")
+            }
+
+            Section {
+                HStack {
+                    Text("Feature walkthrough")
+                    Spacer()
+                    Button("Replay Walkthrough…") {
+                        onReplayWalkthrough?()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(onReplayWalkthrough == nil)
+                }
+                Text("Reopen the onboarding tour for commands, preview actions, and search/filter tips.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Help", systemImage: "sparkles")
             }
         }
         .formStyle(.grouped)

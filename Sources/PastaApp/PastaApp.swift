@@ -11,6 +11,7 @@ import PastaUI
 
 extension Notification.Name {
     static let openSettings = Notification.Name("pasta.openSettings")
+    static let openOnboarding = Notification.Name("pasta.openOnboarding")
 }
 
 @main
@@ -32,6 +33,9 @@ struct PastaApp: App {
                 },
                 syncedCount: {
                     (try? BackgroundService.shared.database.syncedCount()) ?? 0
+                },
+                openWalkthrough: {
+                    NotificationCenter.default.post(name: .openOnboarding, object: nil)
                 },
                 checkForUpdates: { UpdaterManager.shared.checkForUpdates() },
                 automaticallyChecksForUpdates: Binding(
@@ -568,6 +572,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 syncedCount: {
                     (try? BackgroundService.shared.database.syncedCount()) ?? 0
                 },
+                openWalkthrough: { [weak self] in
+                    self?.panelController?.show()
+                    NotificationCenter.default.post(name: .openOnboarding, object: nil)
+                },
                 checkForUpdates: { UpdaterManager.shared.checkForUpdates() },
                 automaticallyChecksForUpdates: Binding(
                     get: { UpdaterManager.shared.automaticallyChecksForUpdates },
@@ -902,6 +910,9 @@ struct PanelContentView: View {
                 if error != nil {
                     isShowingErrorAlert = true
                 }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openOnboarding)) { _ in
+                isShowingOnboarding = true
             }
             .onReceive(backgroundService.$entries) { entries in
                 // Keep preload cache warm so type switching is instant
