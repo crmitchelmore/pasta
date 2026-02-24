@@ -8,6 +8,7 @@ A blazing-fast, local-first clipboard history manager for macOS with intelligent
 
 - **Unlimited History** — Never lose a copied item again
 - **Smart Detection** — Auto-categorizes emails, JWTs, code, URLs, env vars, and more
+- **Detection Rules** — Tune detector strictness, override regex patterns, and add custom detectors
 - **Ultra-Fast Search** — Full-text search with fuzzy matching
 - **Keyboard-First** — Global hotkey (`⌃⌘V`) and full keyboard navigation
 - **Preview Everything** — Images, decoded base64, syntax-highlighted code
@@ -65,6 +66,11 @@ swift run PastaApp
 | 📁 File Path | `/Users/dev/project/` |
 | 💻 Code | Swift, Python, JS, and more |
 | 🖼️ Image | Screenshots, copied images |
+
+Detection behaviour is configurable in **Settings → Detection** with:
+- Global and per-detector strictness profiles (`Lax`, `Medium`, `Strict`)
+- Advanced regex overrides with performance ratings (`Fast`, `Reasonable`, `Slow`)
+- User-defined custom detectors for domain-specific patterns
 
 ## Requirements
 

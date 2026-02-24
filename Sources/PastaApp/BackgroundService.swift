@@ -26,6 +26,7 @@ final class BackgroundService: ObservableObject {
     private let clipboardMonitor: ClipboardMonitor
     private let contentTypeDetector: ContentTypeDetector
     private let screenshotMonitor: ScreenshotMonitor
+    private var detectorConfiguration: DetectorConfiguration
     
     private var cancellables: Set<AnyCancellable> = []
     private var pruneTimer: Timer?
@@ -85,6 +86,7 @@ final class BackgroundService: ObservableObject {
         self.clipboardMonitor = ClipboardMonitor()
         self.contentTypeDetector = ContentTypeDetector()
         self.screenshotMonitor = ScreenshotMonitor()
+        self.detectorConfiguration = DetectorConfigurationStore.load()
         
         // Set error after initialization completes
         if let error = dbError ?? storageError {
@@ -252,6 +254,7 @@ final class BackgroundService: ObservableObject {
                     self.screenshotMonitor.start()
                     PastaLogger.app.info("Clipboard monitoring resumed")
                 }
+                self.detectorConfiguration = DetectorConfigurationStore.load()
             }
             .store(in: &cancellables)
 
@@ -280,6 +283,7 @@ final class BackgroundService: ObservableObject {
                 let deduplicate = UserDefaults.standard.bool(forKey: Defaults.deduplicateEntries)
                 let skipAPIKeys = UserDefaults.standard.bool(forKey: Defaults.skipAPIKeys)
                 let extractContent = UserDefaults.standard.bool(forKey: Defaults.extractContent)
+                let detectorConfiguration = self.detectorConfiguration
                 
                 Task.detached {
                     let result: EnrichResult
@@ -289,7 +293,8 @@ final class BackgroundService: ObservableObject {
                             detector: detector,
                             imageStorage: storage,
                             storeImages: storeImages,
-                            extractContent: extractContent
+                            extractContent: extractContent,
+                            detectorConfiguration: detectorConfiguration
                         )
                     } catch {
                         PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Failed to enrich entry")
@@ -365,6 +370,7 @@ final class BackgroundService: ObservableObject {
                 let detector = self.contentTypeDetector
                 let storeImages = UserDefaults.standard.bool(forKey: Defaults.storeImages)
                 let deduplicate = UserDefaults.standard.bool(forKey: Defaults.deduplicateEntries)
+                let detectorConfiguration = self.detectorConfiguration
                 
                 Task.detached {
                     let result: EnrichResult
@@ -375,7 +381,8 @@ final class BackgroundService: ObservableObject {
                             detector: detector,
                             imageStorage: storage,
                             storeImages: storeImages,
-                            extractContent: false
+                            extractContent: false,
+                            detectorConfiguration: detectorConfiguration
                         )
                     } catch {
                         PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Failed to enrich screenshot entry")
@@ -495,7 +502,8 @@ final class BackgroundService: ObservableObject {
         detector: ContentTypeDetector,
         imageStorage: ImageStorageManager,
         storeImages: Bool,
-        extractContent: Bool
+        extractContent: Bool,
+        detectorConfiguration: DetectorConfiguration
     ) throws -> EnrichResult {
         var entry = entry
 
@@ -516,7 +524,7 @@ final class BackgroundService: ObservableObject {
             return EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: [])
         }
 
-        let output = detector.detect(in: entry.content)
+        let output = detector.detect(in: entry.content, configuration: detectorConfiguration)
 
         // Handle env var block splitting (legacy behavior - these don't have parent links)
         if output.primaryType == .envVarBlock, !output.splitEntries.isEmpty {

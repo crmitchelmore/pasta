@@ -180,6 +180,7 @@ public struct MetadataParser {
         values.append(contentsOf: extractEnvVars(from: dict, blockOnly: false))
         values.append(contentsOf: extractFilePaths(from: dict))
         values.append(contentsOf: extractShellCommands(from: dict))
+        values.append(contentsOf: extractCustomDetections(from: dict))
         
         return values
     }
@@ -209,6 +210,7 @@ public struct MetadataParser {
         appendLimited(extractEnvVars(from: dict, blockOnly: false))
         appendLimited(extractFilePaths(from: dict))
         appendLimited(extractShellCommands(from: dict))
+        appendLimited(extractCustomDetections(from: dict))
 
         return values
     }
@@ -380,6 +382,15 @@ public struct MetadataParser {
             let exec = item["executable"] as? String
             let display = exec.map { "\($0): \(command)" } ?? command
             return ExtractedValue(type: .shellCommand, value: command, displayValue: display)
+        }
+    }
+
+    private static func extractCustomDetections(from dict: [String: Any]) -> [ExtractedValue] {
+        guard let items = dict["customDetectors"] as? [[String: Any]] else { return [] }
+        return items.compactMap { item in
+            guard let name = item["name"] as? String, let value = item["value"] as? String else { return nil }
+            let display = "\(name): \(value)"
+            return ExtractedValue(type: .text, value: value, displayValue: display)
         }
     }
     

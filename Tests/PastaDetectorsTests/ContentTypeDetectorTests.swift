@@ -110,6 +110,42 @@ final class ContentTypeDetectorTests: XCTestCase {
         XCTAssertTrue(detections.contains(where: { $0.provider == "GitHub PAT" }))
     }
 
+    func testPhoneDetectionsRespectConfiguredStrictness() throws {
+        let detector = ContentTypeDetector()
+        let text = "IDs: 202602191651 19105072027582"
+
+        var mediumConfig = DetectorConfiguration.default
+        mediumConfig.globalStrictness = .medium
+        let medium = detector.detect(in: text, configuration: mediumConfig)
+        let mediumMeta = try XCTUnwrap(parseJSON(medium.metadataJSON))
+        XCTAssertNil(mediumMeta["phoneNumbers"])
+
+        var laxConfig = DetectorConfiguration.default
+        laxConfig.globalStrictness = .lax
+        let lax = detector.detect(in: text, configuration: laxConfig)
+        let laxMeta = try XCTUnwrap(parseJSON(lax.metadataJSON))
+        let numbers = laxMeta["phoneNumbers"] as? [[String: Any]]
+        XCTAssertEqual(numbers?.count, 2)
+    }
+
+    func testCustomDetectorsAppearInMetadataAndOutput() throws {
+        let detector = ContentTypeDetector()
+        var config = DetectorConfiguration.default
+        config.customDetectors = [
+            CustomDetectorDefinition(name: "Ticket ID", pattern: #"TKT-(\d{4})"#, isEnabled: true, isCaseInsensitive: false, confidence: 0.8)
+        ]
+
+        let output = detector.detect(in: "Created ticket TKT-4821 yesterday", configuration: config)
+        XCTAssertEqual(output.customDetections.count, 1)
+        XCTAssertEqual(output.customDetections.first?.name, "Ticket ID")
+        XCTAssertEqual(output.customDetections.first?.value, "4821")
+
+        let metadata = try XCTUnwrap(parseJSON(output.metadataJSON))
+        let custom = metadata["customDetectors"] as? [[String: Any]]
+        XCTAssertEqual(custom?.first?["name"] as? String, "Ticket ID")
+        XCTAssertEqual(custom?.first?["value"] as? String, "4821")
+    }
+
     private func parseJSON(_ json: String?) -> [String: Any]? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         return (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any]
