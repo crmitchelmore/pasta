@@ -183,6 +183,10 @@ Use the HotKey library (Carbon-based) with a fallback global NSEvent monitor:
 - Global monitor (`NSEvent.addGlobalMonitorForEvents`) requires accessibility permissions
 - Both are registered for reliability
 
+### Settings Window Width Guardrail
+When adding new tabs to `SettingsView`, increase the fixed settings window width so tabs remain visible and do not collapse into the macOS "Navigation Tab Bar" overflow popout.
+Keep `SettingsView.Layout.settingsWidth` updated whenever tab count/labels change.
+
 ## Build & Test
 ```bash
 swift build              # Debug build

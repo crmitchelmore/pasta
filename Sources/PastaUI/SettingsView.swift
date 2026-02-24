@@ -22,6 +22,11 @@ public struct SettingsView: View {
         static let extractContent = "pasta.extractContent"
     }
 
+    private enum Layout {
+        static let settingsWidth: CGFloat = 760
+        static let settingsHeight: CGFloat = 500
+    }
+
     @AppStorage(Defaults.launchAtLogin) private var launchAtLogin: Bool = false
     @AppStorage(Defaults.maxEntries) private var maxEntries: Int = 0
     @AppStorage(Defaults.excludedApps) private var excludedAppsText: String = ""
@@ -137,7 +142,8 @@ public struct SettingsView: View {
             }
             .tag(SettingsTab.tipJar)
         }
-        .frame(width: 620, height: 500)
+        // Keep this width in sync with tab count to avoid macOS "Navigation Tab Bar" overflow.
+        .frame(width: Layout.settingsWidth, height: Layout.settingsHeight)
         .padding(.top, 8)
         .withAppearance()
         .tint(PastaTheme.accent)
