@@ -122,4 +122,57 @@ final class DatabaseManagerTests: XCTestCase {
         XCTAssertEqual(Set(result.imagePaths), Set(["/tmp/b.png", "/tmp/c.png"]))
         XCTAssertEqual(try db.fetchAll().count, 0)
     }
+
+    func testFetchPrimaryEntriesExcludesExtractedChildren() throws {
+        let db = try DatabaseManager.inMemory()
+        let parentA = ClipboardEntry(content: "parent-a", contentType: .text)
+        let parentB = ClipboardEntry(content: "parent-b", contentType: .text)
+        let child = ClipboardEntry(
+            content: "child",
+            contentType: .email,
+            parentEntryId: parentA.id
+        )
+
+        try db.insert(parentA, deduplicate: false)
+        try db.insert(parentB, deduplicate: false)
+        try db.insert(child, deduplicate: false)
+
+        let primaryEntries = try db.fetchPrimaryEntries()
+        XCTAssertEqual(Set(primaryEntries.map(\.id)), Set([parentA.id, parentB.id]))
+    }
+
+    func testApplyReclassificationUpdatesParentsAndRebuildsExtractedEntries() throws {
+        let db = try DatabaseManager.inMemory()
+        let parent = ClipboardEntry(content: "Contact me at test@example.com", contentType: .text, metadata: "{\"legacy\":true}")
+        let staleExtracted = ClipboardEntry(content: "old@example.com", contentType: .email, parentEntryId: parent.id)
+
+        try db.insert(parent, deduplicate: false)
+        try db.insert(staleExtracted, deduplicate: false)
+
+        let updates = [
+            DatabaseManager.ReclassificationUpdate(
+                entryID: parent.id,
+                contentType: .prose,
+                metadata: "{\"emails\":[{\"email\":\"test@example.com\"}]}"
+            )
+        ]
+
+        let rebuiltExtracted = [
+            ClipboardEntry(content: "test@example.com", contentType: .email, parentEntryId: parent.id),
+            ClipboardEntry(content: "https://example.com", contentType: .url, parentEntryId: parent.id)
+        ]
+
+        let result = try db.applyReclassification(updates: updates, extractedEntries: rebuiltExtracted)
+        XCTAssertEqual(result.updatedEntries, 1)
+        XCTAssertEqual(result.removedExtractedEntries, 1)
+        XCTAssertEqual(result.insertedExtractedEntries, 2)
+
+        let updatedParent = try db.fetch(id: parent.id)
+        XCTAssertEqual(updatedParent?.contentType, .prose)
+        XCTAssertEqual(updatedParent?.metadata, "{\"emails\":[{\"email\":\"test@example.com\"}]}")
+
+        let extractedAfter = try db.fetchExtractedEntries(parentId: parent.id)
+        XCTAssertEqual(Set(extractedAfter.map(\.contentType)), Set([.email, .url]))
+        XCTAssertEqual(Set(extractedAfter.map(\.content)), Set(["test@example.com", "https://example.com"]))
+    }
 }

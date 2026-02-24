@@ -12,6 +12,13 @@ struct FilePathPreviewData {
 }
 
 public struct PreviewPanelView: View {
+    private enum Limits {
+        static let inlineContentCharacters = 12_000
+        static let inlineCodeCharacters = 8_000
+        static let maxMetadataParseBytes = 128_000
+        static let maxMetadataRenderBytes = 24_000
+    }
+
     public let entry: ClipboardEntry?
 
     public init(entry: ClipboardEntry?) {
@@ -21,13 +28,20 @@ public struct PreviewPanelView: View {
     public var body: some View {
         Group {
             if let entry {
+                let metadataIsLarge = isMetadataLarge(entry.metadata)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         header(entry)
 
                         if let decoded = decodedPreview(from: entry), decoded != entry.content {
+                            let decodedPreview = truncatedText(decoded, limit: Limits.inlineContentCharacters)
                             SectionBox(title: "Decoded") {
-                                MonospaceText(decoded)
+                                MonospaceText(decodedPreview.text)
+                                if decodedPreview.isTruncated {
+                                    Text("Showing first \(Limits.inlineContentCharacters.formatted()) characters for performance.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                         
@@ -40,15 +54,27 @@ public struct PreviewPanelView: View {
                             } else if entry.contentType == .filePath, let filePreview = filePathPreview(from: entry) {
                                 FilePreview(preview: filePreview)
                             } else if entry.contentType == .code {
-                                CodePreview(code: entry.content, language: detectedCodeLanguage(from: entry))
+                                let codePreview = truncatedText(entry.content, limit: Limits.inlineCodeCharacters)
+                                CodePreview(code: codePreview.text, language: detectedCodeLanguage(from: entry))
+                                if codePreview.isTruncated {
+                                    Text("Showing first \(Limits.inlineCodeCharacters.formatted()) characters for performance.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             } else {
-                                Text(entry.content)
+                                let contentPreview = truncatedText(entry.content, limit: Limits.inlineContentCharacters)
+                                Text(contentPreview.text)
                                     .textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading)
+                                if contentPreview.isTruncated {
+                                    Text("Showing first \(Limits.inlineContentCharacters.formatted()) characters for performance.")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
 
-                        if entry.contentType == .jwt, let jwt = jwtPreview(from: entry) {
+                        if !metadataIsLarge, entry.contentType == .jwt, let jwt = jwtPreview(from: entry) {
                             SectionBox(title: "JWT") {
                                 VStack(alignment: .leading, spacing: 8) {
                                     if let header = jwt.headerJSON {
@@ -70,7 +96,7 @@ public struct PreviewPanelView: View {
                             }
                         }
 
-                        if let summary = metadataSummary(from: entry) {
+                        if !metadataIsLarge, let summary = metadataSummary(from: entry) {
                             SectionBox(title: "Details") {
                                 VStack(alignment: .leading, spacing: 8) {
                                     ForEach(summary.items, id: \.title) { item in
@@ -82,7 +108,13 @@ public struct PreviewPanelView: View {
                             }
                         }
 
-                        if let pretty = prettyPrintedJSON(entry.metadata) {
+                        if metadataIsLarge {
+                            SectionBox(title: "Metadata") {
+                                Text("Metadata is too large to render inline. Use Export My Data for the full JSON.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else if let pretty = prettyPrintedJSON(entry.metadata) {
                             SectionBox(title: "Metadata") {
                                 MonospaceText(pretty)
                             }
@@ -300,6 +332,7 @@ public struct PreviewPanelView: View {
     }
 
     private func parseJSONDictionary(_ json: String) -> [String: Any]? {
+        guard json.utf8.count <= Limits.maxMetadataParseBytes else { return nil }
         guard let data = json.data(using: .utf8) else { return nil }
         guard let obj = try? JSONSerialization.jsonObject(with: data, options: []) else { return nil }
         return obj as? [String: Any]
@@ -307,18 +340,38 @@ public struct PreviewPanelView: View {
     
     private func prettyPrintedJSON(_ json: String?) -> String? {
         guard let json else { return nil }
+        guard json.utf8.count <= Limits.maxMetadataRenderBytes else { return nil }
         guard let data = json.data(using: .utf8) else { return nil }
         guard let obj = try? JSONSerialization.jsonObject(with: data, options: []) else { return nil }
         guard JSONSerialization.isValidJSONObject(obj) else { return nil }
         guard let pretty = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) else { return nil }
-        return String(data: pretty, encoding: .utf8)
+        guard let prettyString = String(data: pretty, encoding: .utf8) else { return nil }
+        return truncatedText(prettyString, limit: Limits.maxMetadataRenderBytes).text
+    }
+
+    private func isMetadataLarge(_ metadata: String?) -> Bool {
+        guard let metadata else { return false }
+        return metadata.utf8.count > Limits.maxMetadataRenderBytes
+    }
+
+    private func truncatedText(_ text: String, limit: Int) -> TruncatedText {
+        guard text.count > limit else {
+            return TruncatedText(text: text, isTruncated: false)
+        }
+        let endIndex = text.index(text.startIndex, offsetBy: limit)
+        return TruncatedText(text: String(text[..<endIndex]), isTruncated: true)
+    }
+
+    private struct TruncatedText {
+        let text: String
+        let isTruncated: Bool
     }
 }
 
 // MARK: - Extracted Items Section
 
 private struct ExtractedItemsSection: View {
-    private static let maxVisibleItems = 200
+    private static let batchSize = 100
 
     let entry: ClipboardEntry
 
@@ -344,18 +397,26 @@ private struct ExtractedItemsSection: View {
                     }
 
                     if hasMore {
-                        Text("Showing the first \(Self.maxVisibleItems) detected items for performance.")
+                        HStack(spacing: 8) {
+                            Text("Showing the first \(items.count) detected items.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Button("Show \(Self.batchSize) more") {
+                                loadItems(limit: items.count + Self.batchSize)
+                            }
+                            .buttonStyle(.link)
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .disabled(isLoading)
+                        }
                     }
                 }
             }
         }
         .onAppear {
-            loadItems()
+            loadItems(limit: Self.batchSize)
         }
         .onChange(of: entry.id) { _, _ in
-            loadItems()
+            loadItems(limit: Self.batchSize)
         }
         .onDisappear {
             loadTask?.cancel()
@@ -363,7 +424,7 @@ private struct ExtractedItemsSection: View {
         }
     }
 
-    private func loadItems() {
+    private func loadItems(limit: Int) {
         loadTask?.cancel()
         items = []
         hasMore = false
@@ -380,12 +441,12 @@ private struct ExtractedItemsSection: View {
             let result = await Task.detached(priority: .utility) { () -> ([ExtractedItemPayload], Bool) in
                 let extracted = MetadataParser.extractAllValues(
                     from: snapshot.metadata,
-                    limit: Self.maxVisibleItems + 1
+                    limit: limit + 1
                 )
-                let limited = extracted.prefix(Self.maxVisibleItems).map {
+                let limited = extracted.prefix(limit).map {
                     ExtractedItemPayload(type: $0.type, value: $0.value, displayValue: $0.displayValue)
                 }
-                return (Array(limited), extracted.count > Self.maxVisibleItems)
+                return (Array(limited), extracted.count > limit)
             }.value
 
             guard !Task.isCancelled else { return }

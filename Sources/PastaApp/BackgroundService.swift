@@ -254,6 +254,12 @@ final class BackgroundService: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: Notification.Name("pasta.entriesDidChange"))
+            .sink { [weak self] _ in
+                self?.refresh()
+            }
+            .store(in: &cancellables)
         
         clipboardMonitor.publisher
             .receive(on: DispatchQueue.main)

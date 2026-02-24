@@ -104,6 +104,19 @@ If counts/derived data depend on `entries`, precompute once when entries change
 For large datasets (5k+), also preload first-page results per filter (e.g. per ContentType)
 off-main-thread so switching filters is instant.
 
+### Pathological Metadata Resilience
+When entries contain large detector metadata (hundreds/thousands of matches), preserve interactivity first:
+- Never do unbounded metadata parsing/rendering on the main thread.
+- Cap inline detected-item rendering (start at 100) and use progressive disclosure ("Show more").
+- If metadata payload is oversized, show a lightweight summary/fallback instead of pretty-printing full JSON.
+- Keep a Settings debug action to reparse historical entries with current detector rules and rebuild extracted children.
+
+### Performance Regression Verification
+For reported hangs/freezes, verify with evidence before marking fixed:
+1. Reproduce against the user-provided pathological sample (or equivalent real payload).
+2. Confirm no main-thread stall in the affected interaction path (e.g. filter click + item selection).
+3. Run `swift build && swift test` after the fix and report both reproduction result and test/build status.
+
 ### Keyboard Event Handling in SwiftUI
 SwiftUI's `.onKeyPress` doesn't work when a TextField has focus. Use `NSEvent.addLocalMonitorForEvents`:
 
@@ -203,6 +216,14 @@ Releases are fully automated via conventional commits:
 **No manual tagging is needed.** Just use the correct conventional commit prefix and push to main.
 
 To force a release for non-standard commit types, use `fix:` or `feat:` prefix as appropriate.
+
+### Release Notes Quality
+- Release notes must include a compare link, grouped conventional-commit sections, commit links, and key touched files.
+- Avoid placeholder changelog text (for example, "See commit history"); include concrete shipped changes.
+
+### Release Completion Reporting
+- When asked to confirm release completion, wait until the latest CI run on `main` succeeds and all newly triggered `Release` runs for resulting tags are successful (no queued/in-progress runs).
+- Report released tag(s) and release URL(s) as evidence.
 
 ### Protected Branch Limitation
 The release workflow **cannot push to main** due to branch protection requiring status checks.
