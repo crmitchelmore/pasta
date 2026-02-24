@@ -111,6 +111,13 @@ When entries contain large detector metadata (hundreds/thousands of matches), pr
 - If metadata payload is oversized, show a lightweight summary/fallback instead of pretty-printing full JSON.
 - Keep a Settings debug action to reparse historical entries with current detector rules and rebuild extracted children.
 
+### Detector Rules Customisation Contract
+- Detector matching behaviour is user-configurable runtime state, not compile-time constants.
+- Use `DetectorConfigurationStore` as the source of truth (global strictness, per-detector overrides, advanced regex, custom detectors).
+- Any new built-in detector must be added to `BuiltInDetectorKind` defaults and surfaced in Settings → Detection.
+- Reparse/history rebuild flows must apply the active detector configuration so rule changes can clean existing data.
+- Advanced regex paths must preserve compile validation and performance-rating feedback before save.
+
 ### Performance Regression Verification
 For reported hangs/freezes, verify with evidence before marking fixed:
 1. Reproduce against the user-provided pathological sample (or equivalent real payload).
@@ -182,6 +189,12 @@ swift build              # Debug build
 swift build -c release   # Release build  
 swift test               # Run all tests
 ```
+
+### Detector Regression Checks
+When changing detector rules or metadata extraction:
+1. Reproduce with a long-number/blob sample and verify medium strictness suppresses noisy phone matches.
+2. Verify lax/strict profile behaviour and advanced regex capture-group overrides.
+3. Run targeted detector tests (`PhoneNumberDetectorTests`, strictness config tests) before full `swift build && swift test`.
 
 ## Commit Conventions
 Use [Conventional Commits](https://www.conventionalcommits.org/) for all commit messages. These drive automated version bumps and releases.
