@@ -10,9 +10,16 @@ import UIKit
 /// Manages app-level state: local database, sync orchestration, and entry loading.
 @MainActor
 final class AppState: ObservableObject {
+    private enum Defaults {
+        static let hasCompletedOnboarding = "hasCompletedOnboarding"
+        static let lastSeenVersion = "pasta.ios.lastSeenVersion"
+    }
+
     @Published var entries: [ClipboardEntry] = []
     @Published var isLoading = true
     @Published var hasCompletedOnboarding: Bool
+    @Published var isShowingOnboarding = false
+    @Published var isShowingWhatsNew = false
     @Published var iCloudAvailable = false
     @Published var errorMessage: String?
 
@@ -24,7 +31,7 @@ final class AppState: ObservableObject {
     private var isActivationPipelineRunning = false
 
     init() {
-        self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+        self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: Defaults.hasCompletedOnboarding)
     }
 
     func initialise(syncManager: SyncManager) async {
@@ -53,6 +60,7 @@ final class AppState: ObservableObject {
         }
 
         await captureCurrentClipboardIfNeeded(syncManager: syncManager)
+        evaluateWhatsNewIfNeeded()
 
         isLoading = false
     }
@@ -169,7 +177,25 @@ final class AppState: ObservableObject {
 
     func completeOnboarding() {
         hasCompletedOnboarding = true
-        UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+        isShowingOnboarding = false
+        UserDefaults.standard.set(true, forKey: Defaults.hasCompletedOnboarding)
+        UserDefaults.standard.set(Self.currentAppVersion(), forKey: Defaults.lastSeenVersion)
+    }
+
+    func replayOnboarding() {
+        isShowingOnboarding = true
+    }
+
+    func dismissOnboarding() {
+        isShowingOnboarding = false
+    }
+
+    func showWhatsNew() {
+        isShowingWhatsNew = true
+    }
+
+    func dismissWhatsNew() {
+        isShowingWhatsNew = false
     }
 
     static func databaseURL() -> URL {
@@ -177,5 +203,23 @@ final class AppState: ObservableObject {
         return appSupport
             .appendingPathComponent("Pasta", isDirectory: true)
             .appendingPathComponent("pasta.sqlite")
+    }
+
+    private func evaluateWhatsNewIfNeeded() {
+        guard hasCompletedOnboarding else { return }
+
+        let defaults = UserDefaults.standard
+        let currentVersion = Self.currentAppVersion()
+        let lastSeenVersion = defaults.string(forKey: Defaults.lastSeenVersion)
+
+        if let lastSeenVersion, lastSeenVersion != currentVersion {
+            isShowingWhatsNew = true
+        }
+
+        defaults.set(currentVersion, forKey: Defaults.lastSeenVersion)
+    }
+
+    private static func currentAppVersion() -> String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
     }
 }

@@ -8,6 +8,7 @@ struct SettingsView: View {
     var body: some View {
         List {
             syncSection
+            helpSection
             aboutSection
             dangerSection
         }
@@ -55,6 +56,28 @@ struct SettingsView: View {
                 Label("Sync Now", systemImage: "arrow.clockwise")
             }
             .disabled(syncManager.syncState == .syncing)
+        }
+    }
+
+    // MARK: - Help Section
+
+    private var helpSection: some View {
+        Section {
+            Button {
+                appState.replayOnboarding()
+            } label: {
+                Label("Replay Walkthrough", systemImage: "sparkles")
+            }
+
+            Button {
+                appState.showWhatsNew()
+            } label: {
+                Label("What’s New", systemImage: "star.bubble")
+            }
+        } header: {
+            Text("Help")
+        } footer: {
+            Text("Use Replay Walkthrough to re-open onboarding and share what Pasta on iPhone is for.")
         }
     }
 

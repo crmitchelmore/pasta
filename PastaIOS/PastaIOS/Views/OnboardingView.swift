@@ -3,6 +3,10 @@ import SwiftUI
 struct OnboardingView: View {
     @EnvironmentObject var appState: AppState
 
+    private var isReplay: Bool {
+        appState.hasCompletedOnboarding
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Spacer()
@@ -14,12 +18,12 @@ struct OnboardingView: View {
                 .padding(.bottom, 24)
 
             // Title
-            Text("Welcome to Pasta")
+            Text(isReplay ? "Pasta Walkthrough" : "Welcome to Pasta")
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .padding(.bottom, 8)
 
-            Text("Your clipboard history, everywhere")
+            Text("Your iPhone clipboard companion for Pasta on Mac")
                 .font(.title3)
                 .foregroundStyle(.secondary)
                 .padding(.bottom, 40)
@@ -28,18 +32,23 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 20) {
                 FeatureRow(
                     icon: "arrow.triangle.2.circlepath.icloud",
-                    title: "Sync with your Mac",
-                    description: "Clipboard entries from Pasta on your Mac sync automatically via iCloud."
+                    title: "Built for Mac + iPhone",
+                    description: "Pasta on iPhone is a companion app: it mirrors clipboard history from your Mac through iCloud."
                 )
                 FeatureRow(
                     icon: "magnifyingglass",
                     title: "Fast search",
-                    description: "Find any copied text, URL, code snippet, or email in milliseconds."
+                    description: "Find copied text, URLs, and snippets quickly when you need them on mobile."
                 )
                 FeatureRow(
                     icon: "doc.on.doc",
                     title: "Copy & share",
                     description: "Tap any entry to copy it, or share it with other apps."
+                )
+                FeatureRow(
+                    icon: "lock.shield",
+                    title: "Private by default",
+                    description: "Your data stays in iCloud/local storage tied to your Apple account."
                 )
             }
             .padding(.horizontal, 24)
@@ -51,7 +60,7 @@ struct OnboardingView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.icloud")
                         .foregroundStyle(.orange)
-                    Text("iCloud is required for syncing. Please sign in to iCloud in Settings.")
+                    Text("iCloud is needed for cross-device sync. You can still browse local entries while offline.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -62,17 +71,29 @@ struct OnboardingView: View {
                 .padding(.bottom, 12)
             }
 
-            // Continue button
-            Button {
-                appState.completeOnboarding()
-            } label: {
-                Text("Get Started")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
+            VStack(spacing: 8) {
+                // Continue button
+                Button {
+                    if isReplay {
+                        appState.dismissOnboarding()
+                    } else {
+                        appState.completeOnboarding()
+                    }
+                } label: {
+                    Text(isReplay ? "Done" : "Get Started")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                if !isReplay {
+                    Text("You can replay this any time from Settings.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
             .padding(.horizontal, 24)
             .padding(.bottom, 32)
         }
