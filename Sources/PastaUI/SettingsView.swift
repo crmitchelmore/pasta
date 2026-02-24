@@ -295,10 +295,20 @@ private struct ClipboardSettingsTab: View {
 // MARK: - Detection Rules Settings Tab
 
 private struct DetectionRulesSettingsTab: View {
+    private enum Defaults {
+        static let skipAPIKeys = "pasta.skipAPIKeys"
+        static let extractContent = "pasta.extractContent"
+    }
+
     @State private var configuration: DetectorConfiguration = DetectorConfigurationStore.load()
     @State private var saveMessage: String?
     @State private var showError: Bool = false
     @State private var errorMessage: String = ""
+    @State private var isReparsing: Bool = false
+    @State private var reparseCurrent: Int = 0
+    @State private var reparseTotal: Int = 0
+    @State private var showReparseConfirmation: Bool = false
+    @State private var reparseSummary: String? = nil
 
     @State private var advancedDetector: BuiltInDetectorKind? = nil
     @State private var advancedEnabledDraft: Bool = false
@@ -439,6 +449,44 @@ private struct DetectionRulesSettingsTab: View {
                 Label("Add New Detector", systemImage: "plus.circle")
             }
 
+            Section {
+                HStack {
+                    Text("Reclassify existing history")
+                    Spacer()
+
+                    if isReparsing {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Button("Reparse History…") {
+                            showReparseConfirmation = true
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+
+                if isReparsing {
+                    ProgressView(value: reparseProgressFraction)
+                        .progressViewStyle(.linear)
+                    Text("Processing \(reparseCurrent) of \(reparseTotal) entries")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let reparseSummary {
+                    Text(reparseSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("Runs current detector rules across all saved entries and rebuilds extracted child items.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Maintenance", systemImage: "wrench.and.screwdriver")
+            }
+
             if let saveMessage {
                 Section {
                     Text(saveMessage)
@@ -452,6 +500,18 @@ private struct DetectionRulesSettingsTab: View {
             Button("OK") { }
         } message: {
             Text(errorMessage)
+        }
+        .confirmationDialog(
+            "Reparse clipboard history?",
+            isPresented: $showReparseConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reparse Now") {
+                reparseHistory()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This refreshes content types and metadata for all existing entries and recreates extracted child items.")
         }
         .sheet(item: $advancedDetector) { detector in
             builtInAdvancedSheet(for: detector)
@@ -586,6 +646,11 @@ private struct DetectionRulesSettingsTab: View {
         )
     }
 
+    private var reparseProgressFraction: Double {
+        guard reparseTotal > 0 else { return 0 }
+        return Double(reparseCurrent) / Double(reparseTotal)
+    }
+
     private func parsedPatterns(from rawValue: String) -> [String] {
         rawValue
             .split(whereSeparator: \.isNewline)
@@ -637,6 +702,88 @@ private struct DetectionRulesSettingsTab: View {
         } catch {
             errorMessage = error.localizedDescription
             showError = true
+        }
+    }
+
+    private func reparseHistory() {
+        isReparsing = true
+        reparseSummary = nil
+        reparseCurrent = 0
+        reparseTotal = 0
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let database = try DatabaseManager()
+                let detector = ContentTypeDetector()
+                let detectorConfiguration = DetectorConfigurationStore.load()
+                let extractContent = UserDefaults.standard.bool(forKey: Defaults.extractContent)
+                let skipAPIKeys = UserDefaults.standard.bool(forKey: Defaults.skipAPIKeys)
+                let entries = try database.fetchPrimaryEntries()
+
+                var updates: [DatabaseManager.ReclassificationUpdate] = []
+                updates.reserveCapacity(entries.count)
+
+                var extractedEntries: [ClipboardEntry] = []
+                extractedEntries.reserveCapacity(min(entries.count * 2, 20_000))
+
+                DispatchQueue.main.async {
+                    reparseTotal = entries.count
+                }
+
+                for (index, entry) in entries.enumerated() {
+                    if entry.contentType != .image && entry.contentType != .screenshot {
+                        let output = detector.detect(in: entry.content, configuration: detectorConfiguration)
+                        if output.primaryType != entry.contentType || output.metadataJSON != entry.metadata {
+                            updates.append(
+                                DatabaseManager.ReclassificationUpdate(
+                                    entryID: entry.id,
+                                    contentType: output.primaryType,
+                                    metadata: output.metadataJSON
+                                )
+                            )
+                        }
+
+                        if extractContent {
+                            for item in output.extractedItems where !(skipAPIKeys && item.contentType == .apiKey) {
+                                extractedEntries.append(
+                                    ClipboardEntry(
+                                        content: item.content,
+                                        contentType: item.contentType,
+                                        timestamp: entry.timestamp,
+                                        sourceApp: entry.sourceApp,
+                                        metadata: item.metadataJSON,
+                                        parentEntryId: entry.id
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    if index.isMultiple(of: 50) || index + 1 == entries.count {
+                        let current = index + 1
+                        DispatchQueue.main.async {
+                            reparseCurrent = current
+                        }
+                    }
+                }
+
+                let result = try database.applyReclassification(
+                    updates: updates,
+                    extractedEntries: extractedEntries
+                )
+
+                DispatchQueue.main.async {
+                    reparseSummary = "Reparsed \(entries.count) entries, updated \(result.updatedEntries), removed \(result.removedExtractedEntries), rebuilt \(result.insertedExtractedEntries) extracted entries."
+                    isReparsing = false
+                    NotificationCenter.default.post(name: .entriesDidChange, object: nil)
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    errorMessage = error.localizedDescription
+                    showError = true
+                    isReparsing = false
+                }
+            }
         }
     }
 
@@ -1095,20 +1242,10 @@ private struct iCloudSettingsTab: View {
 // MARK: - Import Settings Tab
 
 private struct ImportSettingsTab: View {
-    private enum Defaults {
-        static let skipAPIKeys = "pasta.skipAPIKeys"
-        static let extractContent = "pasta.extractContent"
-    }
-
     @State private var importResults: [ClipboardApp: ImportResult] = [:]
     @State private var isImporting: ClipboardApp? = nil
     @State private var importProgress: ImportProgress? = nil
     @State private var isExporting: Bool = false
-    @State private var isReparsing: Bool = false
-    @State private var reparseCurrent: Int = 0
-    @State private var reparseTotal: Int = 0
-    @State private var showReparseConfirmation: Bool = false
-    @State private var reparseSummary: String? = nil
     @State private var exportSummary: String? = nil
     @State private var showError: Bool = false
     @State private var errorMessage: String = ""
@@ -1135,7 +1272,7 @@ private struct ImportSettingsTab: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                        .disabled(isImporting != nil || isReparsing)
+                        .disabled(isImporting != nil)
                     }
                 }
 
@@ -1153,51 +1290,12 @@ private struct ImportSettingsTab: View {
             }
 
             Section {
-                HStack {
-                    Text("Reclassify existing history")
-                    Spacer()
-
-                    if isReparsing {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Button("Reparse History…") {
-                            showReparseConfirmation = true
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(isImporting != nil || isExporting)
-                    }
-                }
-
-                if isReparsing {
-                    ProgressView(value: reparseProgressFraction)
-                        .progressViewStyle(.linear)
-                    Text("Processing \(reparseCurrent) of \(reparseTotal) entries")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if let reparseSummary {
-                    Text(reparseSummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Text("Runs current detectors across all saved entries, updates metadata, and rebuilds extracted items to clean up stale detections from older versions.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } header: {
-                Label("Debug", systemImage: "wrench.and.screwdriver")
-            }
-            
-            Section {
                 ForEach(ClipboardApp.allCases) { app in
                     ImportAppRow(
                         app: app,
                         result: importResults[app],
                         isImporting: isImporting == app,
-                        isDisabled: isImporting != nil || isExporting || isReparsing,
+                        isDisabled: isImporting != nil || isExporting,
                         progress: isImporting == app ? importProgress : nil,
                         onImport: { importFrom(app) }
                     )
@@ -1211,18 +1309,6 @@ private struct ImportSettingsTab: View {
             Button("OK") { }
         } message: {
             Text(errorMessage)
-        }
-        .confirmationDialog(
-            "Reparse clipboard history?",
-            isPresented: $showReparseConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Reparse Now") {
-                reparseHistory()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This refreshes content types and metadata for all existing entries and recreates extracted child items.")
         }
     }
     
@@ -1266,11 +1352,6 @@ private struct ImportSettingsTab: View {
         return formatter
     }()
 
-    private var reparseProgressFraction: Double {
-        guard reparseTotal > 0 else { return 0 }
-        return Double(reparseCurrent) / Double(reparseTotal)
-    }
-
     private func exportData() {
         let panel = NSSavePanel()
         panel.title = "Export Pasta Data"
@@ -1302,88 +1383,6 @@ private struct ImportSettingsTab: View {
                     errorMessage = error.localizedDescription
                     showError = true
                     isExporting = false
-                }
-            }
-        }
-    }
-
-    private func reparseHistory() {
-        isReparsing = true
-        reparseSummary = nil
-        reparseCurrent = 0
-        reparseTotal = 0
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            do {
-                let database = try DatabaseManager()
-                let detector = ContentTypeDetector()
-                let detectorConfiguration = DetectorConfigurationStore.load()
-                let extractContent = UserDefaults.standard.bool(forKey: Defaults.extractContent)
-                let skipAPIKeys = UserDefaults.standard.bool(forKey: Defaults.skipAPIKeys)
-                let entries = try database.fetchPrimaryEntries()
-
-                var updates: [DatabaseManager.ReclassificationUpdate] = []
-                updates.reserveCapacity(entries.count)
-
-                var extractedEntries: [ClipboardEntry] = []
-                extractedEntries.reserveCapacity(min(entries.count * 2, 20_000))
-
-                DispatchQueue.main.async {
-                    reparseTotal = entries.count
-                }
-
-                for (index, entry) in entries.enumerated() {
-                    if entry.contentType != .image && entry.contentType != .screenshot {
-                        let output = detector.detect(in: entry.content, configuration: detectorConfiguration)
-                        if output.primaryType != entry.contentType || output.metadataJSON != entry.metadata {
-                            updates.append(
-                                DatabaseManager.ReclassificationUpdate(
-                                    entryID: entry.id,
-                                    contentType: output.primaryType,
-                                    metadata: output.metadataJSON
-                                )
-                            )
-                        }
-
-                        if extractContent {
-                            for item in output.extractedItems where !(skipAPIKeys && item.contentType == .apiKey) {
-                                extractedEntries.append(
-                                    ClipboardEntry(
-                                        content: item.content,
-                                        contentType: item.contentType,
-                                        timestamp: entry.timestamp,
-                                        sourceApp: entry.sourceApp,
-                                        metadata: item.metadataJSON,
-                                        parentEntryId: entry.id
-                                    )
-                                )
-                            }
-                        }
-                    }
-
-                    if index.isMultiple(of: 50) || index + 1 == entries.count {
-                        let current = index + 1
-                        DispatchQueue.main.async {
-                            reparseCurrent = current
-                        }
-                    }
-                }
-
-                let result = try database.applyReclassification(
-                    updates: updates,
-                    extractedEntries: extractedEntries
-                )
-
-                DispatchQueue.main.async {
-                    reparseSummary = "Reparsed \(entries.count) entries, updated \(result.updatedEntries), removed \(result.removedExtractedEntries), rebuilt \(result.insertedExtractedEntries) extracted entries."
-                    isReparsing = false
-                    NotificationCenter.default.post(name: .entriesDidChange, object: nil)
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    errorMessage = error.localizedDescription
-                    showError = true
-                    isReparsing = false
                 }
             }
         }

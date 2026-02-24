@@ -109,7 +109,7 @@ When entries contain large detector metadata (hundreds/thousands of matches), pr
 - Never do unbounded metadata parsing/rendering on the main thread.
 - Cap inline detected-item rendering (start at 100) and use progressive disclosure ("Show more").
 - If metadata payload is oversized, show a lightweight summary/fallback instead of pretty-printing full JSON.
-- Keep a Settings debug action to reparse historical entries with current detector rules and rebuild extracted children.
+- Keep the reparse action in Settings → Detection so users can rerun historical reclassification after rule changes.
 
 ### Detector Rules Customisation Contract
 - Detector matching behaviour is user-configurable runtime state, not compile-time constants.
