@@ -343,3 +343,15 @@ All entitlements live in `Resources/release.entitlements` (committed). Both CI a
 - Keys are stored in GitHub Secrets: `SPARKLE_PUBLIC_KEY`, `SPARKLE_PRIVATE_KEY`
 - UpdaterManager wraps SPUStandardUpdaterController for SwiftUI integration
 - `sparkle:version` MUST match `CFBundleVersion` (build number); use `shortVersionString` for marketing version
+
+## Sentry Error Tracking
+
+- **Organisation slug**: `tally-lz`
+- **Project slug**: `pasta`
+- **API token env var**: `$SENTRY_AUTH_TOKEN` (set in `~/.zshrc`)
+- **API base**: `https://sentry.io/api/0/projects/tally-lz/pasta/`
+- **DSN**: configured in `Sources/PastaApp/SentryManager.swift`
+- **Useful endpoints**:
+  - List unresolved issues: `curl -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "https://sentry.io/api/0/projects/tally-lz/pasta/issues/?query=is:unresolved&sort=freq"`
+  - Get latest event for issue: `curl -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "https://sentry.io/api/0/issues/{issue_id}/events/latest/"`
+  - Get issue details: `curl -H "Authorization: Bearer $SENTRY_AUTH_TOKEN" "https://sentry.io/api/0/issues/{issue_id}/"`
