@@ -6,7 +6,7 @@
   <title>Pasta — Your Clipboard, Al Dente</title>
   <meta name="description" content="A blazing-fast, local-first clipboard history manager for macOS with intelligent content detection. Never lose a copied item again.">
   <meta property="og:title" content="Pasta — Clipboard History for macOS">
-  <meta property="og:description" content="Blazing-fast clipboard history with smart content detection. 100% local, privacy-first.">
+  <meta property="og:description" content="Blazing-fast clipboard history with smart content detection. Local-first with optional iCloud Sync.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://pasta-app.com">
   <meta property="og:image" content="https://pasta-app.com/images/og-image.png">
@@ -221,6 +221,13 @@
       50% { opacity: 0.5; transform: scale(0.8); }
     }
 
+    .hero__badge--new {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(59, 130, 246, 0.15));
+      border-color: rgba(16, 185, 129, 0.2);
+      color: var(--color-secondary);
+      font-weight: 600;
+    }
+
     .hero__title {
       font-family: var(--font-display);
       font-size: clamp(3rem, 8vw, 5.5rem);
@@ -321,6 +328,24 @@
         0 0 120px var(--color-accent-glow);
     }
 
+    .hero__screenshot-wrapper::before {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 18px;
+      background: linear-gradient(135deg, var(--color-accent), var(--color-secondary), var(--color-tertiary), var(--color-accent));
+      background-size: 300% 300%;
+      animation: gradient-rotate 8s ease infinite;
+      z-index: -1;
+      opacity: 0.4;
+    }
+
+    @keyframes gradient-rotate {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
     .hero__screenshot img {
       width: 100%;
       height: auto;
@@ -373,7 +398,7 @@
     .feature-card:hover {
       transform: translateY(-4px);
       border-color: rgba(255, 255, 255, 0.1);
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3), 0 0 40px rgba(59, 130, 246, 0.06);
     }
 
     .feature-card__icon {
@@ -404,6 +429,16 @@
     }
     .feature-card__icon--slate {
       background: linear-gradient(135deg, rgba(148, 163, 184, 0.2) 0%, rgba(100, 116, 139, 0.2) 100%);
+    }
+
+    .feature-card__icon--amber {
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(217, 119, 6, 0.2) 100%);
+    }
+    .feature-card__icon--cyan {
+      background: linear-gradient(135deg, rgba(6, 182, 212, 0.2) 0%, rgba(8, 145, 178, 0.2) 100%);
+    }
+    .feature-card__icon--lime {
+      background: linear-gradient(135deg, rgba(132, 204, 22, 0.2) 0%, rgba(101, 163, 13, 0.2) 100%);
     }
 
     .feature-card__title {
@@ -757,6 +792,164 @@
       color: var(--color-text);
     }
 
+    /* Cross-Device Section */
+    .cross-device {
+      padding: 8rem 2rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .cross-device__content {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4rem;
+      align-items: center;
+      margin-top: 3rem;
+    }
+
+    @media (max-width: 768px) {
+      .cross-device__content {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+      }
+    }
+
+    .cross-device__text h3 {
+      font-family: var(--font-display);
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+    }
+
+    .cross-device__text p {
+      color: var(--color-text-muted);
+      line-height: 1.7;
+      margin-bottom: 1rem;
+    }
+
+    .cross-device__apps {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+
+    .cross-device__app-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.4rem 0.75rem;
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      font-size: 0.8rem;
+      color: var(--color-text-muted);
+    }
+
+    .cross-device__visual {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1.5rem;
+    }
+
+    .cross-device__device {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .cross-device__device-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.75rem;
+    }
+
+    .cross-device__device-label {
+      font-size: 0.85rem;
+      color: var(--color-text-muted);
+      font-weight: 500;
+    }
+
+    .cross-device__sync-arrow {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.25rem;
+      color: var(--color-accent);
+    }
+
+    .cross-device__sync-arrow span {
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    /* Import Section */
+    .import-section {
+      padding: 6rem 2rem;
+      background: var(--color-bg-elevated);
+    }
+
+    .import-section__inner {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+
+    .import-section__grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 0.75rem;
+      margin-top: 2.5rem;
+    }
+
+    .import-app {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1rem 1.25rem;
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      transition: all 0.3s var(--ease-out-expo);
+    }
+
+    .import-app:hover {
+      border-color: rgba(255, 255, 255, 0.1);
+      transform: translateY(-2px);
+    }
+
+    .import-app__name {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    .import-app__badge {
+      font-size: 0.7rem;
+      color: var(--color-secondary);
+      font-weight: 500;
+    }
+
+    /* Scroll animations */
+    .fade-in {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.7s var(--ease-out-expo), transform 0.7s var(--ease-out-expo);
+    }
+
+    .fade-in.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
     /* Mobile Styles */
     @media (max-width: 768px) {
       .nav {
@@ -810,6 +1003,7 @@
     <ul class="nav__links">
       <li><a href="#features" class="nav__link">Features</a></li>
       <li><a href="#shortcuts" class="nav__link">Shortcuts</a></li>
+      <li><a href="#cross-device" class="nav__link">Sync</a></li>
       <li><a href="https://github.com/crmitchelmore/pasta" class="nav__link" target="_blank">GitHub</a></li>
     </ul>
     <a href="https://github.com/crmitchelmore/pasta/releases/latest" class="nav__cta">
@@ -822,6 +1016,9 @@
     <div class="hero__badge">
       <span class="hero__badge-dot"></span>
       Free & Open Source
+    </div>
+    <div class="hero__badge hero__badge--new" style="margin-bottom: 2rem;">
+      ✨ Now with iCloud Sync & iOS companion
     </div>
     
     <h1 class="hero__title">
@@ -855,7 +1052,7 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
         </svg>
-        100% Local
+        Local-First
       </span>
       <span class="hero__meta-item">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -907,7 +1104,7 @@
         <div class="feature-card__icon feature-card__icon--violet">⚡</div>
         <h3 class="feature-card__title">Ultra-Fast Search</h3>
         <p class="feature-card__description">
-          Full-text search with fuzzy matching. Find anything in milliseconds, even with thousands of items.
+          Full-text search powered by SQLite FTS5. Find anything in under a millisecond, even with tens of thousands of items.
         </p>
       </div>
       
@@ -931,7 +1128,7 @@
         <div class="feature-card__icon feature-card__icon--slate">🔒</div>
         <h3 class="feature-card__title">Privacy-First</h3>
         <p class="feature-card__description">
-          100% local storage. No cloud sync, no telemetry, no accounts. Your data stays on your Mac.
+          Local by default — everything stays on your Mac. Optionally enable iCloud Sync to access your history across devices.
         </p>
       </div>
       
@@ -939,7 +1136,39 @@
         <div class="feature-card__icon feature-card__icon--violet">⌘</div>
         <h3 class="feature-card__title">Command Mode</h3>
         <p class="feature-card__description">
-          Type <code>!</code> to enter command mode. Clear history, toggle settings, change themes—all without touching your mouse.
+          Type <code>!</code> to access 40+ commands. Clear history, toggle settings, switch themes, filter by type — all without touching your mouse.
+        </p>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--cyan">☁️</div>
+        <h3 class="feature-card__title">iCloud Sync</h3>
+        <p class="feature-card__description">
+          Seamlessly sync your clipboard history between Mac and iOS via CloudKit. Fully optional — disabled by default.
+        </p>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--amber">📥</div>
+        <h3 class="feature-card__title">Import & Export</h3>
+        <p class="feature-card__description">
+          Switch from Alfred, Maccy, Flycut, CopyClip, Paste, Pastebot, or Clipy. Export your data as JSON anytime.
+        </p>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--lime">🎨</div>
+        <h3 class="feature-card__title">Themes & Appearance</h3>
+        <p class="feature-card__description">
+          Light, Dark, or follow your system. Choose between menu bar, Dock, or both. Make it yours.
+        </p>
+      </div>
+      
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--rose">🔧</div>
+        <h3 class="feature-card__title">Detection Customisation</h3>
+        <p class="feature-card__description">
+          Three strictness profiles, per-detector overrides, and advanced regex patterns. Build your own custom detectors too.
         </p>
       </div>
     </div>
@@ -971,10 +1200,10 @@
         </div>
         
         <div class="content-type">
-          <span class="content-type__icon">🔧</span>
+          <span class="content-type__icon">🔑</span>
           <div>
-            <div class="content-type__label">Env Variables</div>
-            <div class="content-type__example">API_KEY=abc123</div>
+            <div class="content-type__label">API Keys</div>
+            <div class="content-type__example">sk_live_abc123...</div>
           </div>
         </div>
         
@@ -983,6 +1212,14 @@
           <div>
             <div class="content-type__label">URLs</div>
             <div class="content-type__example">https://github.com/...</div>
+          </div>
+        </div>
+        
+        <div class="content-type">
+          <span class="content-type__icon">🔧</span>
+          <div>
+            <div class="content-type__label">Env Variables</div>
+            <div class="content-type__example">API_KEY=abc123</div>
           </div>
         </div>
         
@@ -999,6 +1236,46 @@
           <div>
             <div class="content-type__label">Code</div>
             <div class="content-type__example">Swift, Python, JS...</div>
+          </div>
+        </div>
+        
+        <div class="content-type">
+          <span class="content-type__icon">📞</span>
+          <div>
+            <div class="content-type__label">Phone Numbers</div>
+            <div class="content-type__example">+44 7700 900123</div>
+          </div>
+        </div>
+        
+        <div class="content-type">
+          <span class="content-type__icon">🌐</span>
+          <div>
+            <div class="content-type__label">IP Addresses</div>
+            <div class="content-type__example">192.168.1.1</div>
+          </div>
+        </div>
+        
+        <div class="content-type">
+          <span class="content-type__icon">🏷️</span>
+          <div>
+            <div class="content-type__label">UUIDs</div>
+            <div class="content-type__example">550e8400-e29b-...</div>
+          </div>
+        </div>
+        
+        <div class="content-type">
+          <span class="content-type__icon">#️⃣</span>
+          <div>
+            <div class="content-type__label">Hashes</div>
+            <div class="content-type__example">sha256, md5, base64</div>
+          </div>
+        </div>
+        
+        <div class="content-type">
+          <span class="content-type__icon">🖥️</span>
+          <div>
+            <div class="content-type__label">Shell Commands</div>
+            <div class="content-type__example">git commit -m "..."</div>
           </div>
         </div>
         
@@ -1089,17 +1366,18 @@
       </div>
       
       <div class="shortcut">
-        <span class="shortcut__action">Delete Selected Item</span>
+        <span class="shortcut__action">Toggle Preview Panel</span>
         <div class="shortcut__keys">
-          <span class="key">⌘</span>
-          <span class="key">⌫</span>
+          <span class="key">→</span>
+          <span class="key">←</span>
         </div>
       </div>
       
       <div class="shortcut">
-        <span class="shortcut__action">Close Window</span>
+        <span class="shortcut__action">Delete Selected Item</span>
         <div class="shortcut__keys">
-          <span class="key">Esc</span>
+          <span class="key">⌘</span>
+          <span class="key">⌫</span>
         </div>
       </div>
       
@@ -1109,6 +1387,113 @@
           <span class="key">!</span>
         </div>
       </div>
+      
+      <div class="shortcut">
+        <span class="shortcut__action">Close Window</span>
+        <div class="shortcut__keys">
+          <span class="key">Esc</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Cross-Device Section -->
+  <section class="cross-device" id="cross-device">
+    <div class="section-header">
+      <span class="section-label">Cross-Device</span>
+      <h2 class="section-title">Your clipboard, everywhere.</h2>
+    </div>
+    
+    <div class="cross-device__content">
+      <div class="cross-device__text">
+        <h3>Mac + iPhone, in sync</h3>
+        <p>
+          Enable iCloud Sync to access your clipboard history on both macOS and iOS. 
+          Pasta also picks up items from Continuity / Universal Clipboard automatically.
+        </p>
+        <p>
+          Fully optional and disabled by default — your data only leaves your Mac if you choose.
+        </p>
+      </div>
+      <div class="cross-device__visual">
+        <div class="cross-device__device">
+          <div class="cross-device__device-icon">💻</div>
+          <span class="cross-device__device-label">Mac</span>
+        </div>
+        <div class="cross-device__sync-arrow">
+          <svg width="40" height="20" viewBox="0 0 40 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M2 7 L38 7" />
+            <path d="M32 3 L38 7 L32 11" />
+            <path d="M38 13 L2 13" />
+            <path d="M8 9 L2 13 L8 17" />
+          </svg>
+          <span>iCloud</span>
+        </div>
+        <div class="cross-device__device">
+          <div class="cross-device__device-icon">📱</div>
+          <span class="cross-device__device-label">iPhone</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Import Section -->
+  <section class="import-section">
+    <div class="import-section__inner">
+      <div class="section-header">
+        <span class="section-label">Switching?</span>
+        <h2 class="section-title">Bring your history with you.</h2>
+      </div>
+      <p style="text-align: center; color: var(--color-text-muted); font-size: 1.1rem; margin-top: -2rem; margin-bottom: 0.5rem;">
+        Import your existing clipboard history from any of these apps in one click.
+      </p>
+      <div class="import-section__grid">
+        <div class="import-app">
+          <span>🎩</span>
+          <div>
+            <div class="import-app__name">Alfred</div>
+          </div>
+        </div>
+        <div class="import-app">
+          <span>📋</span>
+          <div>
+            <div class="import-app__name">Maccy</div>
+            <div class="import-app__badge">Open Source</div>
+          </div>
+        </div>
+        <div class="import-app">
+          <span>✂️</span>
+          <div>
+            <div class="import-app__name">Flycut</div>
+            <div class="import-app__badge">Open Source</div>
+          </div>
+        </div>
+        <div class="import-app">
+          <span>📎</span>
+          <div>
+            <div class="import-app__name">CopyClip</div>
+          </div>
+        </div>
+        <div class="import-app">
+          <span>📌</span>
+          <div>
+            <div class="import-app__name">Paste</div>
+          </div>
+        </div>
+        <div class="import-app">
+          <span>🤖</span>
+          <div>
+            <div class="import-app__name">Pastebot</div>
+          </div>
+        </div>
+        <div class="import-app">
+          <span>📝</span>
+          <div>
+            <div class="import-app__name">Clipy</div>
+            <div class="import-app__badge">Open Source</div>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -1116,14 +1501,15 @@
   <section class="privacy">
     <div class="privacy__inner">
       <div class="privacy__icon">🔒</div>
-      <h2 class="privacy__title">Your data, your Mac.</h2>
+      <h2 class="privacy__title">Your data, your rules.</h2>
       <p class="privacy__description">
-        Pasta stores everything locally in a SQLite database on your Mac. No cloud sync, no telemetry, no user accounts. Your clipboard history is yours alone.
+        Pasta stores everything locally in a SQLite database on your Mac by default. No telemetry, no tracking, no accounts. 
+        Optionally enable iCloud Sync to access your history across devices — but only if you choose to.
       </p>
       <div class="privacy__badges">
         <div class="privacy__badge">
           <span class="privacy__badge-icon">✓</span>
-          No cloud sync
+          Local by default
         </div>
         <div class="privacy__badge">
           <span class="privacy__badge-icon">✓</span>
@@ -1132,6 +1518,10 @@
         <div class="privacy__badge">
           <span class="privacy__badge-icon">✓</span>
           No accounts
+        </div>
+        <div class="privacy__badge">
+          <span class="privacy__badge-icon">✓</span>
+          Optional iCloud Sync
         </div>
         <div class="privacy__badge">
           <span class="privacy__badge-icon">✓</span>
@@ -1209,5 +1599,25 @@
       </ul>
     </div>
   </footer>
+
+  <script>
+    // Scroll reveal animations with stagger
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+    document.querySelectorAll('.feature-card, .content-type, .shortcut, .cross-device__content, .import-app, .privacy__badge').forEach((el, i) => {
+      el.classList.add('fade-in');
+      // Stagger siblings within the same parent
+      const siblings = Array.from(el.parentElement.children).filter(c => c === el || c.classList.contains(el.classList[0]));
+      const index = siblings.indexOf(el);
+      el.style.transitionDelay = `${index * 0.05}s`;
+      observer.observe(el);
+    });
+  </script>
 </body>
 </html>
