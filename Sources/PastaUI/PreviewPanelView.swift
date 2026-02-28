@@ -14,7 +14,7 @@ struct FilePathPreviewData {
 public struct PreviewPanelView: View {
     private enum Limits {
         static let inlineContentCharacters = 12_000
-        static let inlineCodeCharacters = 8_000
+        static let inlineCodeCharacters = 2_000
         static let maxMetadataParseBytes = 128_000
         static let maxMetadataRenderBytes = 24_000
     }
@@ -793,15 +793,42 @@ private struct CodePreview: View {
     let code: String
     let language: CodeLanguage?
 
+    @State private var highlighted: AttributedString?
+    @State private var highlightTask: Task<Void, Never>?
+
     var body: some View {
-        Text(highlightedCode(code, language: language))
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(8)
-            .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        Group {
+            if let highlighted {
+                Text(highlighted)
+            } else {
+                // Plain monospaced fallback while highlighting runs
+                Text(code)
+                    .font(.system(size: NSFont.systemFontSize, design: .monospaced))
+            }
+        }
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(Color.black.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .onChange(of: code) { _, newCode in
+            scheduleHighlight(newCode)
+        }
+        .onAppear {
+            scheduleHighlight(code)
+        }
     }
 
-    private func highlightedCode(_ code: String, language: CodeLanguage?) -> AttributedString {
+    private func scheduleHighlight(_ text: String) {
+        highlightTask?.cancel()
+        let lang = language
+        highlightTask = Task.detached(priority: .userInitiated) {
+            let result = Self.highlightCode(text, language: lang)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { highlighted = result }
+        }
+    }
+
+    private static func highlightCode(_ code: String, language: CodeLanguage?) -> AttributedString {
         let baseFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         let out = NSMutableAttributedString(string: code)
         out.addAttributes([
@@ -810,17 +837,17 @@ private struct CodePreview: View {
         ], range: NSRange(location: 0, length: out.length))
 
         // Comments
-        apply(pattern: "(?m)//.*$", color: .systemGreen, to: out)
-        apply(pattern: "/\\*([\\s\\S]*?)\\*/", options: [.dotMatchesLineSeparators], color: .systemGreen, to: out)
+        applyPattern("(?m)//.*$", color: .systemGreen, to: out)
+        applyPattern("/\\*([\\s\\S]*?)\\*/", options: [.dotMatchesLineSeparators], color: .systemGreen, to: out)
 
         // Strings
-        apply(pattern: #"\"([^\"\\]|\\.)*\""#, color: .systemRed, to: out)
-        apply(pattern: #"'([^'\\]|\\.)*'"#, color: .systemRed, to: out)
+        applyPattern(#"\"([^\"\\]|\\.)*\""#, color: .systemRed, to: out)
+        applyPattern(#"'([^'\\]|\\.)*'"#, color: .systemRed, to: out)
 
         // Numbers
-        apply(pattern: "\\b\\d+(?:\\.\\d+)?\\b", color: .systemPurple, to: out)
+        applyPattern("\\b\\d+(?:\\.\\d+)?\\b", color: .systemPurple, to: out)
 
-        // Keywords (lightweight, language-aware-ish)
+        // Keywords
         let keywords: [String]
         switch language {
         case .swift:
@@ -834,13 +861,13 @@ private struct CodePreview: View {
         }
 
         let escaped = keywords.map { NSRegularExpression.escapedPattern(for: $0) }.joined(separator: "|")
-        apply(pattern: "\\b(\(escaped))\\b", color: .systemBlue, to: out)
+        applyPattern("\\b(\(escaped))\\b", color: .systemBlue, to: out)
 
         return AttributedString(out)
     }
 
-    private func apply(
-        pattern: String,
+    private static func applyPattern(
+        _ pattern: String,
         options: NSRegularExpression.Options = [],
         color: NSColor,
         to attr: NSMutableAttributedString
