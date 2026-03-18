@@ -210,7 +210,7 @@ public struct ClipboardListView: View {
                 listContent
             }
         }
-        // Use a single change listener on computed hash instead of multiple onChange
+        // Keep cached sections and selection state in sync as the displayed entries change.
         .onChange(of: dataChangeToken) { _, _ in rebuildSections() }
         .onAppear { rebuildSections() }
         .onChange(of: entries.map(\.id)) { _, ids in
@@ -243,7 +243,8 @@ public struct ClipboardListView: View {
     
     @ViewBuilder
     private var listToolbar: some View {
-        let selectedCount = selectedEntriesInDisplayOrder.count
+        let selectedEntries = selectedEntriesInDisplayOrder
+        let selectedCount = selectedEntries.count
 
         HStack {
             if isSelectionMode {
@@ -267,13 +268,13 @@ public struct ClipboardListView: View {
                 Spacer()
 
                 Button {
-                    onCopyMultiple(selectedEntriesInDisplayOrder)
+                    onCopyMultiple(selectedEntries)
                 } label: {
                     Label("Copy Selected", systemImage: "doc.on.doc")
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.bordered)
-                .disabled(selectedEntriesInDisplayOrder.isEmpty)
+                .disabled(selectedEntries.isEmpty)
                 
                 Button("Delete Selected", role: .destructive) {
                     onDeleteMultiple(Array(selectedIDs))
