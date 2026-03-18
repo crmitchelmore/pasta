@@ -284,6 +284,7 @@ final class BackgroundService: ObservableObject {
                 let skipAPIKeys = UserDefaults.standard.bool(forKey: Defaults.skipAPIKeys)
                 let extractContent = UserDefaults.standard.bool(forKey: Defaults.extractContent)
                 let detectorConfiguration = self.detectorConfiguration
+                let syncManager = self.syncManager
                 
                 Task.detached {
                     let result: EnrichResult
@@ -321,7 +322,6 @@ final class BackgroundService: ObservableObject {
 
                     // Push to CloudKit (fire-and-forget)
                     if !insertedEntries.isEmpty {
-                        let syncManager = self.syncManager
                         let db = self.database
                         let entriesToPush = insertedEntries
                         Task.detached(priority: .utility) {
@@ -371,6 +371,7 @@ final class BackgroundService: ObservableObject {
                 let storeImages = UserDefaults.standard.bool(forKey: Defaults.storeImages)
                 let deduplicate = UserDefaults.standard.bool(forKey: Defaults.deduplicateEntries)
                 let detectorConfiguration = self.detectorConfiguration
+                let syncManager = self.syncManager
                 
                 Task.detached {
                     let result: EnrichResult
@@ -402,7 +403,6 @@ final class BackgroundService: ObservableObject {
 
                     // Push to CloudKit (fire-and-forget)
                     if !insertedScreenshots.isEmpty {
-                        let syncManager = self.syncManager
                         let db = self.database
                         let screenshotsToPush = insertedScreenshots
                         Task.detached(priority: .utility) {

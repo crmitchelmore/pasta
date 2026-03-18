@@ -18,6 +18,7 @@ public struct SettingsView: View {
         static let showNotifications = "pasta.showNotifications"
         static let storeImages = "pasta.storeImages"
         static let deduplicateEntries = "pasta.deduplicateEntries"
+        static let multiCopyJoinSeparator = "pasta.multiCopyJoinSeparator"
         static let skipAPIKeys = "pasta.skipAPIKeys"
         static let extractContent = "pasta.extractContent"
     }
@@ -38,6 +39,7 @@ public struct SettingsView: View {
     @AppStorage(Defaults.showNotifications) private var showNotifications: Bool = false
     @AppStorage(Defaults.storeImages) private var storeImages: Bool = true
     @AppStorage(Defaults.deduplicateEntries) private var deduplicateEntries: Bool = true
+    @AppStorage(Defaults.multiCopyJoinSeparator) private var multiCopyJoinSeparator: String = "\n"
     @AppStorage(Defaults.skipAPIKeys) private var skipAPIKeys: Bool = false
     @AppStorage(Defaults.extractContent) private var extractContent: Bool = true
 
@@ -86,6 +88,7 @@ public struct SettingsView: View {
                 pauseMonitoring: $pauseMonitoring,
                 storeImages: $storeImages,
                 deduplicateEntries: $deduplicateEntries,
+                multiCopyJoinSeparator: $multiCopyJoinSeparator,
                 skipAPIKeys: $skipAPIKeys,
                 extractContent: $extractContent,
                 playSounds: $playSounds,
@@ -251,14 +254,96 @@ private struct GeneralSettingsTab: View {
 // MARK: - Clipboard Settings Tab
 
 private struct ClipboardSettingsTab: View {
+    private enum MultiCopyJoinSeparatorPreset: String, CaseIterable, Identifiable {
+        case newline
+        case tab
+        case space
+        case comma
+        case commaSpace
+        case custom
+
+        var id: Self { self }
+
+        var title: String {
+            switch self {
+            case .newline:
+                return "New line"
+            case .tab:
+                return "Tab"
+            case .space:
+                return "Space"
+            case .comma:
+                return "Comma"
+            case .commaSpace:
+                return "Comma + space"
+            case .custom:
+                return "Custom"
+            }
+        }
+
+        var separator: String? {
+            switch self {
+            case .newline:
+                return "\n"
+            case .tab:
+                return "\t"
+            case .space:
+                return " "
+            case .comma:
+                return ","
+            case .commaSpace:
+                return ", "
+            case .custom:
+                return nil
+            }
+        }
+
+        var helperText: String {
+            switch self {
+            case .newline:
+                return "Each selected item is copied on its own line."
+            case .tab:
+                return "Selected items are separated by a tab character."
+            case .space:
+                return "Selected items are separated by a single space."
+            case .comma:
+                return "Selected items are separated by commas."
+            case .commaSpace:
+                return "Selected items are separated by commas and spaces."
+            case .custom:
+                return "Use any custom text to join copied values from the main list."
+            }
+        }
+
+        static func matching(_ separator: String) -> Self {
+            switch separator {
+            case "\n":
+                return .newline
+            case "\t":
+                return .tab
+            case " ":
+                return .space
+            case ",":
+                return .comma
+            case ", ":
+                return .commaSpace
+            default:
+                return .custom
+            }
+        }
+    }
+
     @Binding var pauseMonitoring: Bool
     @Binding var storeImages: Bool
     @Binding var deduplicateEntries: Bool
+    @Binding var multiCopyJoinSeparator: String
     @Binding var skipAPIKeys: Bool
     @Binding var extractContent: Bool
     @Binding var playSounds: Bool
     @Binding var showNotifications: Bool
     @Binding var excludedAppsText: String
+
+    @State private var multiCopyPreset: MultiCopyJoinSeparatorPreset = .newline
 
     var body: some View {
         Form {
@@ -268,6 +353,26 @@ private struct ClipboardSettingsTab: View {
                 Toggle("Deduplicate identical entries", isOn: $deduplicateEntries)
             } header: {
                 Label("Capture", systemImage: "rectangle.and.paperclip")
+            }
+
+            Section {
+                Picker("Join copied selections with", selection: $multiCopyPreset) {
+                    ForEach(MultiCopyJoinSeparatorPreset.allCases) { preset in
+                        Text(preset.title).tag(preset)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                if multiCopyPreset == .custom {
+                    TextField("Custom separator", text: $multiCopyJoinSeparator)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                Text(multiCopyPreset.helperText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Multi-select Copy", systemImage: "doc.on.doc")
             }
 
             Section {
@@ -311,6 +416,21 @@ private struct ClipboardSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear {
+            multiCopyPreset = MultiCopyJoinSeparatorPreset.matching(multiCopyJoinSeparator)
+        }
+        .onChange(of: multiCopyPreset) { _, newValue in
+            guard let separator = newValue.separator else { return }
+            if multiCopyJoinSeparator != separator {
+                multiCopyJoinSeparator = separator
+            }
+        }
+        .onChange(of: multiCopyJoinSeparator) { _, newValue in
+            let matchingPreset = MultiCopyJoinSeparatorPreset.matching(newValue)
+            if matchingPreset != multiCopyPreset {
+                multiCopyPreset = matchingPreset
+            }
+        }
     }
 }
 
@@ -1224,7 +1344,7 @@ private struct iCloudSettingsTab: View {
                                 try? await syncManager.setupZone()
                                 let entries = allEntries()
                                 if !entries.isEmpty {
-                                    try? await syncManager.pushEntries(entries, onBatchSynced: markCallback)
+                                    _ = try? await syncManager.pushEntries(entries, onBatchSynced: markCallback)
                                 }
                                 _ = try? await syncManager.fetchChanges()
                             }

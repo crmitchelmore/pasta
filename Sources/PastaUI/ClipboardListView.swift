@@ -81,6 +81,7 @@ public struct ClipboardListView: View {
     private let filterApp: String?
     @Binding private var showExtractedValuesOnly: Bool
     private let onCopy: (ClipboardEntry) -> Void
+    private let onCopyMultiple: ([ClipboardEntry]) -> Void
     private let onPaste: (ClipboardEntry) -> Void
     private let onDelete: (ClipboardEntry) -> Void
     private let onDeleteMultiple: ([UUID]) -> Void
@@ -101,6 +102,10 @@ public struct ClipboardListView: View {
         return MetadataParser.extractableTypes.contains(filterType)
     }
 
+    private var selectedEntriesInDisplayOrder: [ClipboardEntry] {
+        entries.filter { selectedIDs.contains($0.id) }
+    }
+
     public init(
         entries: [ClipboardEntry],
         selectedEntryID: Binding<UUID?> = .constant(nil),
@@ -109,6 +114,7 @@ public struct ClipboardListView: View {
         filterApp: String? = nil,
         showExtractedValuesOnly: Binding<Bool> = .constant(false),
         onCopy: @escaping (ClipboardEntry) -> Void,
+        onCopyMultiple: @escaping ([ClipboardEntry]) -> Void = { _ in },
         onPaste: @escaping (ClipboardEntry) -> Void,
         onDelete: @escaping (ClipboardEntry) -> Void,
         onDeleteMultiple: @escaping ([UUID]) -> Void = { _ in },
@@ -121,6 +127,7 @@ public struct ClipboardListView: View {
         self.filterApp = filterApp
         _showExtractedValuesOnly = showExtractedValuesOnly
         self.onCopy = onCopy
+        self.onCopyMultiple = onCopyMultiple
         self.onPaste = onPaste
         self.onDelete = onDelete
         self.onDeleteMultiple = onDeleteMultiple
@@ -206,6 +213,16 @@ public struct ClipboardListView: View {
         // Use a single change listener on computed hash instead of multiple onChange
         .onChange(of: dataChangeToken) { _, _ in rebuildSections() }
         .onAppear { rebuildSections() }
+        .onChange(of: entries.map(\.id)) { _, ids in
+            let visibleIDs = Set(ids)
+            let filteredSelection = selectedIDs.intersection(visibleIDs)
+            if filteredSelection != selectedIDs {
+                selectedIDs = filteredSelection
+            }
+            if ids.isEmpty, isSelectionMode {
+                isSelectionMode = false
+            }
+        }
         .alert("Delete Entry?", isPresented: .init(
             get: { deleteConfirmEntry != nil },
             set: { if !$0 { deleteConfirmEntry = nil } }
@@ -226,26 +243,37 @@ public struct ClipboardListView: View {
     
     @ViewBuilder
     private var listToolbar: some View {
+        let selectedCount = selectedEntriesInDisplayOrder.count
+
         HStack {
             if isSelectionMode {
                 Button {
-                    if selectedIDs.count == entries.count {
+                    if selectedCount == entries.count {
                         selectedIDs.removeAll()
                     } else {
                         selectedIDs = Set(entries.map(\.id))
                     }
                 } label: {
-                    Text(selectedIDs.count == entries.count ? "Deselect All" : "Select All")
+                    Text(selectedCount == entries.count ? "Deselect All" : "Select All")
                 }
                 .buttonStyle(.borderless)
                 
                 Spacer()
                 
-                Text("\(selectedIDs.count) selected")
+                Text("\(selectedCount) selected")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 
                 Spacer()
+
+                Button {
+                    onCopyMultiple(selectedEntriesInDisplayOrder)
+                } label: {
+                    Label("Copy Selected", systemImage: "doc.on.doc")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(.bordered)
+                .disabled(selectedEntriesInDisplayOrder.isEmpty)
                 
                 Button("Delete Selected", role: .destructive) {
                     onDeleteMultiple(Array(selectedIDs))
@@ -615,6 +643,7 @@ private struct ExtractedValueRow: View {
     return ClipboardListView(
         entries: items,
         onCopy: { _ in },
+        onCopyMultiple: { _ in },
         onPaste: { _ in },
         onDelete: { _ in },
         onReveal: { _ in }

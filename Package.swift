@@ -70,7 +70,8 @@ let package = Package(
             name: "PastaSync",
             dependencies: [
                 "PastaCore"
-            ]
+            ],
+            exclude: ["README.md"]
         ),
         
         // Tests

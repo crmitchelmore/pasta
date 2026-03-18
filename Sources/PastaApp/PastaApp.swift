@@ -80,7 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.register(defaults: [
             "pasta.storeImages": true,
             "pasta.deduplicateEntries": true,
-            "pasta.appMode": "both"
+            "pasta.appMode": "both",
+            "pasta.multiCopyJoinSeparator": "\n"
         ])
         
         configureAppIcon()
@@ -183,12 +184,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKeyPauseObserver = NotificationCenter.default.addObserver(
             forName: .pastaHotKeyShouldPause, object: nil, queue: .main
         ) { [weak self] _ in
-            self?.hotKeyManager.unregister()
+            Task { @MainActor in
+                self?.hotKeyManager.unregister()
+            }
         }
         hotKeyChangeObserver = NotificationCenter.default.addObserver(
             forName: .pastaHotKeyDidChange, object: nil, queue: .main
         ) { [weak self] _ in
-            self?.registerHotKey()
+            Task { @MainActor in
+                self?.registerHotKey()
+            }
         }
     }
     
@@ -234,7 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let result = await CommandRegistry.shared.execute(command)
         
         // Handle special results that need app-level actions
-        if case .openMainWindow(let contentType) = result {
+        if case .openMainWindow = result {
             quickSearchController?.hide()
             showMainWindow()
             // TODO: Apply contentType filter in main window
@@ -774,9 +779,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct PanelContentView: View {
     private enum Defaults {
         static let didCompleteOnboarding = "pasta.onboarding.completed"
+        static let multiCopyJoinSeparator = "pasta.multiCopyJoinSeparator"
     }
 
     @AppStorage(Defaults.didCompleteOnboarding) private var didCompleteOnboarding: Bool = false
+    @AppStorage(Defaults.multiCopyJoinSeparator) private var multiCopyJoinSeparator: String = "\n"
 
     @ObservedObject private var backgroundService = BackgroundService.shared
 
@@ -876,6 +883,7 @@ struct PanelContentView: View {
                 filterType: contentTypeFilter,
                 showExtractedValuesOnly: $showExtractedValuesOnly,
                 onCopy: { entry in copyEntry(entry) },
+                onCopyMultiple: { entries in copyEntries(entries) },
                 onPaste: { entry in pasteEntry(entry) },
                 onDelete: { entry in deleteEntry(entry) },
                 onDeleteMultiple: { ids in deleteEntries(ids) },
@@ -1122,11 +1130,12 @@ struct PanelContentView: View {
         }
     }
 
-    private static func filterEntries(
+    private nonisolated static func filterEntries(
         _ input: [ClipboardEntry],
         contentTypeFilter: ContentType?,
         sourceFilter: String,
-        urlDomainFilter: String?
+        urlDomainFilter: String?,
+        limit: Int
     ) -> [ClipboardEntry] {
         var out = input
 
@@ -1151,7 +1160,7 @@ struct PanelContentView: View {
             }
         }
 
-        return Array(out.prefix(Preload.limit))
+        return Array(out.prefix(limit))
     }
     
     /// Run entry filtering off the main thread to avoid UI hangs on large datasets
@@ -1161,6 +1170,7 @@ struct PanelContentView: View {
         let typeFilter = contentTypeFilter
         let srcFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines)
         let domainFilter = urlDomainFilter
+        let limit = Preload.limit
         
         filterTask = Task {
             let result = await Task.detached(priority: .userInitiated) { () -> [ClipboardEntry] in
@@ -1168,7 +1178,8 @@ struct PanelContentView: View {
                     entries,
                     contentTypeFilter: typeFilter,
                     sourceFilter: srcFilter,
-                    urlDomainFilter: domainFilter
+                    urlDomainFilter: domainFilter,
+                    limit: limit
                 )
             }.value
             
@@ -1187,6 +1198,7 @@ struct PanelContentView: View {
         let typeFilter = contentTypeFilter
         let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines)
         let domainFilter = urlDomainFilter
+        let limit = Preload.limit
         let searchContentType: ContentType?
         if let typeFilter, MetadataParser.extractableTypes.contains(typeFilter) {
             searchContentType = nil
@@ -1207,7 +1219,8 @@ struct PanelContentView: View {
                     matches.map { $0.entry },
                     contentTypeFilter: typeFilter,
                     sourceFilter: sourceFilter,
-                    urlDomainFilter: domainFilter
+                    urlDomainFilter: domainFilter,
+                    limit: limit
                 )
             } catch {
                 result = []
@@ -1410,6 +1423,12 @@ struct PanelContentView: View {
     private func copyEntry(_ entry: ClipboardEntry) {
         PastaLogger.ui.debug("Copying entry: \(entry.contentType.rawValue)")
         _ = PasteService().copy(entry)
+    }
+
+    private func copyEntries(_ entries: [ClipboardEntry]) {
+        guard !entries.isEmpty else { return }
+        PastaLogger.ui.debug("Copying \(entries.count) entries")
+        _ = PasteService().copy(entries, joinedBy: multiCopyJoinSeparator)
     }
 
     private func pasteEntry(_ entry: ClipboardEntry) {
