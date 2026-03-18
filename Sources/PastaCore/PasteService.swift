@@ -134,6 +134,25 @@ public final class PasteService {
         return true
     }
 
+    /// Copies multiple entry values to the system pasteboard as joined text.
+    /// Single-item selections preserve the normal copy behaviour for that entry type.
+    @discardableResult
+    public func copy(_ entries: [ClipboardEntry], joinedBy separator: String) -> Bool {
+        guard !entries.isEmpty else {
+            PastaLogger.clipboard.warning("Cannot copy an empty entry selection")
+            return false
+        }
+
+        if entries.count == 1, let entry = entries.first {
+            return copy(entry)
+        }
+
+        let joinedContent = entries.map(\.content).joined(separator: separator)
+        pasteboard.write(.text(joinedContent))
+        PastaLogger.clipboard.debug("Copied \(entries.count) joined entries")
+        return true
+    }
+
     /// Copies the entry to the system pasteboard, then simulates Cmd+V.
     /// Returns false if the entry cannot be represented on the pasteboard.
     @discardableResult
@@ -205,6 +224,13 @@ public final class PasteService {
     @discardableResult
     public func copy(_ entry: ClipboardEntry) -> Bool {
         _ = entry
+        return false
+    }
+
+    @discardableResult
+    public func copy(_ entries: [ClipboardEntry], joinedBy separator: String) -> Bool {
+        _ = entries
+        _ = separator
         return false
     }
 

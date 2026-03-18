@@ -828,7 +828,7 @@ private struct CodePreview: View {
         }
     }
 
-    private static func highlightCode(_ code: String, language: CodeLanguage?) -> AttributedString {
+    private nonisolated static func highlightCode(_ code: String, language: CodeLanguage?) -> AttributedString {
         let baseFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         let out = NSMutableAttributedString(string: code)
         out.addAttributes([
@@ -866,7 +866,7 @@ private struct CodePreview: View {
         return AttributedString(out)
     }
 
-    private static func applyPattern(
+    private nonisolated static func applyPattern(
         _ pattern: String,
         options: NSRegularExpression.Options = [],
         color: NSColor,

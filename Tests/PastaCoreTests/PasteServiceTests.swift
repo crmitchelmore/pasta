@@ -51,6 +51,48 @@ final class PasteServiceTests: XCTestCase {
         XCTAssertEqual(sim.callCount, 0)
     }
 
+    func testCopiesMultipleEntriesUsingConfiguredSeparator() {
+        let pb = StubPasteboard()
+        let sim = StubSimulator()
+        let service = PasteService(pasteboard: pb, simulator: sim)
+
+        let entries = [
+            ClipboardEntry(content: "hello", contentType: .text),
+            ClipboardEntry(content: "world", contentType: .text)
+        ]
+
+        XCTAssertTrue(service.copy(entries, joinedBy: "\n"))
+        XCTAssertEqual(pb.written, .text("hello\nworld"))
+        XCTAssertEqual(sim.callCount, 0)
+    }
+
+    func testCopyMultipleUsesNormalCopyBehaviourForSingleEntrySelection() {
+        let pb = StubPasteboard()
+        let sim = StubSimulator()
+        let service = PasteService(pasteboard: pb, simulator: sim)
+
+        let entry = ClipboardEntry(content: "/tmp/a\n/tmp/b", contentType: .filePath)
+
+        XCTAssertTrue(service.copy([entry], joinedBy: "\n"))
+
+        guard case .fileURLs(let urls)? = pb.written else {
+            return XCTFail("Expected fileURLs")
+        }
+
+        XCTAssertEqual(urls.map(\.path), ["/tmp/a", "/tmp/b"])
+        XCTAssertEqual(sim.callCount, 0)
+    }
+
+    func testCopyMultipleReturnsFalseForEmptySelection() {
+        let pb = StubPasteboard()
+        let sim = StubSimulator()
+        let service = PasteService(pasteboard: pb, simulator: sim)
+
+        XCTAssertFalse(service.copy([], joinedBy: "\n"))
+        XCTAssertNil(pb.written)
+        XCTAssertEqual(sim.callCount, 0)
+    }
+
     func testPastesFilePathsAsURLs() {
         let pb = StubPasteboard()
         let sim = StubSimulator()
