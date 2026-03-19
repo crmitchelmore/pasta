@@ -48,23 +48,29 @@ private extension String {
 public struct HighPerformanceListView: NSViewRepresentable {
     public let rows: [ClipboardRowData]
     @Binding public var selectedID: UUID?
+    @Binding public var selectedIDs: Set<UUID>
     public let onPaste: (UUID) -> Void
     public let onCopy: (UUID) -> Void
+    public let onCopyMultiple: ([UUID]) -> Void
     public let onDelete: (UUID) -> Void
     public let onReveal: (UUID) -> Void
     
     public init(
         rows: [ClipboardRowData],
         selectedID: Binding<UUID?>,
+        selectedIDs: Binding<Set<UUID>>,
         onPaste: @escaping (UUID) -> Void,
         onCopy: @escaping (UUID) -> Void,
+        onCopyMultiple: @escaping ([UUID]) -> Void,
         onDelete: @escaping (UUID) -> Void,
         onReveal: @escaping (UUID) -> Void
     ) {
         self.rows = rows
         self._selectedID = selectedID
+        self._selectedIDs = selectedIDs
         self.onPaste = onPaste
         self.onCopy = onCopy
+        self.onCopyMultiple = onCopyMultiple
         self.onDelete = onDelete
         self.onReveal = onReveal
     }
@@ -90,7 +96,7 @@ public struct HighPerformanceListView: NSViewRepresentable {
         tableView.backgroundColor = .clear
         tableView.gridStyleMask = []
         tableView.selectionHighlightStyle = .regular
-        tableView.allowsMultipleSelection = false
+        tableView.allowsMultipleSelection = true
         tableView.allowsEmptySelection = true
         tableView.focusRingType = .none
         
@@ -128,17 +134,7 @@ public struct HighPerformanceListView: NSViewRepresentable {
         
         // Smart diff update for performance
         if oldRows.map(\.id) != newRows.map(\.id) {
-            // Structure changed - full reload
-            let selectedRow = tableView.selectedRow
             tableView.reloadData()
-            
-            // Restore selection
-            if let selectedID = selectedID,
-               let idx = newRows.firstIndex(where: { $0.id == selectedID }) {
-                tableView.selectRowIndexes(IndexSet(integer: idx), byExtendingSelection: false)
-            } else if selectedRow >= 0 && selectedRow < newRows.count {
-                tableView.selectRowIndexes(IndexSet(integer: selectedRow), byExtendingSelection: false)
-            }
         } else if oldRows != newRows {
             // Same structure, content changed - update visible rows only
             let visibleRect = tableView.visibleRect
@@ -151,15 +147,32 @@ public struct HighPerformanceListView: NSViewRepresentable {
         }
         
         // Sync selection from SwiftUI to table
-        if let selectedID = selectedID {
-            if let idx = newRows.firstIndex(where: { $0.id == selectedID }) {
-                if tableView.selectedRow != idx {
-                    tableView.selectRowIndexes(IndexSet(integer: idx), byExtendingSelection: false)
-                    tableView.scrollRowToVisible(idx)
-                }
+        let desiredSelection: IndexSet
+        if !selectedIDs.isEmpty {
+            desiredSelection = IndexSet(selectedIDs.compactMap { id in
+                newRows.firstIndex(where: { $0.id == id })
+            })
+        } else if let selectedID,
+                  let index = newRows.firstIndex(where: { $0.id == selectedID }) {
+            desiredSelection = IndexSet(integer: index)
+        } else {
+            desiredSelection = []
+        }
+
+        if tableView.selectedRowIndexes != desiredSelection {
+            tableView.selectRowIndexes(desiredSelection, byExtendingSelection: false)
+
+            let focusIndex: Int?
+            if let selectedID,
+               let index = newRows.firstIndex(where: { $0.id == selectedID }) {
+                focusIndex = index
+            } else {
+                focusIndex = desiredSelection.first
             }
-        } else if tableView.selectedRow != -1 {
-            tableView.deselectAll(nil)
+
+            if let focusIndex {
+                tableView.scrollRowToVisible(focusIndex)
+            }
         }
     }
     
@@ -208,20 +221,25 @@ public struct HighPerformanceListView: NSViewRepresentable {
         
         public func tableViewSelectionDidChange(_ notification: Notification) {
             guard let tableView = notification.object as? NSTableView else { return }
-            let selectedRow = tableView.selectedRow
-            
-            if selectedRow >= 0 && selectedRow < rows.count {
-                let id = rows[selectedRow].id
-                if parent.selectedID != id {
-                    DispatchQueue.main.async {
-                        self.parent.selectedID = id
-                    }
-                }
+            let selectedRowIndexes = tableView.selectedRowIndexes
+            let ids: Set<UUID> = Set(selectedRowIndexes.compactMap { row in
+                guard row >= 0 && row < rows.count else { return nil }
+                return rows[row].id
+            })
+
+            let primaryID: UUID?
+            if let current = parent.selectedID, ids.contains(current) {
+                primaryID = current
+            } else if let row = selectedRowIndexes.last, row >= 0 && row < rows.count {
+                primaryID = rows[row].id
             } else {
-                if parent.selectedID != nil {
-                    DispatchQueue.main.async {
-                        self.parent.selectedID = nil
-                    }
+                primaryID = nil
+            }
+
+            if parent.selectedIDs != ids || parent.selectedID != primaryID {
+                DispatchQueue.main.async {
+                    self.parent.selectedIDs = ids
+                    self.parent.selectedID = primaryID
                 }
             }
         }
@@ -244,9 +262,18 @@ public struct HighPerformanceListView: NSViewRepresentable {
             guard row >= 0 && row < rows.count else { return }
             
             let rowData = rows[row]
+            let copySelectionIDs: [UUID]
+            if tableView.selectedRowIndexes.count > 1, tableView.selectedRowIndexes.contains(row) {
+                copySelectionIDs = tableView.selectedRowIndexes.compactMap { selectedRow in
+                    guard selectedRow >= 0 && selectedRow < rows.count else { return nil }
+                    return rows[selectedRow].id
+                }
+            } else {
+                copySelectionIDs = [rowData.id]
+            }
             
             menu.addItem(withTitle: "Paste", action: #selector(contextPaste(_:)), keyEquivalent: "")
-            menu.addItem(withTitle: "Copy", action: #selector(contextCopy(_:)), keyEquivalent: "")
+            menu.addItem(withTitle: copySelectionIDs.count > 1 ? "Copy Selected" : "Copy", action: #selector(contextCopy(_:)), keyEquivalent: "")
             menu.addItem(NSMenuItem.separator())
             
             let deleteItem = NSMenuItem(title: "Delete", action: #selector(contextDelete(_:)), keyEquivalent: "")
@@ -259,7 +286,12 @@ public struct HighPerformanceListView: NSViewRepresentable {
             
             for item in menu.items {
                 item.target = self
-                item.representedObject = rowData.id
+            }
+            menu.items[0].representedObject = rowData.id
+            menu.items[1].representedObject = copySelectionIDs
+            deleteItem.representedObject = rowData.id
+            if rowData.contentType == .filePath, let revealItem = menu.items.last {
+                revealItem.representedObject = rowData.id
             }
         }
         
@@ -269,8 +301,15 @@ public struct HighPerformanceListView: NSViewRepresentable {
         }
         
         @objc private func contextCopy(_ sender: NSMenuItem) {
-            guard let id = sender.representedObject as? UUID else { return }
-            parent.onCopy(id)
+            if let ids = sender.representedObject as? [UUID] {
+                if ids.count > 1 {
+                    parent.onCopyMultiple(ids)
+                } else if let id = ids.first {
+                    parent.onCopy(id)
+                }
+            } else if let id = sender.representedObject as? UUID {
+                parent.onCopy(id)
+            }
         }
         
         @objc private func contextDelete(_ sender: NSMenuItem) {

@@ -794,6 +794,7 @@ struct PanelContentView: View {
     @State private var sourceAppFilter: String = ""
 
     @State private var selectedEntryID: UUID? = nil
+    @State private var selectedEntryIDs: Set<UUID> = []
     @State private var showExtractedValuesOnly: Bool = false
 
     @State private var isShowingOnboarding: Bool = false
@@ -880,6 +881,7 @@ struct PanelContentView: View {
             ClipboardListView(
                 entries: displayedEntries,
                 selectedEntryID: $selectedEntryID,
+                selectedEntryIDs: $selectedEntryIDs,
                 filterType: contentTypeFilter,
                 showExtractedValuesOnly: $showExtractedValuesOnly,
                 onCopy: { entry in copyEntry(entry) },
@@ -1246,8 +1248,8 @@ struct PanelContentView: View {
         schedulePreload(for: backgroundService.entries)
         triggerSearchUpdate()
         
-        if selectedEntryID == nil {
-            selectedEntryID = displayedEntries.first?.id
+        if selectedEntryID == nil, let firstID = displayedEntries.first?.id {
+            setSingleSelection(firstID)
         }
         DispatchQueue.main.async {
             searchFocused = true
@@ -1259,11 +1261,30 @@ struct PanelContentView: View {
     }
 
     private func handleDisplayedEntriesChange(_ oldValue: [UUID], _ ids: [UUID]) {
-        if let selectedEntryID, !ids.contains(selectedEntryID) {
-            self.selectedEntryID = nil
+        let visibleIDs = Set(ids)
+        let filteredSelection = selectedEntryIDs.intersection(visibleIDs)
+
+        if filteredSelection != selectedEntryIDs {
+            selectedEntryIDs = filteredSelection
         }
-        if self.selectedEntryID == nil, let first = ids.first {
-            self.selectedEntryID = first
+
+        if let selectedEntryID, !visibleIDs.contains(selectedEntryID) {
+            self.selectedEntryID = filteredSelection.first
+        }
+
+        if self.selectedEntryID == nil, let fallbackID = filteredSelection.first ?? ids.first {
+            self.selectedEntryID = fallbackID
+        }
+
+        if let selectedEntryID {
+            if selectedEntryIDs.isEmpty {
+                selectedEntryIDs = [selectedEntryID]
+            } else if !selectedEntryIDs.contains(selectedEntryID),
+                      let fallbackID = selectedEntryIDs.first {
+                self.selectedEntryID = fallbackID
+            }
+        } else if !selectedEntryIDs.isEmpty {
+            selectedEntryIDs.removeAll()
         }
     }
 
@@ -1313,10 +1334,16 @@ struct PanelContentView: View {
             return .handled
 
         case .upArrow:
+            if keyPress.modifiers.contains(.shift) {
+                return .ignored
+            }
             moveSelection(delta: -1)
             return .handled
 
         case .downArrow:
+            if keyPress.modifiers.contains(.shift) {
+                return .ignored
+            }
             moveSelection(delta: 1)
             return .handled
 
@@ -1342,6 +1369,10 @@ struct PanelContentView: View {
             searchFocused = true
             return .handled
         }
+        if listFocused, keyPress.modifiers == .command, chars.lowercased() == "c" {
+            copySelectedEntries()
+            return .handled
+        }
         if keyPress.modifiers.contains(.command), chars.count == 1, let digit = Int(chars), (1...9).contains(digit) {
             quickPaste(index: digit - 1)
             return .handled
@@ -1361,13 +1392,29 @@ struct PanelContentView: View {
         }
 
         let nextIndex = min(max(currentIndex + delta, 0), displayedEntries.count - 1)
-        selectedEntryID = displayedEntries[nextIndex].id
+        setSingleSelection(displayedEntries[nextIndex].id)
     }
 
     private func quickPaste(index: Int) {
         guard index >= 0, index < displayedEntries.count else { return }
-        selectedEntryID = displayedEntries[index].id
+        setSingleSelection(displayedEntries[index].id)
         pasteSelectedEntry()
+    }
+
+    private func setSingleSelection(_ id: UUID) {
+        selectedEntryID = id
+        selectedEntryIDs = [id]
+    }
+
+    private func copySelectedEntries() {
+        let selectedEntries = displayedEntries.filter { selectedEntryIDs.contains($0.id) }
+
+        if selectedEntries.count > 1 {
+            copyEntries(selectedEntries)
+        } else if let entry = selectedEntries.first ??
+            displayedEntries.first(where: { $0.id == selectedEntryID }) {
+            copyEntry(entry)
+        }
     }
 
     private func pasteSelectedEntry() {

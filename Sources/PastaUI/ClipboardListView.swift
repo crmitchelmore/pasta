@@ -76,6 +76,7 @@ private struct SectionData: Identifiable {
 public struct ClipboardListView: View {
     public let entries: [ClipboardEntry]
     @Binding private var selectedEntryID: UUID?
+    @Binding private var selectedEntryIDs: Set<UUID>
     private let searchQuery: String
     private let filterType: ContentType?
     private let filterApp: String?
@@ -88,7 +89,7 @@ public struct ClipboardListView: View {
     private let onReveal: (ClipboardEntry) -> Void
 
     @State private var isSelectionMode = false
-    @State private var selectedIDs: Set<UUID> = []
+    @State private var bulkSelectedIDs: Set<UUID> = []
     @State private var deleteConfirmEntry: ClipboardEntry? = nil
     
     // Cached computed data for performance
@@ -102,13 +103,14 @@ public struct ClipboardListView: View {
         return MetadataParser.extractableTypes.contains(filterType)
     }
 
-    private var selectedEntriesInDisplayOrder: [ClipboardEntry] {
-        entries.filter { selectedIDs.contains($0.id) }
+    private var bulkSelectedEntriesInDisplayOrder: [ClipboardEntry] {
+        entries.filter { bulkSelectedIDs.contains($0.id) }
     }
 
     public init(
         entries: [ClipboardEntry],
         selectedEntryID: Binding<UUID?> = .constant(nil),
+        selectedEntryIDs: Binding<Set<UUID>> = .constant([]),
         searchQuery: String = "",
         filterType: ContentType? = nil,
         filterApp: String? = nil,
@@ -122,6 +124,7 @@ public struct ClipboardListView: View {
     ) {
         self.entries = entries
         _selectedEntryID = selectedEntryID
+        _selectedEntryIDs = selectedEntryIDs
         self.searchQuery = searchQuery
         self.filterType = filterType
         self.filterApp = filterApp
@@ -215,9 +218,9 @@ public struct ClipboardListView: View {
         .onAppear { rebuildSections() }
         .onChange(of: entries.map(\.id)) { _, ids in
             let visibleIDs = Set(ids)
-            let filteredSelection = selectedIDs.intersection(visibleIDs)
-            if filteredSelection != selectedIDs {
-                selectedIDs = filteredSelection
+            let filteredSelection = bulkSelectedIDs.intersection(visibleIDs)
+            if filteredSelection != bulkSelectedIDs {
+                bulkSelectedIDs = filteredSelection
             }
             if ids.isEmpty, isSelectionMode {
                 isSelectionMode = false
@@ -243,75 +246,88 @@ public struct ClipboardListView: View {
     
     @ViewBuilder
     private var listToolbar: some View {
-        let selectedEntries = selectedEntriesInDisplayOrder
-        let selectedCount = selectedEntries.count
+        let bulkSelectedEntries = bulkSelectedEntriesInDisplayOrder
+        let bulkSelectedCount = bulkSelectedEntries.count
+        let normalSelectedCount = selectedEntryIDs.count
 
-        HStack {
+        Group {
             if isSelectionMode {
-                Button {
-                    if selectedCount == entries.count {
-                        selectedIDs.removeAll()
-                    } else {
-                        selectedIDs = Set(entries.map(\.id))
-                    }
-                } label: {
-                    Text(selectedCount == entries.count ? "Deselect All" : "Select All")
-                }
-                .buttonStyle(.borderless)
-                
-                Spacer()
-                
-                Text("\(selectedCount) selected")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                
-                Spacer()
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Button {
+                            if bulkSelectedCount == entries.count {
+                                bulkSelectedIDs.removeAll()
+                            } else {
+                                bulkSelectedIDs = Set(entries.map(\.id))
+                            }
+                        } label: {
+                            Text(bulkSelectedCount == entries.count ? "Deselect All" : "Select All")
+                        }
+                        .buttonStyle(.borderless)
 
-                Button {
-                    onCopyMultiple(selectedEntries)
-                } label: {
-                    Label("Copy Selected", systemImage: "doc.on.doc")
-                        .labelStyle(.titleAndIcon)
+                        Spacer(minLength: 8)
+
+                        Text("\(bulkSelectedCount) selected")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 8)
+
+                        Button("Done") {
+                            isSelectionMode = false
+                            bulkSelectedIDs.removeAll()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    HStack(spacing: 8) {
+                        Button {
+                            onCopyMultiple(bulkSelectedEntries)
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(bulkSelectedEntries.isEmpty)
+
+                        Button("Delete", role: .destructive) {
+                            onDeleteMultiple(Array(bulkSelectedIDs))
+                            bulkSelectedIDs.removeAll()
+                            isSelectionMode = false
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                        .disabled(bulkSelectedEntries.isEmpty)
+
+                        Spacer(minLength: 0)
+                    }
                 }
-                .buttonStyle(.bordered)
-                .disabled(selectedEntries.isEmpty)
-                
-                Button("Delete Selected", role: .destructive) {
-                    onDeleteMultiple(Array(selectedIDs))
-                    selectedIDs.removeAll()
-                    isSelectionMode = false
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .disabled(selectedIDs.isEmpty)
-                
-                Button("Done") {
-                    isSelectionMode = false
-                    selectedIDs.removeAll()
-                }
-                .buttonStyle(.bordered)
+                .controlSize(.small)
             } else {
-                Text("\(entries.count) items")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                
-                Spacer()
-                
-                // Show "Values Only" toggle when filtering by extractable type
-                if canShowValuesToggle {
-                    Toggle("Values Only", isOn: $showExtractedValuesOnly)
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .help("Show only the extracted \(filterType?.displayTitle.lowercased() ?? "items") instead of full text")
+                HStack {
+                    Text(normalSelectedCount > 1 ? "\(normalSelectedCount) selected" : "\(entries.count) items")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    // Show "Values Only" toggle when filtering by extractable type
+                    if canShowValuesToggle {
+                        Toggle("Values Only", isOn: $showExtractedValuesOnly)
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .help("Show only the extracted \(filterType?.displayTitle.lowercased() ?? "items") instead of full text")
+                    }
+
+                    Button {
+                        bulkSelectedIDs = selectedEntryIDs
+                        isSelectionMode = true
+                    } label: {
+                        Label("Select", systemImage: "checkmark.circle")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .buttonStyle(.borderless)
                 }
-                
-                Button {
-                    isSelectionMode = true
-                } label: {
-                    Label("Select", systemImage: "checkmark.circle")
-                        .labelStyle(.titleAndIcon)
-                }
-                .buttonStyle(.borderless)
             }
         }
         .padding(.horizontal, 12)
@@ -357,11 +373,20 @@ public struct ClipboardListView: View {
             HighPerformanceListView(
                 rows: entries.map { ClipboardRowData(from: $0) },
                 selectedID: $selectedEntryID,
+                selectedIDs: $selectedEntryIDs,
                 onPaste: { id in
                     if let entry = entryLookup[id] { onPaste(entry) }
                 },
                 onCopy: { id in
                     if let entry = entryLookup[id] { onCopy(entry) }
+                },
+                onCopyMultiple: { ids in
+                    let selectedEntries = entries.filter { ids.contains($0.id) }
+                    if selectedEntries.count == 1, let entry = selectedEntries.first {
+                        onCopy(entry)
+                    } else {
+                        onCopyMultiple(selectedEntries)
+                    }
                 },
                 onDelete: { id in
                     if let entry = entryLookup[id] { deleteConfirmEntry = entry }
@@ -443,15 +468,15 @@ public struct ClipboardListView: View {
                         ForEach(section.rows) { row in
                             SelectionModeRowView(
                                 row: row,
-                                isSelected: selectedIDs.contains(row.id)
+                                isSelected: bulkSelectedIDs.contains(row.id)
                             )
                             .id(row.id)
                             .tag(row.id)
                             .onTapGesture {
-                                if selectedIDs.contains(row.id) {
-                                    selectedIDs.remove(row.id)
+                                if bulkSelectedIDs.contains(row.id) {
+                                    bulkSelectedIDs.remove(row.id)
                                 } else {
-                                    selectedIDs.insert(row.id)
+                                    bulkSelectedIDs.insert(row.id)
                                 }
                             }
                         }
