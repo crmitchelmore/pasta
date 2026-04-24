@@ -5,6 +5,12 @@ import os.log
 public final class DatabaseManager: @unchecked Sendable {
     private let dbQueue: DatabaseQueue
 
+    /// Coefficient applied to `ln(1 + ageDays)` when combining BM25 with a
+    /// recency penalty in FTS5 search ordering. Tuned so that an 11000-day-old
+    /// entry incurs ~5.6 of penalty (enough to overcome the BM25 advantage long
+    /// token-heavy documents would otherwise have over fresh exact matches).
+    private static let recencyPenaltyCoefficient: Double = 0.6
+
     public init(databaseURL: URL = DatabaseManager.defaultDatabaseURL()) throws {
         do {
             try FileManager.default.createDirectory(
@@ -351,7 +357,9 @@ public final class DatabaseManager: @unchecked Sendable {
     public func searchExact(query: String, contentType: ContentType?, limit: Int = 50) throws -> [(ClipboardEntry, Double)] {
         try dbQueue.read { db in
             var sql = """
-            SELECT e.*, bm25(clipboard_entries_fts) AS rank
+            SELECT e.*,
+                   bm25(clipboard_entries_fts) + \(Self.recencyPenaltyCoefficient) *
+                       ln(1.0 + max(julianday('now') - julianday(e.timestamp), 0.0)) AS rank
             FROM clipboard_entries_fts
             JOIN clipboard_entries e ON e.rowid = clipboard_entries_fts.rowid
             WHERE clipboard_entries_fts MATCH ?
@@ -364,9 +372,10 @@ public final class DatabaseManager: @unchecked Sendable {
                 args.append(contentType.rawValue)
             }
 
-            // Round rank to 1 decimal place so entries with similar relevance
-            // are grouped together, then sort by timestamp within each group
-            sql += " ORDER BY ROUND(rank, 1) ASC, e.timestamp DESC LIMIT ?"
+            // Combined relevance + recency ordering. BM25 alone over-rewards long
+            // token-heavy documents, so we add a logarithmic recency penalty
+            // (lower = better) so a fresh exact match wins over an ancient long doc.
+            sql += " ORDER BY rank ASC LIMIT ?"
             args.append(limit)
 
             let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
@@ -395,22 +404,25 @@ public final class DatabaseManager: @unchecked Sendable {
         
         return try dbQueue.read { db in
             var sql = """
-            SELECT e.*, bm25(clipboard_entries_fts) AS rank
+            SELECT e.*,
+                   bm25(clipboard_entries_fts) + \(Self.recencyPenaltyCoefficient) *
+                       ln(1.0 + max(julianday('now') - julianday(e.timestamp), 0.0)) AS rank
             FROM clipboard_entries_fts
             JOIN clipboard_entries e ON e.rowid = clipboard_entries_fts.rowid
             WHERE clipboard_entries_fts MATCH ?
             """
-            
+
             var args: [DatabaseValueConvertible] = [ftsQuery]
-            
+
             if let contentType {
                 sql += " AND e.contentType = ?"
                 args.append(contentType.rawValue)
             }
-            
-            // Round rank to 1 decimal place so entries with similar relevance
-            // are grouped together, then sort by timestamp within each group
-            sql += " ORDER BY ROUND(rank, 1) ASC, e.timestamp DESC LIMIT ?"
+
+            // Combined relevance + recency ordering. BM25 alone over-rewards long
+            // token-heavy documents, so we add a logarithmic recency penalty
+            // (lower = better) so a fresh exact match wins over an ancient long doc.
+            sql += " ORDER BY rank ASC LIMIT ?"
             args.append(limit)
             
             let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
