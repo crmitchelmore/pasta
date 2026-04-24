@@ -148,4 +148,89 @@ final class SearchServiceTests: XCTestCase {
         let recent = try db.fetchRecent(limit: 10)
         XCTAssertEqual(recent.map(\.content), ["new", "old"])
     }
+
+    /// Exact case-insensitive equality of trimmed content vs trimmed query
+    /// must outrank everything else — recency, popularity, BM25.
+    func testExactEqualityBoostBeatsRecency() throws {
+        let db = try DatabaseManager.inMemory()
+        let now = Date()
+
+        // Old exact-equal entry
+        try db.insert(ClipboardEntry(content: "Acme Corp", contentType: .text, timestamp: now.addingTimeInterval(-30 * 86_400)))
+        // Fresh fuzzy match
+        try db.insert(ClipboardEntry(content: "Acme Corp acquired Initech today", contentType: .text, timestamp: now.addingTimeInterval(-60)))
+
+        let service = SearchService(database: db)
+        let results = try service.search(query: "acme corp", limit: 10)
+
+        XCTAssertEqual(results.first?.entry.content, "Acme Corp",
+                       "Exact-equality boost should put 'Acme Corp' first even though the fuzzy match is fresher")
+    }
+
+    /// Frequently-pasted entries should rank higher when relevance is comparable.
+    func testCopyCountBoostsRanking() throws {
+        let db = try DatabaseManager.inMemory()
+        let now = Date()
+
+        try db.insert(ClipboardEntry(content: "design notes alpha", contentType: .text, timestamp: now, copyCount: 1))
+        try db.insert(ClipboardEntry(content: "design notes beta", contentType: .text, timestamp: now, copyCount: 50))
+
+        let service = SearchService(database: db)
+        let results = try service.search(query: "design", limit: 10)
+
+        XCTAssertEqual(results.first?.entry.content, "design notes beta",
+                       "Entry pasted 50× should outrank an equally-fresh entry pasted 1×")
+    }
+
+    /// Punctuation-bearing queries (URLs, emails, paths) must be tokenised the
+    /// same way the FTS5 unicode61 tokenizer tokenises content.
+    func testPunctuationInQueryIsTokenised() throws {
+        let db = try DatabaseManager.inMemory()
+        let now = Date()
+        try db.insert(ClipboardEntry(content: "https://github.com/example/repo", contentType: .url, timestamp: now))
+        try db.insert(ClipboardEntry(content: "unrelated entry", contentType: .text, timestamp: now))
+
+        let service = SearchService(database: db)
+
+        let urlQuery = try service.search(query: "github.com", limit: 10)
+        XCTAssertEqual(urlQuery.first?.entry.content, "https://github.com/example/repo")
+
+        let pathQuery = try service.search(query: "example/repo", limit: 10)
+        XCTAssertEqual(pathQuery.first?.entry.content, "https://github.com/example/repo")
+    }
+
+    /// `unicode61 remove_diacritics 2` should fold combining marks so `cafe`
+    /// matches `café`. (Note: ligatures like `ß` are *not* folded — they aren't
+    /// diacritics, they're separate codepoints.)
+    func testDiacriticInsensitiveSearch() throws {
+        let db = try DatabaseManager.inMemory()
+        let now = Date()
+        try db.insert(ClipboardEntry(content: "Café Münchner", contentType: .text, timestamp: now))
+
+        let service = SearchService(database: db)
+
+        XCTAssertEqual(try service.search(query: "cafe", limit: 10).count, 1, "'cafe' should match 'Café'")
+        XCTAssertEqual(try service.search(query: "munchner", limit: 10).count, 1, "'munchner' should match 'Münchner'")
+    }
+
+    /// `contentType` is filtered via the explicit param, not via the FTS index.
+    /// Searching for the literal text "url" or "email" must NOT return rows
+    /// just because their contentType happens to be that value.
+    func testContentTypeNotIndexedInFTS() throws {
+        let db = try DatabaseManager.inMemory()
+        let now = Date()
+        try db.insert(ClipboardEntry(content: "https://example.com", contentType: .url, timestamp: now))
+        try db.insert(ClipboardEntry(content: "user@example.com", contentType: .email, timestamp: now))
+        try db.insert(ClipboardEntry(content: "the quick brown fox", contentType: .text, timestamp: now))
+
+        let service = SearchService(database: db)
+
+        // None of the entries have the word "url" or "email" in their content,
+        // so these queries should match nothing — even though two of the rows
+        // have those values as their contentType.
+        XCTAssertEqual(try service.search(query: "url", limit: 10).count, 0,
+                       "Searching 'url' must not match rows just because their contentType is 'url'")
+        XCTAssertEqual(try service.search(query: "email", limit: 10).count, 0,
+                       "Searching 'email' must not match rows just because their contentType is 'email'")
+    }
 }

@@ -168,6 +168,52 @@ public final class DatabaseManager: @unchecked Sendable {
             )
         }
 
+        migrator.registerMigration("rebuildFTSIndexV2") { db in
+            // The original FTS table indexed `contentType` as a tokenised column,
+            // which polluted ranking — searching "url" matched every URL by
+            // metadata text. We also want diacritic-folding so "café" matches
+            // "cafe". Rebuild with `content` only and the
+            // `unicode61 remove_diacritics 2` tokenizer.
+            try db.execute(sql: "DROP TRIGGER IF EXISTS clipboard_entries_au;")
+            try db.execute(sql: "DROP TRIGGER IF EXISTS clipboard_entries_ad;")
+            try db.execute(sql: "DROP TRIGGER IF EXISTS clipboard_entries_ai;")
+            try db.execute(sql: "DROP TABLE IF EXISTS clipboard_entries_fts;")
+
+            try db.execute(sql: """
+            CREATE VIRTUAL TABLE clipboard_entries_fts USING fts5(
+                content,
+                content='clipboard_entries',
+                content_rowid='rowid',
+                tokenize='unicode61 remove_diacritics 2'
+            );
+            """)
+
+            try db.execute(sql: """
+            CREATE TRIGGER clipboard_entries_ai AFTER INSERT ON clipboard_entries BEGIN
+                INSERT INTO clipboard_entries_fts(rowid, content)
+                VALUES (new.rowid, new.content);
+            END;
+            """)
+
+            try db.execute(sql: """
+            CREATE TRIGGER clipboard_entries_ad AFTER DELETE ON clipboard_entries BEGIN
+                INSERT INTO clipboard_entries_fts(clipboard_entries_fts, rowid, content)
+                VALUES('delete', old.rowid, old.content);
+            END;
+            """)
+
+            try db.execute(sql: """
+            CREATE TRIGGER clipboard_entries_au AFTER UPDATE ON clipboard_entries BEGIN
+                INSERT INTO clipboard_entries_fts(clipboard_entries_fts, rowid, content)
+                VALUES('delete', old.rowid, old.content);
+                INSERT INTO clipboard_entries_fts(rowid, content)
+                VALUES (new.rowid, new.content);
+            END;
+            """)
+
+            try db.execute(sql: "INSERT INTO clipboard_entries_fts(clipboard_entries_fts) VALUES('rebuild');")
+        }
+
         return migrator
     }
 
@@ -351,41 +397,14 @@ public final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Exact full-text search using the FTS5 virtual table.
-    ///
-    /// - Returns: Tuples of (ClipboardEntry, rank) where lower rank is better.
-    public func searchExact(query: String, contentType: ContentType?, limit: Int = 50) throws -> [(ClipboardEntry, Double)] {
-        try dbQueue.read { db in
-            var sql = """
-            SELECT e.*,
-                   bm25(clipboard_entries_fts) + \(Self.recencyPenaltyCoefficient) *
-                       ln(1.0 + max(julianday('now') - julianday(e.timestamp), 0.0)) AS rank
-            FROM clipboard_entries_fts
-            JOIN clipboard_entries e ON e.rowid = clipboard_entries_fts.rowid
-            WHERE clipboard_entries_fts MATCH ?
-            """
+    /// Coefficient applied to `ln(1 + copyCount)` in the FTS5 ranking score.
+    /// Frequently-pasted entries should rank higher.
+    private static let copyCountBonusCoefficient: Double = 0.3
 
-            var args: [DatabaseValueConvertible] = [query]
+    /// Bonus applied when an entry's content equals the trimmed query
+    /// (case-insensitive). Large enough to dominate BM25 + recency.
+    private static let exactEqualityBonus: Double = 10.0
 
-            if let contentType {
-                sql += " AND e.contentType = ?"
-                args.append(contentType.rawValue)
-            }
-
-            // Combined relevance + recency ordering. BM25 alone over-rewards long
-            // token-heavy documents, so we add a logarithmic recency penalty
-            // (lower = better) so a fresh exact match wins over an ancient long doc.
-            sql += " ORDER BY rank ASC LIMIT ?"
-            args.append(limit)
-
-            let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
-            return rows.compactMap { row in
-                guard let entry = try? ClipboardEntry(row: row) else { return nil }
-                return (entry, row["rank"] ?? 0.0)
-            }
-        }
-    }
-    
     /// Fast full-text search using FTS5 with prefix matching support.
     /// This is the primary search method - uses SQLite's optimized FTS5 engine.
     ///
@@ -393,78 +412,75 @@ public final class DatabaseManager: @unchecked Sendable {
     ///   - query: Search query (supports multiple words, each gets prefix matching)
     ///   - contentType: Optional filter by content type
     ///   - limit: Maximum results to return
-    /// - Returns: Matching entries ordered by relevance then recency
+    /// - Returns: Matching entries ordered by combined relevance + recency + popularity
     public func searchFTS(query: String, contentType: ContentType?, limit: Int = 50) throws -> [ClipboardEntry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
-        
-        // Build FTS5 query with prefix matching for each word
-        // "hello world" → "hello* world*" (matches "helloworld", "worldwide", etc.)
+
         let ftsQuery = buildFTSQuery(from: trimmed)
-        
+        guard !ftsQuery.isEmpty else { return [] }
+
+        // Pre-normalised form used for the SQL exact-equality boost.
+        let normalisedExact = trimmed.lowercased()
+
         return try dbQueue.read { db in
             var sql = """
             SELECT e.*,
-                   bm25(clipboard_entries_fts) + \(Self.recencyPenaltyCoefficient) *
-                       ln(1.0 + max(julianday('now') - julianday(e.timestamp), 0.0)) AS rank
+                   bm25(clipboard_entries_fts)
+                   + \(Self.recencyPenaltyCoefficient) * ln(1.0 + max(julianday('now') - julianday(e.timestamp), 0.0))
+                   - \(Self.copyCountBonusCoefficient) * ln(1.0 + e.copyCount)
+                   + (CASE WHEN LOWER(TRIM(e.content)) = ? THEN -\(Self.exactEqualityBonus) ELSE 0.0 END)
+                   AS rank
             FROM clipboard_entries_fts
             JOIN clipboard_entries e ON e.rowid = clipboard_entries_fts.rowid
             WHERE clipboard_entries_fts MATCH ?
             """
 
-            var args: [DatabaseValueConvertible] = [ftsQuery]
+            var args: [DatabaseValueConvertible] = [normalisedExact, ftsQuery]
 
             if let contentType {
                 sql += " AND e.contentType = ?"
                 args.append(contentType.rawValue)
             }
 
-            // Combined relevance + recency ordering. BM25 alone over-rewards long
-            // token-heavy documents, so we add a logarithmic recency penalty
-            // (lower = better) so a fresh exact match wins over an ancient long doc.
+            // Combined score:
+            //   bm25                 — FTS relevance, lower = better
+            //   + recency penalty    — pushes ancient entries down
+            //   - copyCount bonus    — frequently-pasted entries float up
+            //   + exact equality     — content == query trumps everything else
             sql += " ORDER BY rank ASC LIMIT ?"
             args.append(limit)
-            
+
             let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
             return rows.compactMap { row in
                 try? ClipboardEntry(row: row)
             }
         }
     }
-    
-    /// Builds an FTS5 query string with prefix matching.
-    /// Each word gets a * suffix for prefix matching.
-    /// Special characters are escaped to prevent FTS5 syntax errors.
+
+    /// Builds an FTS5 MATCH query string with prefix matching.
+    /// Punctuation is replaced with whitespace so e.g. "github.com" becomes
+    /// the two-token query "github* com*", and FTS5-special characters that
+    /// would otherwise change query semantics are stripped.
     private func buildFTSQuery(from input: String) -> String {
-        // Split into words and clean each
-        let words = input.components(separatedBy: .whitespaces)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
+        // Punctuation that should split a token. Default unicode61 tokenizer
+        // also splits on these, so re-tokenising the query the same way avoids
+        // surprises with terms like `github.com`, `foo@bar`, `path/to/file`.
+        let splitters: Set<Character> = [
+            ".", ",", ";", "/", "\\", "@", "#", "&", "|",
+            "!", "?", "<", ">", "=", "[", "]", "{", "}",
+            "\"", "*", "-", "+", "(", ")", ":", "^", "~", "'", "`"
+        ]
+
+        let normalised = String(input.map { splitters.contains($0) ? " " : $0 })
+
+        let words = normalised
+            .split(whereSeparator: { $0.isWhitespace })
+            .map { String($0) }
             .filter { !$0.isEmpty }
-        
+
         guard !words.isEmpty else { return "" }
-        
-        // Escape special FTS5 characters and add prefix matching
-        let escapedWords = words.map { word -> String in
-            // Remove/escape FTS5 special chars: " * - + ( ) : ^
-            let escaped = word
-                .replacingOccurrences(of: "\"", with: "")
-                .replacingOccurrences(of: "*", with: "")
-                .replacingOccurrences(of: "-", with: "")
-                .replacingOccurrences(of: "+", with: "")
-                .replacingOccurrences(of: "(", with: "")
-                .replacingOccurrences(of: ")", with: "")
-                .replacingOccurrences(of: ":", with: "")
-                .replacingOccurrences(of: "^", with: "")
-            
-            // If word is empty after escaping, skip it
-            guard !escaped.isEmpty else { return "" }
-            
-            // Add prefix matching
-            return escaped + "*"
-        }.filter { !$0.isEmpty }
-        
-        // Join with spaces (implicit AND in FTS5)
-        return escapedWords.joined(separator: " ")
+        return words.map { "\($0)*" }.joined(separator: " ")
     }
 
     /// Deletes entries older than the newest `maxEntries` and returns any associated image paths.
