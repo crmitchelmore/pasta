@@ -214,8 +214,25 @@ public final class DatabaseManager: @unchecked Sendable {
             try db.execute(sql: "INSERT INTO clipboard_entries_fts(clipboard_entries_fts) VALUES('rebuild');")
         }
 
+        migrator.registerMigration("createSnippets") { db in
+            try db.create(table: Snippet.databaseTableName) { t in
+                t.column("id", .text).primaryKey().notNull()
+                t.column("name", .text).notNull()
+                t.column("content", .text).notNull()
+                t.column("keyword", .text)
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.create(index: "idx_snippets_keyword", on: Snippet.databaseTableName, columns: ["keyword"])
+            try db.create(index: "idx_snippets_updatedAt", on: Snippet.databaseTableName, columns: ["updatedAt"])
+        }
+
         return migrator
     }
+
+    /// Provides access to the underlying database queue for components that
+    /// need to perform their own GRDB reads/writes (e.g. `SnippetStore`).
+    public var dbQueueForSnippets: DatabaseQueue { dbQueue }
 
     public static func defaultDatabaseURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!

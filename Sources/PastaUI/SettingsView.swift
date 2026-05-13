@@ -133,6 +133,12 @@ public struct SettingsView: View {
                 Label("Import", systemImage: "square.and.arrow.down")
             }
             .tag(SettingsTab.import)
+
+            SnippetsSettingsTab()
+            .tabItem {
+                Label("Snippets", systemImage: "text.badge.plus")
+            }
+            .tag(SettingsTab.snippets)
             
             AboutSettingsTab(
                 checkForUpdates: checkForUpdates,
@@ -157,7 +163,7 @@ public struct SettingsView: View {
     }
 
     private enum SettingsTab: Hashable {
-        case general, clipboard, detection, storage, iCloud, `import`, about, tipJar
+        case general, clipboard, detection, storage, iCloud, `import`, snippets, about, tipJar
     }
 }
 
