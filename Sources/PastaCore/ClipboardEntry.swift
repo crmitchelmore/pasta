@@ -21,6 +21,9 @@ public enum ContentType: String, Codable, CaseIterable, Sendable {
     case code
     case shellCommand
     case color
+    case macAddress
+    case creditCard
+    case iban
     case unknown
 }
 

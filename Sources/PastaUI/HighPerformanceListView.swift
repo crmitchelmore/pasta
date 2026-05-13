@@ -35,7 +35,13 @@ public struct ClipboardRowData: Equatable {
     public init(from entry: ClipboardEntry) {
         self.id = entry.id
         let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.previewText = trimmed.isEmpty ? "(empty)" : String(trimmed.prefix(300))
+        let baseText = trimmed.isEmpty ? "(empty)" : String(trimmed.prefix(300))
+        // Credit-card primary entries should never show their full PAN in the row preview.
+        if entry.contentType == .creditCard, !trimmed.isEmpty {
+            self.previewText = ClipboardRowData.maskCreditCardPreview(trimmed)
+        } else {
+            self.previewText = baseText
+        }
         self.contentType = entry.contentType
         self.sourceAppName = entry.sourceApp?.displayName
         self.timestamp = entry.timestamp
@@ -68,6 +74,24 @@ public struct ClipboardRowData: Equatable {
             return SwatchColor(red: det.red, green: det.green, blue: det.blue, alpha: det.alpha)
         }
         return nil
+    }
+
+    /// Masks any 13-19 digit (Luhn-valid) numbers in the preview, leaving only last 4 visible.
+    /// Falls back to the trimmed input if no valid card found.
+    static func maskCreditCardPreview(_ text: String) -> String {
+        let digits = text.filter(\.isNumber)
+        guard digits.count >= 13, digits.count <= 19 else {
+            return String(text.prefix(300))
+        }
+        // If the whole entry is a single card number, build the masked grouped form.
+        let last4 = String(digits.suffix(4))
+        let masked = String(repeating: "*", count: max(0, digits.count - 4)) + last4
+        var grouped = ""
+        for (i, ch) in masked.enumerated() {
+            if i > 0 && i % 4 == 0 { grouped.append(" ") }
+            grouped.append(ch)
+        }
+        return grouped
     }
 }
 

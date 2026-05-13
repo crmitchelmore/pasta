@@ -52,6 +52,9 @@ public enum BuiltInDetectorKind: String, Codable, CaseIterable, Identifiable, Se
     case envVar
     case shellCommand
     case color
+    case macAddress
+    case creditCard
+    case iban
 
     public var id: String { rawValue }
 
@@ -69,6 +72,9 @@ public enum BuiltInDetectorKind: String, Codable, CaseIterable, Identifiable, Se
         case .envVar: return "Environment Variables"
         case .shellCommand: return "Shell Commands"
         case .color: return "Colors"
+        case .macAddress: return "MAC Addresses"
+        case .creditCard: return "Credit Cards"
+        case .iban: return "IBANs"
         }
     }
 }
@@ -100,6 +106,12 @@ public extension BuiltInDetectorKind {
             return Self.shellCommandPatterns(for: strictness)
         case .color:
             return Self.colorPatterns(for: strictness)
+        case .macAddress:
+            return MACAddressDetector.builtInPatterns(for: strictness)
+        case .creditCard:
+            return CreditCardDetector.builtInPatterns(for: strictness)
+        case .iban:
+            return IBANDetector.builtInPatterns(for: strictness)
         }
     }
 

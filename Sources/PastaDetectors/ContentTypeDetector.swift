@@ -71,6 +71,9 @@ public struct ContentTypeDetector {
     private let proseDetector: ProseDetector
     private let encodingDetector: EncodingDetector
     private let colorDetector: ColorDetector
+    private let macAddressDetector: MACAddressDetector
+    private let creditCardDetector: CreditCardDetector
+    private let ibanDetector: IBANDetector
 
     public init(
         emailDetector: EmailDetector = EmailDetector(),
@@ -87,7 +90,10 @@ public struct ContentTypeDetector {
         shellCommandDetector: ShellCommandDetector = ShellCommandDetector(),
         proseDetector: ProseDetector = ProseDetector(),
         encodingDetector: EncodingDetector = EncodingDetector(),
-        colorDetector: ColorDetector = ColorDetector()
+        colorDetector: ColorDetector = ColorDetector(),
+        macAddressDetector: MACAddressDetector = MACAddressDetector(),
+        creditCardDetector: CreditCardDetector = CreditCardDetector(),
+        ibanDetector: IBANDetector = IBANDetector()
     ) {
         self.emailDetector = emailDetector
         self.phoneNumberDetector = phoneNumberDetector
@@ -104,6 +110,9 @@ public struct ContentTypeDetector {
         self.proseDetector = proseDetector
         self.encodingDetector = encodingDetector
         self.colorDetector = colorDetector
+        self.macAddressDetector = macAddressDetector
+        self.creditCardDetector = creditCardDetector
+        self.ibanDetector = ibanDetector
     }
 
     public func detect(in text: String, configuration: DetectorConfiguration = .default) -> Output {
@@ -143,6 +152,9 @@ public struct ContentTypeDetector {
         let shellCommands = detectShellCommands(in: analysisText, configuration: configuration)
         let prose = proseDetector.detect(in: analysisText)
         let colors = detectColors(in: analysisText, configuration: configuration)
+        let macAddresses = detectMACAddresses(in: analysisText, configuration: configuration)
+        let creditCards = detectCreditCards(in: analysisText, configuration: configuration)
+        let ibans = detectIBANs(in: analysisText, configuration: configuration)
         let customDetections = detectCustomDetections(in: analysisText, configuration: configuration)
 
         let (primary, confidence) = selectPrimaryType(
@@ -160,7 +172,10 @@ public struct ContentTypeDetector {
             code: code,
             shellCommands: shellCommands,
             prose: prose,
-            colors: colors
+            colors: colors,
+            macAddresses: macAddresses,
+            creditCards: creditCards,
+            ibans: ibans
         )
 
         let splitEntries = makeSplitEntries(envOutput: env)
@@ -182,6 +197,9 @@ public struct ContentTypeDetector {
             shellCommands: shellCommands,
             prose: prose,
             colors: colors,
+            macAddresses: macAddresses,
+            creditCards: creditCards,
+            ibans: ibans,
             customDetections: customDetections
         )
 
@@ -636,6 +654,36 @@ public struct ContentTypeDetector {
         }
     }
 
+    private func detectMACAddresses(in text: String, configuration: DetectorConfiguration) -> [MACAddressDetector.Detection] {
+        let rule = detectorRule(for: .macAddress, configuration: configuration)
+        guard rule.isEnabled else { return [] }
+        return macAddressDetector.detect(
+            in: text,
+            strictness: detectorStrictness(for: .macAddress, configuration: configuration),
+            advancedPatterns: rule.useAdvancedPatterns ? rule.cleanedPatterns : []
+        )
+    }
+
+    private func detectCreditCards(in text: String, configuration: DetectorConfiguration) -> [CreditCardDetector.Detection] {
+        let rule = detectorRule(for: .creditCard, configuration: configuration)
+        guard rule.isEnabled else { return [] }
+        return creditCardDetector.detect(
+            in: text,
+            strictness: detectorStrictness(for: .creditCard, configuration: configuration),
+            advancedPatterns: rule.useAdvancedPatterns ? rule.cleanedPatterns : []
+        )
+    }
+
+    private func detectIBANs(in text: String, configuration: DetectorConfiguration) -> [IBANDetector.Detection] {
+        let rule = detectorRule(for: .iban, configuration: configuration)
+        guard rule.isEnabled else { return [] }
+        return ibanDetector.detect(
+            in: text,
+            strictness: detectorStrictness(for: .iban, configuration: configuration),
+            advancedPatterns: rule.useAdvancedPatterns ? rule.cleanedPatterns : []
+        )
+    }
+
     private func detectCustomDetections(in text: String, configuration: DetectorConfiguration) -> [CustomDetection] {
         let active = configuration.customDetectors.filter { $0.isEnabled }
         guard !active.isEmpty else { return [] }
@@ -723,7 +771,10 @@ public struct ContentTypeDetector {
         code: [CodeDetector.Detection],
         shellCommands: [ShellCommandDetector.Detection],
         prose: ProseDetector.Detection?,
-        colors: [ColorDetector.Detection]
+        colors: [ColorDetector.Detection],
+        macAddresses: [MACAddressDetector.Detection],
+        creditCards: [CreditCardDetector.Detection],
+        ibans: [IBANDetector.Detection]
     ) -> (ContentType, Double) {
         let trimmed = analysisText.trimmingCharacters(in: .whitespacesAndNewlines)
         let totalLength = trimmed.count
@@ -748,8 +799,11 @@ public struct ContentTypeDetector {
         let priorities: [ContentType] = [
             .jwt,
             .apiKey,
+            .creditCard,
+            .iban,
             .email,
             .phoneNumber,
+            .macAddress,
             .ipAddress,
             .uuid,
             .color,
@@ -817,6 +871,27 @@ public struct ContentTypeDetector {
         if let bestHash = hashes.max(by: { $0.confidence < $1.confidence }) {
             if coversMostOfText(bestHash.hash) {
                 candidates.append((.hash, bestHash.confidence))
+            }
+        }
+
+        // MAC address - cover most of text or short context
+        if let bestMAC = macAddresses.max(by: { $0.confidence < $1.confidence }) {
+            if coversMostOfText(bestMAC.raw) || isShortContext(bestMAC.raw) {
+                candidates.append((.macAddress, bestMAC.confidence))
+            }
+        }
+
+        // Credit card - high priority, only if it covers most of text
+        if let bestCC = creditCards.max(by: { $0.confidence < $1.confidence }) {
+            if coversMostOfText(bestCC.raw) || isShortContext(bestCC.raw) {
+                candidates.append((.creditCard, bestCC.confidence))
+            }
+        }
+
+        // IBAN - only if covers most of text or short context
+        if let bestIBAN = ibans.max(by: { $0.confidence < $1.confidence }) {
+            if coversMostOfText(bestIBAN.raw) || isShortContext(bestIBAN.raw) {
+                candidates.append((.iban, bestIBAN.confidence))
             }
         }
         
@@ -910,6 +985,9 @@ public struct ContentTypeDetector {
         shellCommands: [ShellCommandDetector.Detection],
         prose: ProseDetector.Detection?,
         colors: [ColorDetector.Detection],
+        macAddresses: [MACAddressDetector.Detection],
+        creditCards: [CreditCardDetector.Detection],
+        ibans: [IBANDetector.Detection],
         customDetections: [CustomDetection]
     ) -> String? {
         var meta: [String: Any] = [:]
@@ -1044,6 +1122,40 @@ public struct ContentTypeDetector {
                 "estimatedReadingTimeSeconds": prose.estimatedReadingTimeSeconds,
                 "confidence": prose.confidence
             ]
+        }
+
+        if !macAddresses.isEmpty {
+            meta["macAddresses"] = macAddresses.map { d in
+                [
+                    "raw": d.raw,
+                    "normalized": d.normalized,
+                    "isMulticast": d.isMulticast,
+                    "isLocallyAdministered": d.isLocallyAdministered,
+                    "confidence": d.confidence
+                ] as [String: Any]
+            }
+        }
+
+        if !creditCards.isEmpty {
+            // Important: only store masked form + last4, NOT the full PAN.
+            meta["creditCards"] = creditCards.map { d in
+                [
+                    "masked": d.maskedDisplay,
+                    "last4": d.last4,
+                    "brand": d.brand,
+                    "confidence": d.confidence
+                ] as [String: Any]
+            }
+        }
+
+        if !ibans.isEmpty {
+            meta["ibans"] = ibans.map { d in
+                [
+                    "iban": d.normalized,
+                    "country": d.countryCode,
+                    "confidence": d.confidence
+                ] as [String: Any]
+            }
         }
 
         if !customDetections.isEmpty {

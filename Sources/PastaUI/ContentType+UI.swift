@@ -21,6 +21,9 @@ extension ContentType {
         case .code: return "chevron.left.forwardslash.chevron.right"
         case .shellCommand: return "apple.terminal"
         case .color: return "paintpalette"
+        case .macAddress: return "wifi.router"
+        case .creditCard: return "creditcard"
+        case .iban: return "building.columns"
         case .unknown: return "questionmark"
         }
     }
@@ -44,6 +47,9 @@ extension ContentType {
         case .screenshot: return "Screenshot"
         case .url: return "URL"
         case .color: return "Color"
+        case .macAddress: return "MAC Address"
+        case .creditCard: return "Credit Card"
+        case .iban: return "IBAN"
         default:
             return rawValue.capitalized
         }
@@ -64,6 +70,9 @@ extension ContentType {
         case .uuid: return "UUID"
         case .hash: return "HASH"
         case .apiKey: return "API KEY"
+        case .macAddress: return "MAC"
+        case .creditCard: return "CARD"
+        case .iban: return "IBAN"
         default:
             return displayTitle.uppercased()
         }
