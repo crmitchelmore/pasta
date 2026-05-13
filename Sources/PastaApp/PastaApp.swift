@@ -1349,7 +1349,11 @@ struct PanelContentView: View {
             return .handled
 
         case .return:
-            pasteSelectedEntry()
+            if keyPress.modifiers.contains(.shift) || keyPress.modifiers.contains(.option) {
+                pasteSelectedEntry(asPlainText: true)
+            } else {
+                pasteSelectedEntry()
+            }
             return .handled
 
         case .delete:
@@ -1426,12 +1430,16 @@ struct PanelContentView: View {
         }
     }
 
-    private func pasteSelectedEntry() {
+    private func pasteSelectedEntry(asPlainText: Bool = false) {
         guard let selectedEntryID,
               let entry = displayedEntries.first(where: { $0.id == selectedEntryID }) else { return }
 
-        PastaLogger.ui.debug("Pasting entry: \(entry.contentType.rawValue) (\(entry.content.prefix(50))...)")
-        _ = PasteService().paste(entry)
+        PastaLogger.ui.debug("Pasting entry: \(entry.contentType.rawValue) (plain=\(asPlainText)) (\(entry.content.prefix(50))...)")
+        if asPlainText {
+            _ = PasteService().pastePlainText(entry)
+        } else {
+            _ = PasteService().paste(entry)
+        }
 
         closePanel()
     }

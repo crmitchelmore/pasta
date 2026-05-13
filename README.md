@@ -51,6 +51,7 @@ swift run PastaApp
 | `⌃⌘V` | Show/hide Pasta |
 | `↑` `↓` | Navigate history |
 | `Enter` | Paste selected item |
+| `⇧Enter` | Paste as plain text (strip formatting) |
 | `⌘1-9` | Quick-paste by position |
 | `⌘O` | Open selected entry as URL in browser |
 | `⌘⌫` | Delete selected item |
