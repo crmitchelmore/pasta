@@ -63,6 +63,10 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
     public var parentEntryId: UUID?
     /// Whether this entry has been synced to iCloud.
     public var isSynced: Bool
+    /// Whether this entry is pinned to the top of the list.
+    /// Pinned entries are excluded from `DeleteService.deleteAll()` unless
+    /// `includePinned: true` is passed, and are skipped by retention pruning.
+    public var isPinned: Bool
 
     /// Whether this entry was extracted from a parent entry.
     public var isExtracted: Bool { parentEntryId != nil }
@@ -98,7 +102,8 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
         sourceApp: String? = nil,
         metadata: String? = nil,
         parentEntryId: UUID? = nil,
-        isSynced: Bool = false
+        isSynced: Bool = false,
+        isPinned: Bool = false
     ) {
         self.id = id
         self.content = content
@@ -111,6 +116,7 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
         self.metadata = metadata
         self.parentEntryId = parentEntryId
         self.isSynced = isSynced
+        self.isPinned = isPinned
     }
 
     public func encode(to container: inout PersistenceContainer) {
@@ -125,6 +131,7 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
         container["metadata"] = metadata
         container["parentEntryId"] = parentEntryId?.uuidString
         container["isSynced"] = isSynced
+        container["isPinned"] = isPinned
     }
 
     static func sha256Hex(_ string: String) -> String {

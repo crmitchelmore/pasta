@@ -227,6 +227,17 @@ public final class DatabaseManager: @unchecked Sendable {
             try db.create(index: "idx_snippets_updatedAt", on: Snippet.databaseTableName, columns: ["updatedAt"])
         }
 
+        migrator.registerMigration("addIsPinned") { db in
+            try db.alter(table: ClipboardEntry.databaseTableName) { t in
+                t.add(column: "isPinned", .boolean).notNull().defaults(to: false)
+            }
+            try db.create(
+                index: "idx_clipboard_entries_isPinned",
+                on: ClipboardEntry.databaseTableName,
+                columns: ["isPinned"]
+            )
+        }
+
         return migrator
     }
 
@@ -266,8 +277,8 @@ public final class DatabaseManager: @unchecked Sendable {
                 try db.execute(
                     sql: """
                     INSERT INTO \(ClipboardEntry.databaseTableName)
-                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isPinned)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     arguments: [
                         entry.id.uuidString,
@@ -281,6 +292,7 @@ public final class DatabaseManager: @unchecked Sendable {
                         entry.metadata,
                         contentHash,
                         entry.parentEntryId?.uuidString,
+                        entry.isPinned,
                     ]
                 )
                 PastaLogger.database.debug("Inserted new entry with type \(entry.contentType.rawValue)")
@@ -390,16 +402,33 @@ public final class DatabaseManager: @unchecked Sendable {
     }
 
     /// Deletes all entries and returns the count deleted and associated image paths.
-    public func deleteAll() throws -> (count: Int, imagePaths: [String]) {
+    ///
+    /// - Parameter includePinned: when `false` (the default), pinned entries are
+    ///   preserved. Pass `true` from explicit "wipe everything" code paths.
+    public func deleteAll(includePinned: Bool = false) throws -> (count: Int, imagePaths: [String]) {
         try dbQueue.write { db in
+            let pinClause = includePinned ? "" : " AND isPinned = 0"
             let imagePaths = try String.fetchAll(
                 db,
-                sql: "SELECT imagePath FROM \(ClipboardEntry.databaseTableName) WHERE imagePath IS NOT NULL"
+                sql: "SELECT imagePath FROM \(ClipboardEntry.databaseTableName) WHERE imagePath IS NOT NULL\(pinClause)"
             )
 
-            try db.execute(sql: "DELETE FROM \(ClipboardEntry.databaseTableName)")
+            let deleteWhere = includePinned ? "" : " WHERE isPinned = 0"
+            try db.execute(sql: "DELETE FROM \(ClipboardEntry.databaseTableName)\(deleteWhere)")
 
             return (db.changesCount, imagePaths)
+        }
+    }
+
+    /// Sets the pinned state for an entry. Returns true if a row was updated.
+    @discardableResult
+    public func setPinned(id: UUID, pinned: Bool) throws -> Bool {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE \(ClipboardEntry.databaseTableName) SET isPinned = ? WHERE id = ?",
+                arguments: [pinned, id.uuidString]
+            )
+            return db.changesCount > 0
         }
     }
 
@@ -501,6 +530,7 @@ public final class DatabaseManager: @unchecked Sendable {
     }
 
     /// Deletes entries older than the newest `maxEntries` and returns any associated image paths.
+    /// Pinned entries are never pruned and do not count against the cap.
     public func pruneToMaxEntries(_ maxEntries: Int) throws -> [String] {
         guard maxEntries > 0 else { return [] }
 
@@ -513,6 +543,7 @@ public final class DatabaseManager: @unchecked Sendable {
                 WHERE rowid IN (
                     SELECT rowid
                     FROM clipboard_entries
+                    WHERE isPinned = 0
                     ORDER BY timestamp DESC
                     LIMIT -1 OFFSET ?
                 ) AND imagePath IS NOT NULL
@@ -526,6 +557,7 @@ public final class DatabaseManager: @unchecked Sendable {
                 WHERE rowid IN (
                     SELECT rowid
                     FROM clipboard_entries
+                    WHERE isPinned = 0
                     ORDER BY timestamp DESC
                     LIMIT -1 OFFSET ?
                 )
@@ -538,6 +570,7 @@ public final class DatabaseManager: @unchecked Sendable {
     }
 
     /// Deletes entries older than the specified number of days and returns any associated image paths.
+    /// Pinned entries are preserved.
     public func pruneOlderThan(days: Int, now: Date = Date()) throws -> [String] {
         guard days > 0 else { return [] }
 
@@ -546,12 +579,12 @@ public final class DatabaseManager: @unchecked Sendable {
         return try dbQueue.write { db in
             let imagePaths = try String.fetchAll(
                 db,
-                sql: "SELECT imagePath FROM \(ClipboardEntry.databaseTableName) WHERE timestamp < ? AND imagePath IS NOT NULL",
+                sql: "SELECT imagePath FROM \(ClipboardEntry.databaseTableName) WHERE timestamp < ? AND isPinned = 0 AND imagePath IS NOT NULL",
                 arguments: [cutoff]
             )
 
             try db.execute(
-                sql: "DELETE FROM \(ClipboardEntry.databaseTableName) WHERE timestamp < ?",
+                sql: "DELETE FROM \(ClipboardEntry.databaseTableName) WHERE timestamp < ? AND isPinned = 0",
                 arguments: [cutoff]
             )
 
@@ -592,8 +625,8 @@ public final class DatabaseManager: @unchecked Sendable {
                 try db.execute(
                     sql: """
                     INSERT INTO \(ClipboardEntry.databaseTableName)
-                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isPinned)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     arguments: [
                         entry.id.uuidString,
@@ -607,6 +640,7 @@ public final class DatabaseManager: @unchecked Sendable {
                         entry.metadata,
                         contentHash,
                         entry.parentEntryId?.uuidString,
+                        entry.isPinned,
                     ]
                 )
                 PastaLogger.database.debug("Inserted new entry with type \(entry.contentType.rawValue)")

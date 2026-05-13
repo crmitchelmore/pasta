@@ -916,7 +916,8 @@ struct PanelContentView: View {
                 onDelete: { entry in deleteEntry(entry) },
                 onDeleteMultiple: { ids in deleteEntries(ids) },
                 onReveal: { entry in revealEntry(entry) },
-                onOpenURL: { entry in _ = openEntryURL(entry) }
+                onOpenURL: { entry in _ = openEntryURL(entry) },
+                onTogglePin: { entry in togglePin(entry) }
             )
             .frame(width: 320)
             .focusable()
@@ -1432,6 +1433,10 @@ struct PanelContentView: View {
             confirmClearAllHistory()
             return .handled
         }
+        if keyPress.modifiers.contains(.command), keyPress.modifiers.contains(.shift), chars.lowercased() == "p" {
+            togglePinSelectedEntry()
+            return .handled
+        }
         if keyPress.modifiers.contains(.command), chars.count == 1, let digit = Int(chars), (1...9).contains(digit) {
             quickPaste(index: digit - 1)
             return .handled
@@ -1488,6 +1493,20 @@ struct PanelContentView: View {
         }
 
         closePanel()
+    }
+
+    private func togglePinSelectedEntry() {
+        guard let selectedEntryID,
+              let entry = displayedEntries.first(where: { $0.id == selectedEntryID }) else { return }
+        togglePin(entry)
+    }
+
+    private func togglePin(_ entry: ClipboardEntry) {
+        do {
+            try backgroundService.setPinned(id: entry.id, pinned: !entry.isPinned)
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.ui, context: "Failed to toggle pin")
+        }
     }
 
     private func deleteSelectedEntry() {

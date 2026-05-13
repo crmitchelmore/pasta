@@ -88,6 +88,7 @@ public struct ClipboardListView: View {
     private let onDeleteMultiple: ([UUID]) -> Void
     private let onReveal: (ClipboardEntry) -> Void
     private let onOpenURL: ((ClipboardEntry) -> Void)?
+    private let onTogglePin: ((ClipboardEntry) -> Void)?
 
     @State private var isSelectionMode = false
     @State private var bulkSelectedIDs: Set<UUID> = []
@@ -122,7 +123,8 @@ public struct ClipboardListView: View {
         onDelete: @escaping (ClipboardEntry) -> Void,
         onDeleteMultiple: @escaping ([UUID]) -> Void = { _ in },
         onReveal: @escaping (ClipboardEntry) -> Void,
-        onOpenURL: ((ClipboardEntry) -> Void)? = nil
+        onOpenURL: ((ClipboardEntry) -> Void)? = nil,
+        onTogglePin: ((ClipboardEntry) -> Void)? = nil
     ) {
         self.entries = entries
         _selectedEntryID = selectedEntryID
@@ -138,6 +140,7 @@ public struct ClipboardListView: View {
         self.onDeleteMultiple = onDeleteMultiple
         self.onReveal = onReveal
         self.onOpenURL = onOpenURL
+        self.onTogglePin = onTogglePin
     }
 
     /// Compute a stable hash for change detection
@@ -374,7 +377,7 @@ public struct ClipboardListView: View {
         } else {
             // Use high-performance NSTableView for normal browsing
             HighPerformanceListView(
-                rows: entries.map { ClipboardRowData(from: $0) },
+                rows: buildHighPerfRows(),
                 selectedID: $selectedEntryID,
                 selectedIDs: $selectedEntryIDs,
                 onPaste: { id in
@@ -401,9 +404,44 @@ public struct ClipboardListView: View {
                     { id in
                         if let entry = entryLookup[id] { handler(entry) }
                     }
+                },
+                onTogglePin: onTogglePin.map { handler in
+                    { id in
+                        if let entry = entryLookup[id] { handler(entry) }
+                    }
                 }
             )
         }
+    }
+
+    /// Builds the row list for the NSTableView, prepending a "Pinned" section
+    /// header + pinned entries when any pinned items exist.
+    private func buildHighPerfRows() -> [ClipboardRowData] {
+        var pinned: [ClipboardEntry] = []
+        var unpinned: [ClipboardEntry] = []
+        pinned.reserveCapacity(entries.count)
+        unpinned.reserveCapacity(entries.count)
+        for entry in entries {
+            if entry.isPinned {
+                pinned.append(entry)
+            } else {
+                unpinned.append(entry)
+            }
+        }
+
+        guard !pinned.isEmpty else {
+            return entries.map { ClipboardRowData(from: $0) }
+        }
+
+        var rows: [ClipboardRowData] = []
+        rows.reserveCapacity(entries.count + 2)
+        rows.append(.header("Pinned"))
+        rows.append(contentsOf: pinned.map { ClipboardRowData(from: $0) })
+        if !unpinned.isEmpty {
+            rows.append(.header("History"))
+            rows.append(contentsOf: unpinned.map { ClipboardRowData(from: $0) })
+        }
+        return rows
     }
     
     /// View showing only extracted values for the filtered type
