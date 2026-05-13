@@ -51,6 +51,7 @@ public enum BuiltInDetectorKind: String, Codable, CaseIterable, Identifiable, Se
     case filePath
     case envVar
     case shellCommand
+    case color
 
     public var id: String { rawValue }
 
@@ -67,6 +68,7 @@ public enum BuiltInDetectorKind: String, Codable, CaseIterable, Identifiable, Se
         case .filePath: return "File Paths"
         case .envVar: return "Environment Variables"
         case .shellCommand: return "Shell Commands"
+        case .color: return "Colors"
         }
     }
 }
@@ -96,6 +98,8 @@ public extension BuiltInDetectorKind {
             return Self.envVarPatterns(for: strictness)
         case .shellCommand:
             return Self.shellCommandPatterns(for: strictness)
+        case .color:
+            return Self.colorPatterns(for: strictness)
         }
     }
 
@@ -291,6 +295,17 @@ public extension BuiltInDetectorKind {
             return [
                 #"(?m)^\s*([^\n]+(?:&&|\|\||\|)[^\n]+)\s*$"#,
                 #"(?m)^\s*([A-Za-z0-9._/-]+\s+[^=\n]+)\s*$"#
+            ]
+        }
+    }
+
+    private static func colorPatterns(for strictness: DetectorStrictness) -> [String] {
+        switch strictness {
+        case .strict, .medium, .lax:
+            return [
+                #"(?<![0-9A-Za-z_])#(?:[0-9A-Fa-f]{8}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{3})(?![0-9A-Za-z_])"#,
+                #"(?i)(?<![A-Za-z_])rgba?\s*\([^)]*\)"#,
+                #"(?i)(?<![A-Za-z_])hsla?\s*\([^)]*\)"#
             ]
         }
     }

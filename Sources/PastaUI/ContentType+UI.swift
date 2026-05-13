@@ -20,6 +20,7 @@ extension ContentType {
         case .url: return "link"
         case .code: return "chevron.left.forwardslash.chevron.right"
         case .shellCommand: return "apple.terminal"
+        case .color: return "paintpalette"
         case .unknown: return "questionmark"
         }
     }
@@ -42,6 +43,7 @@ extension ContentType {
         case .shellCommand: return "Shell Command"
         case .screenshot: return "Screenshot"
         case .url: return "URL"
+        case .color: return "Color"
         default:
             return rawValue.capitalized
         }

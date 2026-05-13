@@ -32,6 +32,7 @@ public enum PastaTheme {
         case .url: return .indigo
         case .code: return golden
         case .shellCommand: return .green
+        case .color: return .pink
         case .unknown: return .gray
         }
     }

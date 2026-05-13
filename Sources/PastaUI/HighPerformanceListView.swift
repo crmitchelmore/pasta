@@ -16,7 +16,22 @@ public struct ClipboardRowData: Equatable {
     public let isExtracted: Bool
     public let parentEntryId: UUID?
     public let isSynced: Bool
-    
+    public let swatchColor: SwatchColor?
+
+    public struct SwatchColor: Equatable {
+        public let red: UInt8
+        public let green: UInt8
+        public let blue: UInt8
+        public let alpha: Double
+
+        public init(red: UInt8, green: UInt8, blue: UInt8, alpha: Double) {
+            self.red = red
+            self.green = green
+            self.blue = blue
+            self.alpha = alpha
+        }
+    }
+
     public init(from entry: ClipboardEntry) {
         self.id = entry.id
         let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -29,6 +44,70 @@ public struct ClipboardRowData: Equatable {
         self.isExtracted = entry.isExtracted
         self.parentEntryId = entry.parentEntryId
         self.isSynced = entry.isSynced
+        self.swatchColor = Self.parseSwatch(from: entry)
+    }
+
+    private static func parseSwatch(from entry: ClipboardEntry) -> SwatchColor? {
+        guard entry.contentType == .color else { return nil }
+        if let meta = entry.metadata,
+           let data = meta.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data, options: []),
+           let dict = obj as? [String: Any],
+           let colors = dict["colors"] as? [[String: Any]],
+           let first = colors.first,
+           let r = (first["red"] as? Int) ?? (first["red"] as? Double).map(Int.init),
+           let g = (first["green"] as? Int) ?? (first["green"] as? Double).map(Int.init),
+           let b = (first["blue"] as? Int) ?? (first["blue"] as? Double).map(Int.init)
+        {
+            let a = (first["alpha"] as? Double) ?? Double(first["alpha"] as? Int ?? 1)
+            return SwatchColor(red: UInt8(clamping: r), green: UInt8(clamping: g), blue: UInt8(clamping: b), alpha: a)
+        }
+        // Fallback: re-detect from content.
+        let detector = ColorSwatchParser.shared
+        if let det = detector.parse(entry.content) {
+            return SwatchColor(red: det.red, green: det.green, blue: det.blue, alpha: det.alpha)
+        }
+        return nil
+    }
+}
+
+/// Tiny shim to avoid pulling PastaDetectors into PastaUI for swatch parsing.
+/// Uses NSColor parsing for hex literals as a best-effort fallback.
+private final class ColorSwatchParser {
+    static let shared = ColorSwatchParser()
+    struct Parsed { let red: UInt8; let green: UInt8; let blue: UInt8; let alpha: Double }
+
+    func parse(_ text: String) -> Parsed? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("#") else { return nil }
+        let body = String(trimmed.dropFirst())
+        switch body.count {
+        case 3:
+            let chars = Array(body)
+            guard let r = hex(chars[0], chars[0]),
+                  let g = hex(chars[1], chars[1]),
+                  let b = hex(chars[2], chars[2]) else { return nil }
+            return Parsed(red: r, green: g, blue: b, alpha: 1.0)
+        case 6:
+            let chars = Array(body)
+            guard let r = hex(chars[0], chars[1]),
+                  let g = hex(chars[2], chars[3]),
+                  let b = hex(chars[4], chars[5]) else { return nil }
+            return Parsed(red: r, green: g, blue: b, alpha: 1.0)
+        case 8:
+            let chars = Array(body)
+            guard let r = hex(chars[0], chars[1]),
+                  let g = hex(chars[2], chars[3]),
+                  let b = hex(chars[4], chars[5]),
+                  let a = hex(chars[6], chars[7]) else { return nil }
+            return Parsed(red: r, green: g, blue: b, alpha: Double(a) / 255.0)
+        default:
+            return nil
+        }
+    }
+
+    private func hex(_ a: Character, _ b: Character) -> UInt8? {
+        UInt8(String([a, b]), radix: 16)
     }
 }
 
@@ -457,9 +536,27 @@ private final class ClipboardCellView: NSTableCellView {
     }
     
     func configure(with row: ClipboardRowData) {
-        // Icon
-        iconView.image = NSImage(systemSymbolName: row.contentType.systemImageName, accessibilityDescription: nil)
-        iconView.contentTintColor = NSColor(row.contentType.tint)
+        // Icon (or color swatch)
+        if let swatch = row.swatchColor {
+            iconView.image = nil
+            iconView.wantsLayer = true
+            let cg = CGColor(
+                srgbRed: CGFloat(swatch.red) / 255.0,
+                green: CGFloat(swatch.green) / 255.0,
+                blue: CGFloat(swatch.blue) / 255.0,
+                alpha: CGFloat(swatch.alpha)
+            )
+            iconView.layer?.backgroundColor = cg
+            iconView.layer?.cornerRadius = 4
+            iconView.layer?.borderColor = NSColor.separatorColor.cgColor
+            iconView.layer?.borderWidth = 0.5
+        } else {
+            iconView.layer?.backgroundColor = nil
+            iconView.layer?.borderWidth = 0
+            iconView.layer?.cornerRadius = 0
+            iconView.image = NSImage(systemSymbolName: row.contentType.systemImageName, accessibilityDescription: nil)
+            iconView.contentTintColor = NSColor(row.contentType.tint)
+        }
         
         // Title - fixed layout, no movement
         titleLabel.stringValue = row.previewText
