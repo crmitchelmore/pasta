@@ -13,19 +13,23 @@ public struct EmailDetector {
 
     public init() {}
 
+    // RFC 5322 is huge; we use a pragmatic approximation that performs well for clipboard content.
+    // Local-part: letters/digits and common specials, must start/end with alnum.
+    // Domain: labels separated by dots, final TLD 2+ chars.
+    // Boundary rules are intentionally conservative: don't match when surrounded by token characters.
+    //
+    // Compiled once at type-load — `NSRegularExpression` is thread-safe for matching,
+    // so a shared instance saves the ICU regex-compilation cost on every call.
+    private static let regex: NSRegularExpression? = {
+        let pattern = #"(?i)(?<![A-Z0-9._%+\-])([A-Z0-9](?:[A-Z0-9._%+\-]{0,62}[A-Z0-9])?)@([A-Z0-9](?:[A-Z0-9\-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9\-]{0,61}[A-Z0-9])?)+)(?![A-Z0-9_%+\-])"#
+        return try? NSRegularExpression(pattern: pattern, options: [])
+    }()
+
     /// Detects email addresses in `text`.
     ///
     /// - Returns: Detected emails in document order, with a confidence score.
     public func detect(in text: String) -> [Detection] {
-        // RFC 5322 is huge; we use a pragmatic approximation that performs well for clipboard content.
-        // Local-part: letters/digits and common specials, must start/end with alnum.
-        // Domain: labels separated by dots, final TLD 2+ chars.
-        // Boundary rules are intentionally conservative: don't match when surrounded by token characters.
-        let pattern = #"(?i)(?<![A-Z0-9._%+\-])([A-Z0-9](?:[A-Z0-9._%+\-]{0,62}[A-Z0-9])?)@([A-Z0-9](?:[A-Z0-9\-]{0,61}[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9\-]{0,61}[A-Z0-9])?)+)(?![A-Z0-9_%+\-])"#
-
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return []
-        }
+        guard let regex = Self.regex else { return [] }
 
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         let matches = regex.matches(in: text, options: [], range: range)

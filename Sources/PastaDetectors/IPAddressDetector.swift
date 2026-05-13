@@ -51,9 +51,18 @@ public struct IPAddressDetector {
         return out
     }
 
-    private func detectIPv4(in text: String) -> [Detection] {
+    private static let ipv4Regex: NSRegularExpression? = {
         let pattern = #"(?<![0-9])((?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})(?![0-9])"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        return try? NSRegularExpression(pattern: pattern, options: [])
+    }()
+
+    private static let ipv6Regex: NSRegularExpression? = {
+        let pattern = #"(?i)(?<![0-9a-f])((?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,5}(?::[0-9a-f]{1,4}){1,2}|(?:[0-9a-f]{1,4}:){1,4}(?::[0-9a-f]{1,4}){1,3}|(?:[0-9a-f]{1,4}:){1,3}(?::[0-9a-f]{1,4}){1,4}|(?:[0-9a-f]{1,4}:){1,2}(?::[0-9a-f]{1,4}){1,5}|[0-9a-f]{1,4}:(?::[0-9a-f]{1,4}){1,6}|:(?::[0-9a-f]{1,4}){1,7}|fe80:(?::[0-9a-f]{0,4}){0,4}%[0-9a-z]+|::(?:ffff(?::0{1,4}){0,1}:){0,1}(?:\d{1,3}\.){3}\d{1,3}|(?:[0-9a-f]{1,4}:){1,4}:(?:\d{1,3}\.){3}\d{1,3})(?![0-9a-f])"#
+        return try? NSRegularExpression(pattern: pattern, options: [])
+    }()
+
+    private func detectIPv4(in text: String) -> [Detection] {
+        guard let regex = Self.ipv4Regex else { return [] }
 
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         let matches = regex.matches(in: text, options: [], range: range)
@@ -82,8 +91,7 @@ public struct IPAddressDetector {
     }
 
     private func detectIPv6(in text: String) -> [Detection] {
-        let pattern = #"(?i)(?<![0-9a-f])((?:[0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,5}(?::[0-9a-f]{1,4}){1,2}|(?:[0-9a-f]{1,4}:){1,4}(?::[0-9a-f]{1,4}){1,3}|(?:[0-9a-f]{1,4}:){1,3}(?::[0-9a-f]{1,4}){1,4}|(?:[0-9a-f]{1,4}:){1,2}(?::[0-9a-f]{1,4}){1,5}|[0-9a-f]{1,4}:(?::[0-9a-f]{1,4}){1,6}|:(?::[0-9a-f]{1,4}){1,7}|fe80:(?::[0-9a-f]{0,4}){0,4}%[0-9a-z]+|::(?:ffff(?::0{1,4}){0,1}:){0,1}(?:\d{1,3}\.){3}\d{1,3}|(?:[0-9a-f]{1,4}:){1,4}:(?:\d{1,3}\.){3}\d{1,3})(?![0-9a-f])"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        guard let regex = Self.ipv6Regex else { return [] }
 
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         let matches = regex.matches(in: text, options: [], range: range)

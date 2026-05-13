@@ -121,6 +121,13 @@ public struct ContentTypeDetector {
             return Output(primaryType: .unknown, confidence: 0.0)
         }
 
+        // Trivial inputs can't meaningfully produce any of the structured types —
+        // short-circuit before paying for ~14 detector passes (each scanning the
+        // string, building NSRanges, etc.).
+        if trimmed.count < 2 {
+            return Output(primaryType: .text, confidence: 0.5)
+        }
+
         // Prefer analyzing decoded content when it looks URL/base64-encoded, but keep encoding metadata.
         let encodingDetections = encodingDetector.detect(in: trimmed)
         let decodedText = encodingDetections.first?.decoded

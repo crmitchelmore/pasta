@@ -75,15 +75,19 @@ public final class SearchService {
     }
 
     private func matchRanges(in content: String, query: String) -> [CountableClosedRange<Int>] {
-        let lowerContent = content.lowercased()
-        let terms = query.lowercased().split(whereSeparator: { $0.isWhitespace })
+        // Tokenise the query, then locate each term in the content using
+        // case-insensitive substring search. Avoids allocating a `lowercased()`
+        // copy of the (potentially large) content/query strings on every result.
+        let terms = query.split(whereSeparator: { $0.isWhitespace })
         guard !terms.isEmpty else { return [] }
 
         var ranges: [CountableClosedRange<Int>] = []
+        ranges.reserveCapacity(terms.count)
+
         for term in terms {
-            guard let range = lowerContent.range(of: term) else { continue }
-            let start = lowerContent.distance(from: lowerContent.startIndex, to: range.lowerBound)
-            let end = lowerContent.distance(from: lowerContent.startIndex, to: range.upperBound) - 1
+            guard let range = content.range(of: term, options: .caseInsensitive) else { continue }
+            let start = content.distance(from: content.startIndex, to: range.lowerBound)
+            let end = content.distance(from: content.startIndex, to: range.upperBound) - 1
             if start <= end {
                 ranges.append(start...end)
             }

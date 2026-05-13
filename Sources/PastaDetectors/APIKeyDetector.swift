@@ -125,7 +125,24 @@ public struct APIKeyDetector {
     ]
     
     public init() {}
-    
+
+    /// Compiled regex cache shared across instances. The pattern set is small
+    /// and static (built-in providers), so caching reuses one ICU regex per
+    /// provider instead of recompiling on every detect call.
+    private static let regexCache: NSCache<NSString, NSRegularExpression> = {
+        let cache = NSCache<NSString, NSRegularExpression>()
+        cache.countLimit = 64
+        return cache
+    }()
+
+    fileprivate static func cachedRegex(for pattern: String) -> NSRegularExpression? {
+        let key = pattern as NSString
+        if let cached = regexCache.object(forKey: key) { return cached }
+        guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+        regexCache.setObject(compiled, forKey: key)
+        return compiled
+    }
+
     public func detect(in text: String) -> [Detection] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 16 else { return [] }
@@ -134,7 +151,7 @@ public struct APIKeyDetector {
         var seenKeys = Set<String>()
         
         for keyPattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: keyPattern.pattern, options: []) else {
+            guard let regex = Self.cachedRegex(for: keyPattern.pattern) else {
                 continue
             }
             

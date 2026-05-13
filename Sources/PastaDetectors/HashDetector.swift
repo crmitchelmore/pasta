@@ -36,9 +36,18 @@ public struct HashDetector {
         return out
     }
 
-    private func detectHex(in text: String) -> [Detection] {
+    private static let hexRegex: NSRegularExpression? = {
         let pattern = #"(?i)(?<![0-9a-f])([0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{56}|[0-9a-f]{64}|[0-9a-f]{96}|[0-9a-f]{128})(?![0-9a-f])"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        return try? NSRegularExpression(pattern: pattern, options: [])
+    }()
+
+    private static let base64Regex: NSRegularExpression? = {
+        let pattern = #"(?<![A-Za-z0-9+/=])([A-Za-z0-9+/]{43}={0,2}|[A-Za-z0-9+/]{86}={0,2}|[A-Za-z0-9+/]{128}={0,2}|[A-Za-z0-9+/]{171}={0,2})(?![A-Za-z0-9+/=])"#
+        return try? NSRegularExpression(pattern: pattern, options: [])
+    }()
+
+    private func detectHex(in text: String) -> [Detection] {
+        guard let regex = Self.hexRegex else { return [] }
 
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         let matches = regex.matches(in: text, options: [], range: range)
@@ -58,8 +67,7 @@ public struct HashDetector {
     }
 
     private func detectBase64(in text: String) -> [Detection] {
-        let pattern = #"(?<![A-Za-z0-9+/=])([A-Za-z0-9+/]{43}={0,2}|[A-Za-z0-9+/]{86}={0,2}|[A-Za-z0-9+/]{128}={0,2}|[A-Za-z0-9+/]{171}={0,2})(?![A-Za-z0-9+/=])"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        guard let regex = Self.base64Regex else { return [] }
 
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         let matches = regex.matches(in: text, options: [], range: range)
