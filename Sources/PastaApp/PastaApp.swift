@@ -889,7 +889,8 @@ struct PanelContentView: View {
                 onPaste: { entry in pasteEntry(entry) },
                 onDelete: { entry in deleteEntry(entry) },
                 onDeleteMultiple: { ids in deleteEntries(ids) },
-                onReveal: { entry in revealEntry(entry) }
+                onReveal: { entry in revealEntry(entry) },
+                onOpenURL: { entry in _ = openEntryURL(entry) }
             )
             .frame(width: 320)
             .focusable()
@@ -1373,6 +1374,10 @@ struct PanelContentView: View {
             copySelectedEntries()
             return .handled
         }
+        if keyPress.modifiers.contains(.command), chars.lowercased() == "o" {
+            if openSelectedEntryURL() { return .handled }
+            return .ignored
+        }
         if keyPress.modifiers.contains(.command), chars.count == 1, let digit = Int(chars), (1...9).contains(digit) {
             quickPaste(index: digit - 1)
             return .handled
@@ -1482,6 +1487,47 @@ struct PanelContentView: View {
         PastaLogger.ui.debug("Pasting entry: \(entry.contentType.rawValue)")
         _ = PasteService().paste(entry)
         closePanel()
+    }
+
+    /// If the selected entry's content is a URL, open it in the user's default browser
+    /// and close the panel. Returns true when an open was performed.
+    @discardableResult
+    private func openSelectedEntryURL() -> Bool {
+        guard let selectedEntryID,
+              let entry = displayedEntries.first(where: { $0.id == selectedEntryID }) else {
+            return false
+        }
+        return openEntryURL(entry)
+    }
+
+    @discardableResult
+    private func openEntryURL(_ entry: ClipboardEntry) -> Bool {
+        let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        // Only act on entries that look like URLs. We accept either the URL ContentType
+        // or text whose first line parses as an http(s):// URL — the URL detector may
+        // not have reclassified an older entry yet.
+        let candidate: String
+        if entry.contentType == .url {
+            candidate = trimmed.split(whereSeparator: \.isNewline).first.map(String.init) ?? trimmed
+        } else if entry.contentType == .text || entry.contentType == .prose {
+            candidate = trimmed.split(whereSeparator: \.isNewline).first.map(String.init) ?? trimmed
+            guard candidate.lowercased().hasPrefix("http://") || candidate.lowercased().hasPrefix("https://") else {
+                return false
+            }
+        } else {
+            return false
+        }
+
+        guard let url = URL(string: candidate), url.scheme?.hasPrefix("http") == true else {
+            return false
+        }
+
+        PastaLogger.ui.info("Opening URL from clipboard entry: \(url.absoluteString)")
+        NSWorkspace.shared.open(url)
+        closePanel()
+        return true
     }
 
     private func revealEntry(_ entry: ClipboardEntry) {

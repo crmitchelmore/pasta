@@ -52,6 +52,7 @@ swift run PastaApp
 | `↑` `↓` | Navigate history |
 | `Enter` | Paste selected item |
 | `⌘1-9` | Quick-paste by position |
+| `⌘O` | Open selected entry as URL in browser |
 | `⌘⌫` | Delete selected item |
 | `Esc` | Close window |
 
