@@ -70,6 +70,7 @@ public struct ContentTypeDetector {
     private let shellCommandDetector: ShellCommandDetector
     private let proseDetector: ProseDetector
     private let encodingDetector: EncodingDetector
+    private let colorDetector: ColorDetector
 
     public init(
         emailDetector: EmailDetector = EmailDetector(),
@@ -85,7 +86,8 @@ public struct ContentTypeDetector {
         codeDetector: CodeDetector = CodeDetector(),
         shellCommandDetector: ShellCommandDetector = ShellCommandDetector(),
         proseDetector: ProseDetector = ProseDetector(),
-        encodingDetector: EncodingDetector = EncodingDetector()
+        encodingDetector: EncodingDetector = EncodingDetector(),
+        colorDetector: ColorDetector = ColorDetector()
     ) {
         self.emailDetector = emailDetector
         self.phoneNumberDetector = phoneNumberDetector
@@ -101,6 +103,7 @@ public struct ContentTypeDetector {
         self.shellCommandDetector = shellCommandDetector
         self.proseDetector = proseDetector
         self.encodingDetector = encodingDetector
+        self.colorDetector = colorDetector
     }
 
     public func detect(in text: String, configuration: DetectorConfiguration = .default) -> Output {
@@ -139,6 +142,7 @@ public struct ContentTypeDetector {
         let code = codeDetector.detect(in: analysisText)
         let shellCommands = detectShellCommands(in: analysisText, configuration: configuration)
         let prose = proseDetector.detect(in: analysisText)
+        let colors = detectColors(in: analysisText, configuration: configuration)
         let customDetections = detectCustomDetections(in: analysisText, configuration: configuration)
 
         let (primary, confidence) = selectPrimaryType(
@@ -155,7 +159,8 @@ public struct ContentTypeDetector {
             paths: paths,
             code: code,
             shellCommands: shellCommands,
-            prose: prose
+            prose: prose,
+            colors: colors
         )
 
         let splitEntries = makeSplitEntries(envOutput: env)
@@ -176,6 +181,7 @@ public struct ContentTypeDetector {
             code: code,
             shellCommands: shellCommands,
             prose: prose,
+            colors: colors,
             customDetections: customDetections
         )
 
@@ -597,6 +603,39 @@ public struct ContentTypeDetector {
         }
     }
 
+    private func detectColors(in text: String, configuration: DetectorConfiguration) -> [ColorDetector.Detection] {
+        let rule = detectorRule(for: .color, configuration: configuration)
+        guard rule.isEnabled else { return [] }
+
+        if rule.useAdvancedPatterns, !rule.cleanedPatterns.isEmpty {
+            let candidates = matchPatterns(rule.cleanedPatterns, in: text)
+            var out: [ColorDetector.Detection] = []
+            var seen = Set<String>()
+            for cand in candidates {
+                let parsed = colorDetector.detect(in: cand, namedColorPolicy: .wholeStringOnly)
+                for det in parsed where seen.insert(det.raw.lowercased()).inserted {
+                    out.append(det)
+                }
+            }
+            return out
+        }
+
+        let strictness = detectorStrictness(for: .color, configuration: configuration)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch strictness {
+        case .strict:
+            let candidates = colorDetector.detect(in: trimmed, namedColorPolicy: .wholeStringOnly)
+            return candidates.filter { det in
+                det.raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    == trimmed.lowercased()
+            }
+        case .medium:
+            return colorDetector.detect(in: text, namedColorPolicy: .wholeStringOnly)
+        case .lax:
+            return colorDetector.detect(in: text, namedColorPolicy: .extract)
+        }
+    }
+
     private func detectCustomDetections(in text: String, configuration: DetectorConfiguration) -> [CustomDetection] {
         let active = configuration.customDetectors.filter { $0.isEnabled }
         guard !active.isEmpty else { return [] }
@@ -683,7 +722,8 @@ public struct ContentTypeDetector {
         paths: [FilePathDetector.Detection],
         code: [CodeDetector.Detection],
         shellCommands: [ShellCommandDetector.Detection],
-        prose: ProseDetector.Detection?
+        prose: ProseDetector.Detection?,
+        colors: [ColorDetector.Detection]
     ) -> (ContentType, Double) {
         let trimmed = analysisText.trimmingCharacters(in: .whitespacesAndNewlines)
         let totalLength = trimmed.count
@@ -712,6 +752,7 @@ public struct ContentTypeDetector {
             .phoneNumber,
             .ipAddress,
             .uuid,
+            .color,
             .hash,
             .envVarBlock,
             .envVar,
@@ -762,6 +803,13 @@ public struct ContentTypeDetector {
         if let bestUUID = uuids.max(by: { $0.confidence < $1.confidence }) {
             if coversMostOfText(bestUUID.uuid) {
                 candidates.append((.uuid, bestUUID.confidence))
+            }
+        }
+
+        // Color - short literal that should cover most of the text
+        if let bestColor = colors.max(by: { $0.confidence < $1.confidence }) {
+            if coversMostOfText(bestColor.raw) || isShortContext(bestColor.raw) {
+                candidates.append((.color, bestColor.confidence))
             }
         }
         
@@ -861,6 +909,7 @@ public struct ContentTypeDetector {
         code: [CodeDetector.Detection],
         shellCommands: [ShellCommandDetector.Detection],
         prose: ProseDetector.Detection?,
+        colors: [ColorDetector.Detection],
         customDetections: [CustomDetection]
     ) -> String? {
         var meta: [String: Any] = [:]
@@ -1004,6 +1053,20 @@ public struct ContentTypeDetector {
                     "value": detection.value,
                     "confidence": detection.confidence
                 ]
+            }
+        }
+
+        if !colors.isEmpty {
+            meta["colors"] = colors.map { detection in
+                [
+                    "raw": detection.raw,
+                    "format": detection.format.rawValue,
+                    "red": Int(detection.red),
+                    "green": Int(detection.green),
+                    "blue": Int(detection.blue),
+                    "alpha": detection.alpha,
+                    "confidence": detection.confidence
+                ] as [String: Any]
             }
         }
 

@@ -20,6 +20,7 @@ public enum ContentType: String, Codable, CaseIterable, Sendable {
     case url
     case code
     case shellCommand
+    case color
     case unknown
 }
 
