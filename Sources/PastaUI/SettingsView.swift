@@ -1251,7 +1251,7 @@ private struct StorageSettingsTab: View {
             let database = try DatabaseManager()
             let imageStorage = try ImageStorageManager()
             let deleteService = DeleteService(database: database, imageStorage: imageStorage)
-            let count = try deleteService.deleteAll()
+            let count = try deleteService.deleteAll(includePinned: true)
             clearAllSummary = "Deleted \(count) entries"
             refreshStorageSummary()
         } catch {

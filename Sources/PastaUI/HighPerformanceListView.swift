@@ -17,6 +17,10 @@ public struct ClipboardRowData: Equatable {
     public let parentEntryId: UUID?
     public let isSynced: Bool
     public let swatchColor: SwatchColor?
+    public let isPinned: Bool
+    /// When non-nil, this row renders as a non-selectable section header
+    /// with the given title. The other fields are unused.
+    public let sectionHeader: String?
 
     public struct SwatchColor: Equatable {
         public let red: UInt8
@@ -51,6 +55,8 @@ public struct ClipboardRowData: Equatable {
         self.parentEntryId = entry.parentEntryId
         self.isSynced = entry.isSynced
         self.swatchColor = Self.parseSwatch(from: entry)
+        self.isPinned = entry.isPinned
+        self.sectionHeader = nil
     }
 
     private static func parseSwatch(from entry: ClipboardEntry) -> SwatchColor? {
@@ -93,6 +99,29 @@ public struct ClipboardRowData: Equatable {
         }
         return grouped
     }
+
+    /// Builds a non-selectable section header row.
+    public static func header(_ title: String) -> ClipboardRowData {
+        ClipboardRowData(headerTitle: title)
+    }
+
+    private init(headerTitle: String) {
+        self.id = UUID()
+        self.previewText = ""
+        self.contentType = .text
+        self.sourceAppName = nil
+        self.timestamp = .distantPast
+        self.copyCount = 0
+        self.isLarge = false
+        self.isExtracted = false
+        self.parentEntryId = nil
+        self.isSynced = false
+        self.swatchColor = nil
+        self.isPinned = false
+        self.sectionHeader = headerTitle
+    }
+
+    public var isHeader: Bool { sectionHeader != nil }
 }
 
 /// Tiny shim to avoid pulling PastaDetectors into PastaUI for swatch parsing.
@@ -158,6 +187,7 @@ public struct HighPerformanceListView: NSViewRepresentable {
     public let onDelete: (UUID) -> Void
     public let onReveal: (UUID) -> Void
     public let onOpenURL: ((UUID) -> Void)?
+    public let onTogglePin: ((UUID) -> Void)?
 
     public init(
         rows: [ClipboardRowData],
@@ -168,7 +198,8 @@ public struct HighPerformanceListView: NSViewRepresentable {
         onCopyMultiple: @escaping ([UUID]) -> Void,
         onDelete: @escaping (UUID) -> Void,
         onReveal: @escaping (UUID) -> Void,
-        onOpenURL: ((UUID) -> Void)? = nil
+        onOpenURL: ((UUID) -> Void)? = nil,
+        onTogglePin: ((UUID) -> Void)? = nil
     ) {
         self.rows = rows
         self._selectedID = selectedID
@@ -179,6 +210,7 @@ public struct HighPerformanceListView: NSViewRepresentable {
         self.onDelete = onDelete
         self.onReveal = onReveal
         self.onOpenURL = onOpenURL
+        self.onTogglePin = onTogglePin
     }
     
     public func makeCoordinator() -> Coordinator {
@@ -307,7 +339,20 @@ public struct HighPerformanceListView: NSViewRepresentable {
         public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard row < rows.count else { return nil }
             let rowData = rows[row]
-            
+
+            if let title = rowData.sectionHeader {
+                let headerID = NSUserInterfaceItemIdentifier("ClipboardSectionHeader")
+                let header: ClipboardSectionHeaderView
+                if let reused = tableView.makeView(withIdentifier: headerID, owner: nil) as? ClipboardSectionHeaderView {
+                    header = reused
+                } else {
+                    header = ClipboardSectionHeaderView()
+                    header.identifier = headerID
+                }
+                header.configure(title: title)
+                return header
+            }
+
             // Reuse or create cell
             let cell: ClipboardCellView
             if let reused = tableView.makeView(withIdentifier: Self.cellIdentifier, owner: nil) as? ClipboardCellView {
@@ -316,13 +361,19 @@ public struct HighPerformanceListView: NSViewRepresentable {
                 cell = ClipboardCellView()
                 cell.identifier = Self.cellIdentifier
             }
-            
+
             cell.configure(with: rowData)
             return cell
         }
-        
+
         public func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-            56 // Fixed height for performance
+            guard row >= 0 && row < rows.count else { return 56 }
+            return rows[row].isHeader ? 24 : 56
+        }
+
+        public func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+            guard row >= 0 && row < rows.count else { return false }
+            return !rows[row].isHeader
         }
         
         public func tableViewSelectionDidChange(_ notification: Notification) {
@@ -330,13 +381,14 @@ public struct HighPerformanceListView: NSViewRepresentable {
             let selectedRowIndexes = tableView.selectedRowIndexes
             let ids: Set<UUID> = Set(selectedRowIndexes.compactMap { row in
                 guard row >= 0 && row < rows.count else { return nil }
-                return rows[row].id
+                let r = rows[row]
+                return r.isHeader ? nil : r.id
             })
 
             let primaryID: UUID?
             if let current = parent.selectedID, ids.contains(current) {
                 primaryID = current
-            } else if let row = selectedRowIndexes.last, row >= 0 && row < rows.count {
+            } else if let row = selectedRowIndexes.last, row >= 0 && row < rows.count, !rows[row].isHeader {
                 primaryID = rows[row].id
             } else {
                 primaryID = nil
@@ -349,42 +401,58 @@ public struct HighPerformanceListView: NSViewRepresentable {
                 }
             }
         }
-        
+
         // MARK: - Actions
-        
+
         @objc func doubleClicked(_ sender: NSTableView) {
             let row = sender.clickedRow
             guard row >= 0 && row < rows.count else { return }
-            parent.onPaste(rows[row].id)
+            let data = rows[row]
+            guard !data.isHeader else { return }
+            parent.onPaste(data.id)
         }
         
         // MARK: - Context Menu
         
         public func menuNeedsUpdate(_ menu: NSMenu) {
             menu.removeAllItems()
-            
+
             guard let tableView = tableView else { return }
             let row = tableView.clickedRow
             guard row >= 0 && row < rows.count else { return }
-            
+
             let rowData = rows[row]
+            guard !rowData.isHeader else { return }
             let copySelectionIDs: [UUID]
             if tableView.selectedRowIndexes.count > 1, tableView.selectedRowIndexes.contains(row) {
                 copySelectionIDs = tableView.selectedRowIndexes.compactMap { selectedRow in
                     guard selectedRow >= 0 && selectedRow < rows.count else { return nil }
-                    return rows[selectedRow].id
+                    let r = rows[selectedRow]
+                    return r.isHeader ? nil : r.id
                 }
             } else {
                 copySelectionIDs = [rowData.id]
             }
-            
+
             menu.addItem(withTitle: "Paste", action: #selector(contextPaste(_:)), keyEquivalent: "")
             menu.addItem(withTitle: copySelectionIDs.count > 1 ? "Copy Selected" : "Copy", action: #selector(contextCopy(_:)), keyEquivalent: "")
             menu.addItem(NSMenuItem.separator())
-            
+
+            var pinItem: NSMenuItem? = nil
+            if parent.onTogglePin != nil {
+                let item = NSMenuItem(
+                    title: rowData.isPinned ? "Unpin" : "Pin",
+                    action: #selector(contextTogglePin(_:)),
+                    keyEquivalent: "p"
+                )
+                item.keyEquivalentModifierMask = [.command, .shift]
+                menu.addItem(item)
+                pinItem = item
+            }
+
             let deleteItem = NSMenuItem(title: "Delete", action: #selector(contextDelete(_:)), keyEquivalent: "")
             menu.addItem(deleteItem)
-            
+
             if rowData.contentType == .filePath {
                 menu.addItem(NSMenuItem.separator())
                 menu.addItem(withTitle: "Reveal in Finder", action: #selector(contextReveal(_:)), keyEquivalent: "")
@@ -403,6 +471,7 @@ public struct HighPerformanceListView: NSViewRepresentable {
             }
             menu.items[0].representedObject = rowData.id
             menu.items[1].representedObject = copySelectionIDs
+            pinItem?.representedObject = rowData.id
             deleteItem.representedObject = rowData.id
             if rowData.contentType == .filePath, let revealItem = menu.items.first(where: { $0.title == "Reveal in Finder" }) {
                 revealItem.representedObject = rowData.id
@@ -439,6 +508,11 @@ public struct HighPerformanceListView: NSViewRepresentable {
         @objc private func contextOpenURL(_ sender: NSMenuItem) {
             guard let id = sender.representedObject as? UUID else { return }
             parent.onOpenURL?(id)
+        }
+
+        @objc private func contextTogglePin(_ sender: NSMenuItem) {
+            guard let id = sender.representedObject as? UUID else { return }
+            parent.onTogglePin?(id)
         }
     }
 }
@@ -610,6 +684,39 @@ private final class ClipboardCellView: NSTableCellView {
         
         // Sync indicator
         syncIndicator.isHidden = !row.isSynced
+    }
+}
+
+// MARK: - Section Header Cell
+
+private final class ClipboardSectionHeaderView: NSTableCellView {
+    private let titleLabel = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupViews()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupViews()
+    }
+
+    private func setupViews() {
+        wantsLayer = true
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        titleLabel.textColor = .secondaryLabelColor
+        addSubview(titleLabel)
+        NSLayoutConstraint.activate([
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+        ])
+    }
+
+    func configure(title: String) {
+        titleLabel.stringValue = title.uppercased()
     }
 }
 

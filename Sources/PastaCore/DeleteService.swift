@@ -48,16 +48,20 @@ public final class DeleteService {
     }
 
     /// Deletes all entries and cleans up any associated image files.
+    ///
+    /// - Parameter includePinned: when `false` (the default), pinned entries are
+    ///   preserved so quick-clear actions don't wipe favorites. Pass `true` from
+    ///   explicit "wipe everything" UI (e.g. Settings → Clear All).
     @discardableResult
-    public func deleteAll() throws -> Int {
+    public func deleteAll(includePinned: Bool = false) throws -> Int {
         do {
-            let result = try database.deleteAll()
+            let result = try database.deleteAll(includePinned: includePinned)
 
             for imagePath in result.imagePaths {
                 try imageStorage.deleteImage(path: imagePath)
             }
 
-            PastaLogger.database.info("Deleted all \(result.count) entries")
+            PastaLogger.database.info("Deleted all \(result.count) entries (includePinned=\(includePinned))")
             return result.count
         } catch {
             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to delete all entries")

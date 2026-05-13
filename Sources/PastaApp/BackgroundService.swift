@@ -574,11 +574,24 @@ final class BackgroundService: ObservableObject {
     }
     
     /// Deletes all entries and refreshes the entries list.
+    ///
+    /// - Parameter includePinned: when `false` (the default), pinned entries are
+    ///   preserved. Pass `true` from explicit "wipe everything" UI.
     @discardableResult
-    func deleteAll() throws -> Int {
+    func deleteAll(includePinned: Bool = false) throws -> Int {
         let deleteService = DeleteService(database: database, imageStorage: imageStorage)
-        let count = try deleteService.deleteAll()
+        let count = try deleteService.deleteAll(includePinned: includePinned)
         refresh()
         return count
+    }
+
+    /// Sets the pinned state of a single entry, then refreshes if it changed.
+    @discardableResult
+    func setPinned(id: UUID, pinned: Bool) throws -> Bool {
+        let changed = try database.setPinned(id: id, pinned: pinned)
+        if changed {
+            refresh()
+        }
+        return changed
     }
 }
