@@ -1378,6 +1378,10 @@ struct PanelContentView: View {
             if openSelectedEntryURL() { return .handled }
             return .ignored
         }
+        if keyPress.modifiers.contains(.control), keyPress.modifiers.contains(.shift), chars.lowercased() == "x" {
+            confirmClearAllHistory()
+            return .handled
+        }
         if keyPress.modifiers.contains(.command), chars.count == 1, let digit = Int(chars), (1...9).contains(digit) {
             quickPaste(index: digit - 1)
             return .handled
@@ -1538,6 +1542,31 @@ struct PanelContentView: View {
             .filter { !$0.isEmpty }
         let urls = paths.map { URL(fileURLWithPath: $0) }
         NSWorkspace.shared.activateFileViewerSelecting(urls)
+    }
+
+    private func confirmClearAllHistory() {
+        let alert = NSAlert()
+        alert.messageText = "Clear all clipboard history?"
+        alert.informativeText = "This permanently deletes every saved entry, including any stored images. This cannot be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Clear All")
+        alert.addButton(withTitle: "Cancel")
+        // Make the destructive button less likely to be hit by accident:
+        // first button is default; user must explicitly arrow / click it.
+        if let destructive = alert.buttons.first {
+            destructive.hasDestructiveAction = true
+        }
+
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else { return }
+
+        do {
+            let count = try BackgroundService.shared.deleteAll()
+            PastaLogger.ui.info("Cleared all clipboard history (\(count) entries)")
+            refreshEntries()
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.ui, context: "Failed to clear all history")
+        }
     }
 }
 
