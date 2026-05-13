@@ -102,9 +102,13 @@ public struct ProseDetector {
         return structured >= 2 && (Double(structured) / Double(nonEmpty)) >= 0.5
     }
 
-    private func wordCount(in s: String) -> Int {
+    private static let wordRegex: NSRegularExpression? = {
         let pattern = #"\b[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)?\b"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return 0 }
+        return try? NSRegularExpression(pattern: pattern, options: [])
+    }()
+
+    private func wordCount(in s: String) -> Int {
+        guard let regex = Self.wordRegex else { return 0 }
         let nsRange = NSRange(s.startIndex..<s.endIndex, in: s)
         return regex.numberOfMatches(in: s, options: [], range: nsRange)
     }

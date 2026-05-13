@@ -113,7 +113,23 @@ public struct ShellCommandDetector {
     ]
     
     public init() {}
-    
+
+    /// Compiled regex cache. The shell/flag pattern arrays are tiny and static,
+    /// so each pattern is compiled exactly once and reused.
+    private static let regexCache: NSCache<NSString, NSRegularExpression> = {
+        let cache = NSCache<NSString, NSRegularExpression>()
+        cache.countLimit = 64
+        return cache
+    }()
+
+    fileprivate static func cachedRegex(for pattern: String) -> NSRegularExpression? {
+        let key = pattern as NSString
+        if let cached = regexCache.object(forKey: key) { return cached }
+        guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+        regexCache.setObject(compiled, forKey: key)
+        return compiled
+    }
+
     public func detect(in text: String) -> [Detection] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
@@ -188,16 +204,16 @@ public struct ShellCommandDetector {
         
         // Check for shell patterns (accumulative)
         for (pattern, weight) in Self.shellPatterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+            if let regex = Self.cachedRegex(for: pattern),
                regex.firstMatch(in: trimmed, options: [], range: NSRange(trimmed.startIndex..., in: trimmed)) != nil {
                 confidence += weight * 0.4  // Scale down so multiple patterns boost but don't overflow
             }
         }
-        
+
         // Check for flag patterns (accumulative)
         var flagScore = 0.0
         for (pattern, weight) in Self.flagPatterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+            if let regex = Self.cachedRegex(for: pattern),
                regex.firstMatch(in: command, options: [], range: NSRange(command.startIndex..., in: command)) != nil {
                 flagScore += weight
             }

@@ -36,13 +36,17 @@ public struct CodeDetector {
         return out
     }
 
+    private static let fencedRegex: NSRegularExpression? = {
+        let pattern = #"```([A-Za-z0-9_+-]+)?\n([\s\S]*?)```"#
+        return try? NSRegularExpression(pattern: pattern, options: [])
+    }()
+
     private func extractCandidates(from text: String) -> [String] {
         // Prefer fenced code blocks when present.
         // ```lang
         // code
         // ```
-        let pattern = #"```([A-Za-z0-9_+-]+)?\n([\s\S]*?)```"#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+        guard let regex = Self.fencedRegex else {
             return [text]
         }
 

@@ -69,8 +69,22 @@ public struct FilePathDetector {
 
     private enum Kind { case unix, windows }
 
+    private static let regexCache: NSCache<NSString, NSRegularExpression> = {
+        let cache = NSCache<NSString, NSRegularExpression>()
+        cache.countLimit = 32
+        return cache
+    }()
+
+    private static func cachedRegex(for pattern: String) -> NSRegularExpression? {
+        let key = pattern as NSString
+        if let cached = regexCache.object(forKey: key) { return cached }
+        guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+        regexCache.setObject(compiled, forKey: key)
+        return compiled
+    }
+
     private func match(pattern: String, in text: String, kind: Kind) -> [Detection] {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        guard let regex = Self.cachedRegex(for: pattern) else { return [] }
 
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         let matches = regex.matches(in: text, options: [], range: range)

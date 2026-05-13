@@ -47,13 +47,15 @@ public struct JWTDetector {
         self.now = now
     }
 
-    public func detect(in text: String) -> [Detection] {
-        // JWT (JWS) shape: header.payload.signature; each segment is base64url.
+    /// Compiled once at type-load and shared across all calls.
+    /// JWT (JWS) shape: header.payload.signature; each segment is base64url.
+    private static let regex: NSRegularExpression? = {
         let pattern = #"(?<![A-Za-z0-9_\-])([A-Za-z0-9_\-]+)\.([A-Za-z0-9_\-]+)\.([A-Za-z0-9_\-]+)(?![A-Za-z0-9_\-])"#
+        return try? NSRegularExpression(pattern: pattern, options: [])
+    }()
 
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return []
-        }
+    public func detect(in text: String) -> [Detection] {
+        guard let regex = Self.regex else { return [] }
 
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         let matches = regex.matches(in: text, options: [], range: range)
