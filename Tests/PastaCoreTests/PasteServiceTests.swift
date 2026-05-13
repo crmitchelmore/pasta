@@ -131,5 +131,28 @@ final class PasteServiceTests: XCTestCase {
         XCTAssertNil(pb.written)
         XCTAssertEqual(sim.callCount, 0)
     }
+
+    func testPastePlainTextWritesPlainStringEvenForFilePathEntries() {
+        let pb = StubPasteboard()
+        let sim = StubSimulator()
+        let service = PasteService(pasteboard: pb, simulator: sim)
+
+        // A filePath entry would normally be written as fileURLs; with plain-text
+        // paste we expect the raw string to be written instead.
+        let entry = ClipboardEntry(content: "/tmp/a.txt\n/tmp/b.txt", contentType: .filePath)
+        XCTAssertTrue(service.pastePlainText(entry))
+        XCTAssertEqual(pb.written, .text("/tmp/a.txt\n/tmp/b.txt"))
+    }
+
+    func testPastePlainTextReturnsFalseForEmptyImageEntry() {
+        let pb = StubPasteboard()
+        let sim = StubSimulator()
+        let service = PasteService(pasteboard: pb, simulator: sim)
+
+        let entry = ClipboardEntry(content: "", contentType: .image, rawData: Data([0x01]))
+        XCTAssertFalse(service.pastePlainText(entry))
+        XCTAssertNil(pb.written)
+        XCTAssertEqual(sim.callCount, 0)
+    }
 }
 #endif

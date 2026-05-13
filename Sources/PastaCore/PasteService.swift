@@ -157,8 +157,30 @@ public final class PasteService {
     /// Returns false if the entry cannot be represented on the pasteboard.
     @discardableResult
     public func paste(_ entry: ClipboardEntry) -> Bool {
-        guard let contents = makeContents(for: entry) else {
-            PastaLogger.clipboard.warning("Cannot create pasteboard contents for entry type \(entry.contentType.rawValue)")
+        return paste(entry, asPlainText: false)
+    }
+
+    /// Like `paste(_:)` but always writes the entry's text content as a plain UTF-8
+    /// string, regardless of the entry's content type. Useful when the original was
+    /// captured as RTF/file-URL/image and the user wants to drop formatting.
+    /// For binary types (image / screenshot) with no textual representation this
+    /// returns false without touching the pasteboard.
+    @discardableResult
+    public func pastePlainText(_ entry: ClipboardEntry) -> Bool {
+        return paste(entry, asPlainText: true)
+    }
+
+    @discardableResult
+    private func paste(_ entry: ClipboardEntry, asPlainText: Bool) -> Bool {
+        let contents: Contents?
+        if asPlainText {
+            let text = entry.content
+            contents = text.isEmpty ? nil : .text(text)
+        } else {
+            contents = makeContents(for: entry)
+        }
+        guard let contents else {
+            PastaLogger.clipboard.warning("Cannot create pasteboard contents for entry type \(entry.contentType.rawValue) (plain=\(asPlainText))")
             return false
         }
         
