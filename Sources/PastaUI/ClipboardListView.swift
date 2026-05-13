@@ -87,6 +87,7 @@ public struct ClipboardListView: View {
     private let onDelete: (ClipboardEntry) -> Void
     private let onDeleteMultiple: ([UUID]) -> Void
     private let onReveal: (ClipboardEntry) -> Void
+    private let onOpenURL: ((ClipboardEntry) -> Void)?
 
     @State private var isSelectionMode = false
     @State private var bulkSelectedIDs: Set<UUID> = []
@@ -120,7 +121,8 @@ public struct ClipboardListView: View {
         onPaste: @escaping (ClipboardEntry) -> Void,
         onDelete: @escaping (ClipboardEntry) -> Void,
         onDeleteMultiple: @escaping ([UUID]) -> Void = { _ in },
-        onReveal: @escaping (ClipboardEntry) -> Void
+        onReveal: @escaping (ClipboardEntry) -> Void,
+        onOpenURL: ((ClipboardEntry) -> Void)? = nil
     ) {
         self.entries = entries
         _selectedEntryID = selectedEntryID
@@ -135,6 +137,7 @@ public struct ClipboardListView: View {
         self.onDelete = onDelete
         self.onDeleteMultiple = onDeleteMultiple
         self.onReveal = onReveal
+        self.onOpenURL = onOpenURL
     }
 
     /// Compute a stable hash for change detection
@@ -393,6 +396,11 @@ public struct ClipboardListView: View {
                 },
                 onReveal: { id in
                     if let entry = entryLookup[id] { onReveal(entry) }
+                },
+                onOpenURL: onOpenURL.map { handler in
+                    { id in
+                        if let entry = entryLookup[id] { handler(entry) }
+                    }
                 }
             )
         }

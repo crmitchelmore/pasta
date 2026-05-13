@@ -54,7 +54,8 @@ public struct HighPerformanceListView: NSViewRepresentable {
     public let onCopyMultiple: ([UUID]) -> Void
     public let onDelete: (UUID) -> Void
     public let onReveal: (UUID) -> Void
-    
+    public let onOpenURL: ((UUID) -> Void)?
+
     public init(
         rows: [ClipboardRowData],
         selectedID: Binding<UUID?>,
@@ -63,7 +64,8 @@ public struct HighPerformanceListView: NSViewRepresentable {
         onCopy: @escaping (UUID) -> Void,
         onCopyMultiple: @escaping ([UUID]) -> Void,
         onDelete: @escaping (UUID) -> Void,
-        onReveal: @escaping (UUID) -> Void
+        onReveal: @escaping (UUID) -> Void,
+        onOpenURL: ((UUID) -> Void)? = nil
     ) {
         self.rows = rows
         self._selectedID = selectedID
@@ -73,6 +75,7 @@ public struct HighPerformanceListView: NSViewRepresentable {
         self.onCopyMultiple = onCopyMultiple
         self.onDelete = onDelete
         self.onReveal = onReveal
+        self.onOpenURL = onOpenURL
     }
     
     public func makeCoordinator() -> Coordinator {
@@ -283,14 +286,22 @@ public struct HighPerformanceListView: NSViewRepresentable {
                 menu.addItem(NSMenuItem.separator())
                 menu.addItem(withTitle: "Reveal in Finder", action: #selector(contextReveal(_:)), keyEquivalent: "")
             }
-            
+
+            if rowData.contentType == .url, parent.onOpenURL != nil {
+                menu.addItem(NSMenuItem.separator())
+                let openItem = NSMenuItem(title: "Open Link", action: #selector(contextOpenURL(_:)), keyEquivalent: "o")
+                openItem.keyEquivalentModifierMask = [.command]
+                openItem.representedObject = rowData.id
+                menu.addItem(openItem)
+            }
+
             for item in menu.items {
                 item.target = self
             }
             menu.items[0].representedObject = rowData.id
             menu.items[1].representedObject = copySelectionIDs
             deleteItem.representedObject = rowData.id
-            if rowData.contentType == .filePath, let revealItem = menu.items.last {
+            if rowData.contentType == .filePath, let revealItem = menu.items.first(where: { $0.title == "Reveal in Finder" }) {
                 revealItem.representedObject = rowData.id
             }
         }
@@ -320,6 +331,11 @@ public struct HighPerformanceListView: NSViewRepresentable {
         @objc private func contextReveal(_ sender: NSMenuItem) {
             guard let id = sender.representedObject as? UUID else { return }
             parent.onReveal(id)
+        }
+
+        @objc private func contextOpenURL(_ sender: NSMenuItem) {
+            guard let id = sender.representedObject as? UUID else { return }
+            parent.onOpenURL?(id)
         }
     }
 }
