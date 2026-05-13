@@ -6,12 +6,14 @@ public struct SearchBarView: View {
     @Binding private var query: String
     @Binding private var contentType: ContentType?
     @Binding private var sourceAppFilter: String
+    @Binding private var showContentTypePicker: Bool
 
     private let resultCount: Int
     private let suggestions: [SearchSuggestion]
+    private let availableContentTypes: [ContentType]
     private let onOpenSettings: () -> Void
     private let searchFocused: FocusState<Bool>.Binding
-    
+
     @State private var isFieldFocused: Bool = false
 
     public init(
@@ -20,6 +22,8 @@ public struct SearchBarView: View {
         resultCount: Int,
         sourceAppFilter: Binding<String>,
         suggestions: [SearchSuggestion] = [],
+        availableContentTypes: [ContentType] = [],
+        showContentTypePicker: Binding<Bool> = .constant(false),
         onOpenSettings: @escaping () -> Void,
         searchFocused: FocusState<Bool>.Binding
     ) {
@@ -28,6 +32,8 @@ public struct SearchBarView: View {
         self.resultCount = resultCount
         _sourceAppFilter = sourceAppFilter
         self.suggestions = suggestions
+        self.availableContentTypes = availableContentTypes
+        _showContentTypePicker = showContentTypePicker
         self.onOpenSettings = onOpenSettings
         self.searchFocused = searchFocused
     }
@@ -71,7 +77,19 @@ public struct SearchBarView: View {
                     .padding(.trailing, 12)
                     .transition(.scale.combined(with: .opacity))
                 }
-                
+
+                // Active content-type filter chip (also visible to confirm
+                // selections made via the ⌘P picker or sidebar).
+                if let activeType = contentType {
+                    ContentTypeFilterChip(type: activeType) {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            contentType = nil
+                        }
+                    }
+                    .padding(.trailing, 8)
+                    .transition(.scale.combined(with: .opacity))
+                }
+
                 // Result count badge
                 Text("\(resultCount)")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -84,6 +102,19 @@ public struct SearchBarView: View {
                     )
                     .padding(.trailing, 12)
                     .contentTransition(.numericText(value: Double(resultCount)))
+                    .popover(isPresented: $showContentTypePicker, arrowEdge: .bottom) {
+                        ContentTypePickerView(
+                            availableTypes: availableContentTypes,
+                            selectedType: contentType,
+                            onSelect: { newType in
+                                contentType = newType
+                                showContentTypePicker = false
+                            },
+                            onCancel: {
+                                showContentTypePicker = false
+                            }
+                        )
+                    }
             }
             .frame(height: 48)
             .frame(maxWidth: .infinity)
@@ -522,3 +553,139 @@ private struct SearchFieldWithSuggestions: NSViewRepresentable {
 }
 
 // pickerTitle provided by ContentType+UI.swift
+
+// MARK: - Content Type Filter Chip
+
+private struct ContentTypeFilterChip: View {
+    let type: ContentType
+    let onClear: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: type.systemImageName)
+                .font(.system(size: 11, weight: .medium))
+            Text(type.displayTitle)
+                .font(.system(size: 12, weight: .semibold))
+            Button(action: onClear) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Clear content type filter")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(type.tint.opacity(0.18))
+        )
+        .overlay(
+            Capsule()
+                .strokeBorder(type.tint.opacity(0.4), lineWidth: 1)
+        )
+        .foregroundStyle(type.tint)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Filtering by \(type.displayTitle)")
+    }
+}
+
+// MARK: - Content Type Picker
+
+/// Compact picker shown via ⌘P listing the content types present in the
+/// current clipboard history. Selecting a row sets the filter; "All" clears it.
+public struct ContentTypePickerView: View {
+    let availableTypes: [ContentType]
+    let selectedType: ContentType?
+    let onSelect: (ContentType?) -> Void
+    let onCancel: () -> Void
+
+    public init(
+        availableTypes: [ContentType],
+        selectedType: ContentType?,
+        onSelect: @escaping (ContentType?) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
+        self.availableTypes = availableTypes
+        self.selectedType = selectedType
+        self.onSelect = onSelect
+        self.onCancel = onCancel
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Filter by Content Type")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    PickerRow(
+                        icon: "circle.dashed",
+                        title: "All",
+                        tint: .secondary,
+                        isSelected: selectedType == nil
+                    ) {
+                        onSelect(nil)
+                    }
+
+                    if !availableTypes.isEmpty {
+                        Divider().padding(.vertical, 4)
+                    }
+
+                    ForEach(availableTypes, id: \.self) { type in
+                        PickerRow(
+                            icon: type.systemImageName,
+                            title: type.displayTitle,
+                            tint: type.tint,
+                            isSelected: selectedType == type
+                        ) {
+                            onSelect(type)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .frame(maxHeight: 320)
+        }
+        .frame(width: 240)
+        .onExitCommand(perform: onCancel)
+    }
+
+    private struct PickerRow: View {
+        let icon: String
+        let title: String
+        let tint: Color
+        let isSelected: Bool
+        let action: () -> Void
+
+        var body: some View {
+            Button(action: action) {
+                HStack(spacing: 10) {
+                    Image(systemName: icon)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(tint)
+                        .frame(width: 18)
+                    Text(title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 0)
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}

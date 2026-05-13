@@ -799,6 +799,7 @@ struct PanelContentView: View {
 
     @State private var isShowingOnboarding: Bool = false
     @State private var isShowingErrorAlert: Bool = false
+    @State private var isShowingContentTypePicker: Bool = false
     
     // Cache search service to avoid recreation per keystroke
     @State private var searchService: SearchService? = nil
@@ -829,6 +830,29 @@ struct PanelContentView: View {
         displayedEntries.map(\.id)
     }
 
+    /// Content types that have at least one entry in the current history,
+    /// sorted by descending count (most common first). Powers the ⌘P picker.
+    private var availableContentTypesInHistory: [ContentType] {
+        if let counts = preloadedEffectiveTypeCounts, !counts.isEmpty {
+            return counts
+                .filter { $0.value > 0 }
+                .sorted { lhs, rhs in
+                    if lhs.value != rhs.value { return lhs.value > rhs.value }
+                    return lhs.key.rawValue < rhs.key.rawValue
+                }
+                .map(\.key)
+        }
+        // Fallback: derive from entries directly when preload cache hasn't run yet.
+        var seen: [ContentType: Int] = [:]
+        for entry in backgroundService.entries {
+            seen[entry.contentType, default: 0] += 1
+        }
+        return seen
+            .filter { $0.value > 0 }
+            .sorted { $0.value > $1.value }
+            .map(\.key)
+    }
+
     var body: some View {
         applyChrome(to: baseView)
             .withAppearance()
@@ -845,6 +869,8 @@ struct PanelContentView: View {
                 contentType: $contentTypeFilter,
                 resultCount: displayedEntries.count,
                 sourceAppFilter: $sourceAppFilter,
+                availableContentTypes: availableContentTypesInHistory,
+                showContentTypePicker: $isShowingContentTypePicker,
                 onOpenSettings: {
                     // Post notification to open settings via AppDelegate
                     NotificationCenter.default.post(name: .openSettings, object: nil)
@@ -917,6 +943,12 @@ struct PanelContentView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.regularMaterial)
             .onAppear(perform: handleOnAppear)
+            .onDisappear {
+                // Reset the content-type filter and close the picker when the
+                // panel hides so each new session starts unfiltered.
+                contentTypeFilter = nil
+                isShowingContentTypePicker = false
+            }
             .onReceive(backgroundService.$lastError) { error in
                 if error != nil {
                     isShowingErrorAlert = true
@@ -1309,6 +1341,13 @@ struct PanelContentView: View {
     }
 
     private func handleKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
+        // If the content-type picker is open, Esc closes it without changing
+        // the filter (so it never falls through to closing the panel).
+        if isShowingContentTypePicker, keyPress.key == .escape {
+            isShowingContentTypePicker = false
+            return .handled
+        }
+
         switch keyPress.key {
         case .escape:
             closePanel()
@@ -1372,6 +1411,13 @@ struct PanelContentView: View {
         let chars = keyPress.characters
         if keyPress.modifiers.contains(.command), chars.lowercased() == "f" {
             searchFocused = true
+            return .handled
+        }
+        if keyPress.modifiers.contains(.command), chars.lowercased() == "p" {
+            // Toggle the content-type filter picker (Raycast-style).
+            // ⌘P would normally trigger Print, but Pasta is a panel app with
+            // no Print menu so the shortcut is safe to repurpose.
+            isShowingContentTypePicker.toggle()
             return .handled
         }
         if listFocused, keyPress.modifiers == .command, chars.lowercased() == "c" {
