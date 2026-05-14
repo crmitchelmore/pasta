@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pasta — Your Clipboard, Al Dente</title>
-  <meta name="description" content="A blazing-fast, local-first clipboard history manager for macOS with intelligent content detection. Never lose a copied item again.">
+  <meta name="description" content="Pasta is a blazing-fast, local-first clipboard history manager for macOS. Smart content detection, snippets with placeholders, command mode, and a Spotlight-style quick search. Free and open source.">
   <meta property="og:title" content="Pasta — Clipboard History for macOS">
-  <meta property="og:description" content="Blazing-fast clipboard history with smart content detection. Local-first with optional iCloud Sync.">
+  <meta property="og:description" content="Local-first clipboard history with smart detection, snippets, command mode, and optional iCloud sync. Free & open source.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://pasta-app.com">
   <meta property="og:image" content="https://pasta-app.com/images/og-image.png">
@@ -938,8 +938,138 @@
       font-weight: 500;
     }
 
-    /* Scroll animations */
-    .fade-in {
+    /* What's New / Highlights Section */
+    .whats-new {
+      padding: 7rem 2rem 4rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .whats-new__grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1.25rem;
+      margin-top: 3rem;
+    }
+    .highlight {
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border);
+      border-radius: 18px;
+      padding: 1.75rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .highlight::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 18px;
+      padding: 1px;
+      background: linear-gradient(135deg, rgba(59,130,246,0.5), transparent 60%);
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+              mask-composite: exclude;
+      pointer-events: none;
+      opacity: 0.7;
+    }
+    .highlight__chip {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--color-accent-warm);
+      background: rgba(59, 130, 246, 0.12);
+      padding: 0.25rem 0.6rem;
+      border-radius: 100px;
+      margin-bottom: 1rem;
+    }
+    .highlight__title {
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    .highlight__body {
+      color: var(--color-text-muted);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+    .highlight__body code {
+      background: rgba(139, 92, 246, 0.15);
+      color: var(--color-tertiary);
+      padding: 0.1em 0.4em;
+      border-radius: 4px;
+      font-family: 'SF Mono', 'Menlo', monospace;
+      font-size: 0.85em;
+    }
+
+    /* Snippets / Command demo */
+    .demo-section {
+      padding: 7rem 2rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .demo-section__grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 3rem;
+      margin-top: 3rem;
+    }
+    @media (max-width: 768px) {
+      .demo-section__grid { grid-template-columns: 1fr; }
+    }
+    .demo-card {
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border);
+      border-radius: 18px;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+    .demo-card__header {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .demo-card__icon {
+      font-size: 1.4rem;
+    }
+    .demo-card h3 {
+      font-family: var(--font-display);
+      font-size: 1.4rem;
+      font-weight: 700;
+    }
+    .demo-card__lead {
+      color: var(--color-text-muted);
+      line-height: 1.65;
+    }
+    .demo-card__lead code {
+      background: rgba(139, 92, 246, 0.15);
+      color: var(--color-tertiary);
+      padding: 0.1em 0.4em;
+      border-radius: 4px;
+      font-family: 'SF Mono', 'Menlo', monospace;
+      font-size: 0.9em;
+    }
+    .terminal {
+      background: var(--color-bg);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+      font-family: 'SF Mono', 'Menlo', monospace;
+      font-size: 0.85rem;
+      line-height: 1.7;
+      color: var(--color-text);
+      overflow-x: auto;
+    }
+    .terminal .tok-cmd { color: var(--color-accent-warm); font-weight: 600; }
+    .terminal .tok-arg { color: var(--color-secondary); }
+    .terminal .tok-ph  { color: var(--color-tertiary); }
+    .terminal .tok-c   { color: var(--color-text-muted); }
+    .terminal .tok-out { color: var(--color-text-muted); }
+
+
       opacity: 0;
       transform: translateY(24px);
       transition: opacity 0.7s var(--ease-out-expo), transform 0.7s var(--ease-out-expo);
@@ -986,6 +1116,18 @@
         text-align: center;
       }
     }
+    /* Reduced motion: respect user preference */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+      .bg-orb { animation: none !important; }
+      .hero__badge-dot { animation: none !important; }
+      .fade-in { opacity: 1; transform: none; }
+    }
   </style>
 </head>
 <body>
@@ -1001,10 +1143,11 @@
       Pasta
     </a>
     <ul class="nav__links">
+      <li><a href="#whats-new" class="nav__link">What's new</a></li>
       <li><a href="#features" class="nav__link">Features</a></li>
+      <li><a href="#snippets" class="nav__link">Snippets</a></li>
       <li><a href="#shortcuts" class="nav__link">Shortcuts</a></li>
-      <li><a href="#cross-device" class="nav__link">Sync</a></li>
-      <li><a href="https://github.com/crmitchelmore/pasta" class="nav__link" target="_blank">GitHub</a></li>
+      <li><a href="https://github.com/crmitchelmore/pasta" class="nav__link" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
     <a href="https://github.com/crmitchelmore/pasta/releases/latest" class="nav__cta">
       Download
@@ -1015,19 +1158,20 @@
   <section class="hero">
     <div class="hero__badge">
       <span class="hero__badge-dot"></span>
-      Free & Open Source
+      Free & Open Source · v1.0
     </div>
-    <div class="hero__badge hero__badge--new" style="margin-bottom: 2rem;">
-      ✨ Now with iCloud Sync & iOS companion
-    </div>
-    
+    <a href="#whats-new" class="hero__badge hero__badge--new" style="margin-bottom: 2rem; text-decoration: none;">
+      🎉 Pasta 1.0 — Snippets, Command Mode, Pinned items &amp; more
+    </a>
+
     <h1 class="hero__title">
       Your clipboard,<br>
       <span class="hero__title-gradient">al dente.</span>
     </h1>
-    
+
     <p class="hero__subtitle">
-      A blazing-fast, local-first clipboard history manager for macOS with intelligent content detection. Never lose a copied item again.
+      A fast, local-first clipboard history manager for macOS. Smart content detection,
+      Spotlight-style search, snippets with dynamic placeholders, and a keyboard-first command mode.
     </p>
     
     <div class="hero__actions">
@@ -1039,7 +1183,7 @@
         </svg>
         Download for Mac
       </a>
-      <a href="https://github.com/crmitchelmore/pasta" class="btn btn--secondary" target="_blank">
+      <a href="https://github.com/crmitchelmore/pasta" class="btn btn--secondary" target="_blank" rel="noopener">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
           <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
         </svg>
@@ -1076,6 +1220,56 @@
     </div>
   </section>
 
+  <!-- What's New in 1.0 -->
+  <section class="whats-new" id="whats-new">
+    <div class="section-header">
+      <span class="section-label">What's new in 1.0</span>
+      <h2 class="section-title">A first stable release,<br>packed with upgrades.</h2>
+    </div>
+    <div class="whats-new__grid">
+      <div class="highlight">
+        <span class="highlight__chip">New</span>
+        <h3 class="highlight__title">Snippets with placeholders</h3>
+        <p class="highlight__body">Saved clips that expand <code>{date}</code>, <code>{datetime}</code>, <code>{clipboard:N}</code>, <code>{cursor}</code>, and <code>{uuid}</code> at paste time. JSON import/export.</p>
+      </div>
+      <div class="highlight">
+        <span class="highlight__chip">New</span>
+        <h3 class="highlight__title">Command Mode</h3>
+        <p class="highlight__body">Type <code>!</code> in Quick Search to clear history slices, toggle settings, switch themes, or jump anywhere — 40+ commands.</p>
+      </div>
+      <div class="highlight">
+        <span class="highlight__chip">New</span>
+        <h3 class="highlight__title">Pinned items</h3>
+        <p class="highlight__body">Pin entries to the top with <code>⌘⇧P</code>. Optional auto-injected Pinned section in Quick Search.</p>
+      </div>
+      <div class="highlight">
+        <span class="highlight__chip">New</span>
+        <h3 class="highlight__title">More detectors</h3>
+        <p class="highlight__body">MAC addresses, credit cards (with masked preview), IBANs, and CSS colours with swatch previews.</p>
+      </div>
+      <div class="highlight">
+        <span class="highlight__chip">New</span>
+        <h3 class="highlight__title">Paste as plain text</h3>
+        <p class="highlight__body"><code>⇧Enter</code> or <code>⌥Enter</code> strips formatting on paste. <code>⌘O</code> opens URL entries in your browser.</p>
+      </div>
+      <div class="highlight">
+        <span class="highlight__chip">Faster</span>
+        <h3 class="highlight__title">Two-stage FTS5 search</h3>
+        <p class="highlight__body">A new BM25 + recency ranker and a two-stage query that skips BLOB hydration for non-winning rows. Sub-millisecond on huge histories.</p>
+      </div>
+      <div class="highlight">
+        <span class="highlight__chip">Privacy</span>
+        <h3 class="highlight__title">Transient pasteboard skip</h3>
+        <p class="highlight__body">Honors the <code>nspasteboard.org</code> transient/concealed/auto-generated flags so password managers like 1Password &amp; Bitwarden are never recorded.</p>
+      </div>
+      <div class="highlight">
+        <span class="highlight__chip">Privacy</span>
+        <h3 class="highlight__title">Opt-in diagnostics</h3>
+        <p class="highlight__body">Crash reports are off by default. Enable them in Settings → Diagnostics if you want to help — clipboard contents are never transmitted.</p>
+      </div>
+    </div>
+  </section>
+
   <!-- Features Section -->
   <section class="features" id="features">
     <div class="section-header">
@@ -1091,84 +1285,100 @@
           Every copy is saved automatically. Search through weeks of clipboard history instantly.
         </p>
       </div>
-      
+
       <div class="feature-card">
         <div class="feature-card__icon feature-card__icon--emerald">🧠</div>
         <h3 class="feature-card__title">Smart Detection</h3>
         <p class="feature-card__description">
-          Auto-categorizes emails, JWTs, code snippets, URLs, env vars, file paths, and more.
+          Auto-categorises emails, JWTs, API keys, code, URLs, env vars, file paths, IBANs, credit cards, colours and more — fifteen detectors out of the box.
         </p>
       </div>
-      
+
       <div class="feature-card">
         <div class="feature-card__icon feature-card__icon--violet">⚡</div>
         <h3 class="feature-card__title">Ultra-Fast Search</h3>
         <p class="feature-card__description">
-          Full-text search powered by SQLite FTS5. Find anything in under a millisecond, even with tens of thousands of items.
+          Full-text search powered by SQLite FTS5 with a custom BM25 + recency ranker. Sub-millisecond on tens of thousands of items.
         </p>
       </div>
-      
+
       <div class="feature-card">
         <div class="feature-card__icon feature-card__icon--sky">⌨️</div>
         <h3 class="feature-card__title">Keyboard-First</h3>
         <p class="feature-card__description">
-          Global hotkey, full keyboard navigation, and quick-paste shortcuts. Your hands never leave the keyboard.
+          Global hotkey, full keyboard navigation, quick-paste by position, and paste-as-plain-text with <code>⇧Enter</code>. Your hands never leave the keyboard.
         </p>
       </div>
-      
+
       <div class="feature-card">
         <div class="feature-card__icon feature-card__icon--rose">👁️</div>
         <h3 class="feature-card__title">Preview Everything</h3>
         <p class="feature-card__description">
-          Images, syntax-highlighted code, decoded base64, and formatted JSON. See exactly what you copied.
+          Images, syntax-highlighted code, decoded base64, formatted JSON, colour swatches, and masked credit cards. See exactly what you copied.
         </p>
       </div>
-      
+
       <div class="feature-card">
         <div class="feature-card__icon feature-card__icon--slate">🔒</div>
         <h3 class="feature-card__title">Privacy-First</h3>
         <p class="feature-card__description">
-          Local by default — everything stays on your Mac. Optionally enable iCloud Sync to access your history across devices.
+          Local by default — clipboard contents stay on your Mac. Items copied by 1Password, Bitwarden and other password managers are skipped automatically.
         </p>
       </div>
-      
+
       <div class="feature-card">
         <div class="feature-card__icon feature-card__icon--violet">⌘</div>
         <h3 class="feature-card__title">Command Mode</h3>
         <p class="feature-card__description">
-          Type <code>!</code> to access 40+ commands. Clear history, toggle settings, switch themes, filter by type — all without touching your mouse.
+          Type <code>!</code> in Quick Search to access 40+ commands: clear history slices, toggle settings, switch themes, jump anywhere — without touching your mouse.
         </p>
       </div>
-      
+
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--amber">📌</div>
+        <h3 class="feature-card__title">Pinned Items</h3>
+        <p class="feature-card__description">
+          Pin clipboard entries to the top with <code>⌘⇧P</code> so the things you reach for stay one keystroke away — even after thousands of new copies.
+        </p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--emerald">📝</div>
+        <h3 class="feature-card__title">Snippets &amp; Placeholders</h3>
+        <p class="feature-card__description">
+          Save reusable clips with dynamic placeholders like <code>{date}</code>, <code>{datetime}</code>, <code>{clipboard}</code>, <code>{clipboard:N}</code>, <code>{cursor}</code>, and <code>{uuid}</code>. JSON import/export included.
+        </p>
+      </div>
+
       <div class="feature-card">
         <div class="feature-card__icon feature-card__icon--cyan">☁️</div>
-        <h3 class="feature-card__title">iCloud Sync</h3>
+        <h3 class="feature-card__title">Optional iCloud Sync</h3>
         <p class="feature-card__description">
-          Seamlessly sync your clipboard history between Mac and iOS via CloudKit. Fully optional — disabled by default.
+          Opt in to sync clipboard history between Mac and iOS via your private CloudKit database. Off by default; flip it on in Settings whenever you want it.
         </p>
       </div>
-      
+
       <div class="feature-card">
         <div class="feature-card__icon feature-card__icon--amber">📥</div>
-        <h3 class="feature-card__title">Import & Export</h3>
+        <h3 class="feature-card__title">Import &amp; Export</h3>
         <p class="feature-card__description">
           Switch from Alfred, Maccy, Flycut, CopyClip, Paste, Pastebot, or Clipy. Export your data as JSON anytime.
         </p>
       </div>
-      
+
       <div class="feature-card">
         <div class="feature-card__icon feature-card__icon--lime">🎨</div>
-        <h3 class="feature-card__title">Themes & Appearance</h3>
+        <h3 class="feature-card__title">Themes &amp; Appearance</h3>
         <p class="feature-card__description">
           Light, Dark, or follow your system. Choose between menu bar, Dock, or both. Make it yours.
         </p>
       </div>
-      
+
       <div class="feature-card">
         <div class="feature-card__icon feature-card__icon--rose">🔧</div>
         <h3 class="feature-card__title">Detection Customisation</h3>
         <p class="feature-card__description">
-          Three strictness profiles, per-detector overrides, and advanced regex patterns. Build your own custom detectors too.
+          Three strictness profiles, per-detector overrides, and advanced regex patterns with performance ratings. Build your own custom detectors too.
         </p>
       </div>
     </div>
@@ -1280,13 +1490,45 @@
         </div>
         
         <div class="content-type">
+          <span class="content-type__icon">💳</span>
+          <div>
+            <div class="content-type__label">Credit Cards</div>
+            <div class="content-type__example">•••• •••• •••• 4242</div>
+          </div>
+        </div>
+
+        <div class="content-type">
+          <span class="content-type__icon">🏦</span>
+          <div>
+            <div class="content-type__label">IBANs</div>
+            <div class="content-type__example">GB29 NWBK 6016…</div>
+          </div>
+        </div>
+
+        <div class="content-type">
+          <span class="content-type__icon">🎨</span>
+          <div>
+            <div class="content-type__label">Colors</div>
+            <div class="content-type__example">#3b82f6 · rgb(…)</div>
+          </div>
+        </div>
+
+        <div class="content-type">
+          <span class="content-type__icon">🛜</span>
+          <div>
+            <div class="content-type__label">MAC Addresses</div>
+            <div class="content-type__example">aa:bb:cc:dd:ee:ff</div>
+          </div>
+        </div>
+
+        <div class="content-type">
           <span class="content-type__icon">🖼️</span>
           <div>
             <div class="content-type__label">Images</div>
             <div class="content-type__example">Screenshots, photos</div>
           </div>
         </div>
-        
+
         <div class="content-type">
           <span class="content-type__icon">📄</span>
           <div>
@@ -1325,6 +1567,55 @@
     </div>
   </section>
 
+  <!-- Snippets + Command Mode side-by-side demo -->
+  <section class="demo-section" id="snippets">
+    <div class="section-header">
+      <span class="section-label">Snippets &amp; Commands</span>
+      <h2 class="section-title">Type less, paste smarter.</h2>
+    </div>
+
+    <div class="demo-section__grid">
+      <div class="demo-card">
+        <div class="demo-card__header">
+          <span class="demo-card__icon">📝</span>
+          <h3>Snippets with placeholders</h3>
+        </div>
+        <p class="demo-card__lead">
+          Save the things you type all the time. Drop in placeholders and Pasta fills them in at paste time.
+        </p>
+        <div class="terminal" aria-label="Snippet example">
+<span class="tok-c"># standup template</span>
+Yesterday: <span class="tok-ph">{cursor}</span>
+Today:
+Blockers: none
+<span class="tok-c"># pasted on </span><span class="tok-ph">{date:yyyy-MM-dd}</span><span class="tok-c"> · ticket </span><span class="tok-ph">{uuid}</span></div>
+        <p class="demo-card__lead" style="margin-top: -0.25rem;">
+          Built-in placeholders: <code>{date}</code>, <code>{time}</code>, <code>{datetime}</code>, <code>{clipboard}</code>, <code>{clipboard:N}</code>, <code>{cursor}</code>, <code>{uuid}</code> — with optional format strings.
+        </p>
+      </div>
+
+      <div class="demo-card">
+        <div class="demo-card__header">
+          <span class="demo-card__icon">⌘</span>
+          <h3>Command Mode</h3>
+        </div>
+        <p class="demo-card__lead">
+          Press <code>!</code> in Quick Search to drive Pasta from the keyboard. Forty-plus commands across history, settings, and navigation.
+        </p>
+        <div class="terminal" aria-label="Command examples">
+<span class="tok-cmd">!clear</span> <span class="tok-arg">10 mins</span>          <span class="tok-out">› wipe the last 10 minutes of history</span>
+<span class="tok-cmd">!pause</span>                  <span class="tok-out">› stop monitoring the clipboard</span>
+<span class="tok-cmd">!theme</span> <span class="tok-arg">dark</span>             <span class="tok-out">› switch appearance</span>
+<span class="tok-cmd">!skip-api-keys</span> <span class="tok-arg">on</span>     <span class="tok-out">› never record detected API keys</span>
+<span class="tok-cmd">!urls</span>                   <span class="tok-out">› quick filter to URL entries</span>
+<span class="tok-cmd">!help</span>                   <span class="tok-out">› list every command</span></div>
+        <p class="demo-card__lead" style="margin-top: -0.25rem;">
+          Destructive commands prompt for confirmation. Filters mirror the sidebar so you can stay in the search field.
+        </p>
+      </div>
+    </div>
+  </section>
+
   <!-- Keyboard Shortcuts Section -->
   <section class="shortcuts" id="shortcuts">
     <div class="section-header">
@@ -1341,7 +1632,7 @@
           <span class="key">V</span>
         </div>
       </div>
-      
+
       <div class="shortcut">
         <span class="shortcut__action">Navigate History</span>
         <div class="shortcut__keys">
@@ -1349,14 +1640,22 @@
           <span class="key">↓</span>
         </div>
       </div>
-      
+
       <div class="shortcut">
         <span class="shortcut__action">Paste Selected Item</span>
         <div class="shortcut__keys">
           <span class="key">↵</span>
         </div>
       </div>
-      
+
+      <div class="shortcut">
+        <span class="shortcut__action">Paste as Plain Text</span>
+        <div class="shortcut__keys">
+          <span class="key">⇧</span>
+          <span class="key">↵</span>
+        </div>
+      </div>
+
       <div class="shortcut">
         <span class="shortcut__action">Quick-Paste by Position</span>
         <div class="shortcut__keys">
@@ -1364,7 +1663,32 @@
           <span class="key">1-9</span>
         </div>
       </div>
-      
+
+      <div class="shortcut">
+        <span class="shortcut__action">Open URL Entry in Browser</span>
+        <div class="shortcut__keys">
+          <span class="key">⌘</span>
+          <span class="key">O</span>
+        </div>
+      </div>
+
+      <div class="shortcut">
+        <span class="shortcut__action">Pin / Unpin Selected</span>
+        <div class="shortcut__keys">
+          <span class="key">⌘</span>
+          <span class="key">⇧</span>
+          <span class="key">P</span>
+        </div>
+      </div>
+
+      <div class="shortcut">
+        <span class="shortcut__action">Cycle Content-Type Filter</span>
+        <div class="shortcut__keys">
+          <span class="key">⌘</span>
+          <span class="key">P</span>
+        </div>
+      </div>
+
       <div class="shortcut">
         <span class="shortcut__action">Toggle Preview Panel</span>
         <div class="shortcut__keys">
@@ -1372,7 +1696,7 @@
           <span class="key">←</span>
         </div>
       </div>
-      
+
       <div class="shortcut">
         <span class="shortcut__action">Delete Selected Item</span>
         <div class="shortcut__keys">
@@ -1380,14 +1704,23 @@
           <span class="key">⌫</span>
         </div>
       </div>
-      
+
+      <div class="shortcut">
+        <span class="shortcut__action">Clear All History</span>
+        <div class="shortcut__keys">
+          <span class="key">⌃</span>
+          <span class="key">⇧</span>
+          <span class="key">X</span>
+        </div>
+      </div>
+
       <div class="shortcut">
         <span class="shortcut__action">Enter Command Mode</span>
         <div class="shortcut__keys">
           <span class="key">!</span>
         </div>
       </div>
-      
+
       <div class="shortcut">
         <span class="shortcut__action">Close Window</span>
         <div class="shortcut__keys">
@@ -1503,8 +1836,9 @@
       <div class="privacy__icon">🔒</div>
       <h2 class="privacy__title">Your data, your rules.</h2>
       <p class="privacy__description">
-        Pasta stores everything locally in a SQLite database on your Mac by default. No telemetry, no tracking, no accounts. 
-        Optionally enable iCloud Sync to access your history across devices — but only if you choose to.
+        Pasta stores your clipboard locally in a SQLite database on your Mac. No accounts. No telemetry by default.
+        Items copied by password managers are skipped automatically. iCloud Sync and crash reporting are both opt-in
+        — your data only leaves your Mac if you choose.
       </p>
       <div class="privacy__badges">
         <div class="privacy__badge">
@@ -1513,7 +1847,11 @@
         </div>
         <div class="privacy__badge">
           <span class="privacy__badge-icon">✓</span>
-          No telemetry
+          Skips password managers
+        </div>
+        <div class="privacy__badge">
+          <span class="privacy__badge-icon">✓</span>
+          No telemetry by default
         </div>
         <div class="privacy__badge">
           <span class="privacy__badge-icon">✓</span>
@@ -1525,7 +1863,7 @@
         </div>
         <div class="privacy__badge">
           <span class="privacy__badge-icon">✓</span>
-          Open source
+          MIT-licensed open source
         </div>
       </div>
     </div>
@@ -1542,19 +1880,19 @@
         Pasta is free and open source. If you find it useful, consider supporting its development!
       </p>
       <div class="support__buttons">
-        <a href="https://github.com/sponsors/crmitchelmore" class="btn btn--sponsor" target="_blank">
+        <a href="https://github.com/sponsors/crmitchelmore" class="btn btn--sponsor" target="_blank" rel="noopener">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
           </svg>
           GitHub Sponsors
         </a>
-        <a href="https://ko-fi.com/crmitchelmore" class="btn btn--kofi" target="_blank">
+        <a href="https://ko-fi.com/crmitchelmore" class="btn btn--kofi" target="_blank" rel="noopener">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.965-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.963 1.904.82 1.832 3.011.723 4.311zm6.173.478c-.928.116-1.682.028-1.682.028V7.284h1.77s1.971.551 1.971 2.638c0 1.913-.985 2.667-2.059 3.015z"/>
           </svg>
           Ko-fi
         </a>
-        <a href="https://github.com/crmitchelmore/pasta" class="btn btn--secondary" target="_blank">
+        <a href="https://github.com/crmitchelmore/pasta" class="btn btn--secondary" target="_blank" rel="noopener">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
           </svg>
@@ -1580,7 +1918,7 @@
           </svg>
           Download for Mac
         </a>
-        <a href="https://github.com/crmitchelmore/pasta" class="btn btn--secondary" target="_blank">
+        <a href="https://github.com/crmitchelmore/pasta" class="btn btn--secondary" target="_blank" rel="noopener">
           View Source
         </a>
       </div>
@@ -1610,7 +1948,7 @@
       });
     }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
 
-    document.querySelectorAll('.feature-card, .content-type, .shortcut, .cross-device__content, .import-app, .privacy__badge').forEach((el, i) => {
+    document.querySelectorAll('.feature-card, .content-type, .shortcut, .cross-device__content, .import-app, .privacy__badge, .highlight, .demo-card').forEach((el, i) => {
       el.classList.add('fade-in');
       // Stagger siblings within the same parent
       const siblings = Array.from(el.parentElement.children).filter(c => c === el || c.classList.contains(el.classList[0]));
