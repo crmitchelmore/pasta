@@ -12,6 +12,13 @@ import PastaUI
 extension Notification.Name {
     static let openSettings = Notification.Name("pasta.openSettings")
     static let openOnboarding = Notification.Name("pasta.openOnboarding")
+    static let applyContentTypeFilter = Notification.Name("pasta.applyContentTypeFilter")
+}
+
+/// Userinfo key for `applyContentTypeFilter` carrying an optional `ContentType`.
+/// `nil` means clear the filter (show all).
+enum ApplyContentTypeFilterKey {
+    static let contentType = "contentType"
 }
 
 @main
@@ -226,26 +233,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         handlers.quitApp = {
             NSApplication.shared.terminate(nil)
         }
-        
-        handlers.openMainWindow = { [weak self] contentType in
-            self?.quickSearchController?.hide()
-            self?.showMainWindow()
-            // TODO: Apply filter in main window if contentType is provided
-        }
-        
+
+        // Note: `openMainWindow` is intentionally not wired as a handler.
+        // The result is observed in `handleCommandResult` so we can both
+        // open the window and broadcast the optional contentType filter
+        // via NotificationCenter.
+
         CommandRegistry.shared.handlers = handlers
     }
-    
+
     private func handleCommandResult(_ command: Command) async -> CommandResult {
         let result = await CommandRegistry.shared.execute(command)
-        
+
         // Handle special results that need app-level actions
-        if case .openMainWindow = result {
+        if case .openMainWindow(let contentType) = result {
             quickSearchController?.hide()
             showMainWindow()
-            // TODO: Apply contentType filter in main window
+            NotificationCenter.default.post(
+                name: .applyContentTypeFilter,
+                object: nil,
+                userInfo: [ApplyContentTypeFilterKey.contentType: contentType as Any]
+            )
         }
-        
+
         return result
     }
     
@@ -959,6 +969,12 @@ struct PanelContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .openOnboarding)) { _ in
                 isShowingOnboarding = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .applyContentTypeFilter)) { note in
+                let value = note.userInfo?[ApplyContentTypeFilterKey.contentType]
+                let type = value as? ContentType
+                contentTypeFilter = type
+                filterSelection = type.map { .type($0) } ?? .all
             }
             .onReceive(backgroundService.$entries) { entries in
                 // Keep preload cache warm so type switching is instant
