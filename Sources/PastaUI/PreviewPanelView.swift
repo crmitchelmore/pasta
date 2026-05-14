@@ -1,12 +1,13 @@
 import AppKit
 import PastaCore
+import PastaDetectors
 import SwiftUI
 
 // File-level struct for file path preview data
 struct FilePathPreviewData {
     var path: String
     var filename: String
-    var fileType: String
+    var fileType: FilePathDetector.FileType
     var mimeType: String?
     var exists: Bool
 }
@@ -327,7 +328,7 @@ public struct PreviewPanelView: View {
         return FilePathPreviewData(
             path: first["path"] as? String ?? entry.content,
             filename: first["filename"] as? String ?? "",
-            fileType: first["fileType"] as? String ?? "other",
+            fileType: (first["fileType"] as? String).flatMap(FilePathDetector.FileType.init(rawValue:)) ?? .other,
             mimeType: first["mimeType"] as? String,
             exists: first["exists"] as? Bool ?? false
         )
@@ -502,7 +503,7 @@ private struct ExtractedItemRow: View {
             copyToClipboard()
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: item.type.icon)
+                Image(systemName: item.type.systemImageName)
                     .font(.caption)
                     .foregroundStyle(item.type.tint)
                     .frame(width: 16)
@@ -543,43 +544,18 @@ private struct ExtractedItemRow: View {
     }
 }
 
-// Make ExtractedItem and ExtractedItemType accessible to private structs
+// Make ExtractedItem accessible to private structs
 extension PreviewPanelView {
     struct ExtractedItem: Identifiable {
         let id = UUID()
-        let type: ExtractedItemType
+        let type: ContentType
         let value: String
         let displayValue: String
 
         init(type: ContentType, value: String, displayValue: String) {
-            self.type = .contentType(type)
+            self.type = type
             self.value = value
             self.displayValue = displayValue
-        }
-    }
-    
-    enum ExtractedItemType {
-        case contentType(ContentType)
-        
-        var icon: String {
-            switch self {
-            case .contentType(let type):
-                return type.systemImageName
-            }
-        }
-        
-        var label: String {
-            switch self {
-            case .contentType(let type):
-                return type.displayTitle
-            }
-        }
-        
-        var tint: Color {
-            switch self {
-            case .contentType(let type):
-                return type.tint
-            }
         }
     }
 }
@@ -663,7 +639,7 @@ struct ImagePreview: View {
         loadedPath = imagePath
         image = nil
         DispatchQueue.global(qos: .userInitiated).async {
-            let loaded = DownsampledImageLoader.load(path: imagePath, maxPixelSize: 1600)
+            let loaded = ImageDownsampler.load(path: imagePath, maxPixelSize: 1600) ?? NSImage(contentsOfFile: imagePath)
             DispatchQueue.main.async {
                 // Only update if path hasn't changed
                 if loadedPath == imagePath {
@@ -681,36 +657,36 @@ private struct FilePreview: View {
     @State private var quickLookURL: URL?
     
     private var isImage: Bool {
-        preview.fileType == "image"
+        preview.fileType == .image
     }
-    
+
     private var systemImageName: String {
         switch preview.fileType {
-        case "image": return "photo"
-        case "video": return "film"
-        case "audio": return "waveform"
-        case "document": return "doc.richtext"
-        case "code": return "doc.text"
-        case "archive": return "archivebox"
-        case "data": return "cylinder"
-        case "executable": return "app"
-        case "font": return "textformat"
-        default: return "doc"
+        case .image: return "photo"
+        case .video: return "film"
+        case .audio: return "waveform"
+        case .document: return "doc.richtext"
+        case .code: return "doc.text"
+        case .archive: return "archivebox"
+        case .data: return "cylinder"
+        case .executable: return "app"
+        case .font: return "textformat"
+        case .other: return "doc"
         }
     }
-    
+
     private var fileTypeColor: Color {
         switch preview.fileType {
-        case "image": return .purple
-        case "video": return .pink
-        case "audio": return .orange
-        case "document": return .blue
-        case "code": return .green
-        case "archive": return .brown
-        case "data": return .cyan
-        case "executable": return .red
-        case "font": return .indigo
-        default: return .gray
+        case .image: return .purple
+        case .video: return .pink
+        case .audio: return .orange
+        case .document: return .blue
+        case .code: return .green
+        case .archive: return .brown
+        case .data: return .cyan
+        case .executable: return .red
+        case .font: return .indigo
+        case .other: return .gray
         }
     }
     
@@ -730,7 +706,7 @@ private struct FilePreview: View {
                         .lineLimit(2)
                     
                     HStack(spacing: 8) {
-                        Text(preview.fileType.uppercased())
+                        Text(preview.fileType.rawValue.uppercased())
                             .font(.caption2.weight(.semibold))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -799,19 +775,13 @@ private struct FilePreview: View {
             if isImage && preview.exists && image == nil {
                 let path = preview.path
                 DispatchQueue.global(qos: .userInitiated).async {
-                    let loaded = DownsampledImageLoader.load(path: path, maxPixelSize: 1200)
+                    let loaded = ImageDownsampler.load(path: path, maxPixelSize: 1200) ?? NSImage(contentsOfFile: path)
                     DispatchQueue.main.async {
                         self.image = loaded
                     }
                 }
             }
         }
-    }
-}
-
-private enum DownsampledImageLoader {
-    static func load(path: String, maxPixelSize: CGFloat) -> NSImage? {
-        ImageDownsampler.load(path: path, maxPixelSize: maxPixelSize) ?? NSImage(contentsOfFile: path)
     }
 }
 

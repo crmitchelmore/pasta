@@ -376,7 +376,6 @@ public struct CommandHandlers: Sendable {
     public var checkForUpdates: (@Sendable @MainActor () -> Void)?
     public var openReleaseNotes: (@Sendable @MainActor () -> Void)?
     public var quitApp: (@Sendable @MainActor () -> Void)?
-    public var openMainWindow: (@Sendable @MainActor (ContentType?) -> Void)?
-    
+
     public init() {}
 }
