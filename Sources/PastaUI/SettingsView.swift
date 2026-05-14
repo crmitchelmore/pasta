@@ -20,6 +20,7 @@ public struct SettingsView: View {
         static let deduplicateEntries = "pasta.deduplicateEntries"
         static let multiCopyJoinSeparator = "pasta.multiCopyJoinSeparator"
         static let skipAPIKeys = "pasta.skipAPIKeys"
+        static let respectTransientPasteboard = "pasta.respectTransientPasteboard"
         static let extractContent = "pasta.extractContent"
     }
 
@@ -41,6 +42,7 @@ public struct SettingsView: View {
     @AppStorage(Defaults.deduplicateEntries) private var deduplicateEntries: Bool = true
     @AppStorage(Defaults.multiCopyJoinSeparator) private var multiCopyJoinSeparator: String = "\n"
     @AppStorage(Defaults.skipAPIKeys) private var skipAPIKeys: Bool = false
+    @AppStorage(Defaults.respectTransientPasteboard) private var respectTransientPasteboard: Bool = true
     @AppStorage(Defaults.extractContent) private var extractContent: Bool = true
 
     @State private var selectedTab: SettingsTab = .general
@@ -90,6 +92,7 @@ public struct SettingsView: View {
                 deduplicateEntries: $deduplicateEntries,
                 multiCopyJoinSeparator: $multiCopyJoinSeparator,
                 skipAPIKeys: $skipAPIKeys,
+                respectTransientPasteboard: $respectTransientPasteboard,
                 extractContent: $extractContent,
                 playSounds: $playSounds,
                 showNotifications: $showNotifications,
@@ -344,6 +347,7 @@ private struct ClipboardSettingsTab: View {
     @Binding var deduplicateEntries: Bool
     @Binding var multiCopyJoinSeparator: String
     @Binding var skipAPIKeys: Bool
+    @Binding var respectTransientPasteboard: Bool
     @Binding var extractContent: Bool
     @Binding var playSounds: Bool
     @Binding var showNotifications: Bool
@@ -393,6 +397,11 @@ private struct ClipboardSettingsTab: View {
             Section {
                 Toggle("Skip detected API keys", isOn: $skipAPIKeys)
                 Text("When enabled, clipboard entries that look like API keys (OpenAI, GitHub, Stripe, AWS, etc.) won't be captured for security.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Respect transient/concealed clipboards", isOn: $respectTransientPasteboard)
+                Text("When enabled, items copied by password managers and other apps that mark the clipboard as transient or concealed (e.g. 1Password, Bitwarden) are ignored entirely.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {

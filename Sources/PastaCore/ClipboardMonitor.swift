@@ -213,7 +213,9 @@ public final class ClipboardMonitor {
 
         // Privacy: skip transient/concealed clipboards (password managers, etc.)
         // Check BEFORE reading contents so we never even materialize the secret.
-        if pasteboard.isTransient() {
+        // User can opt out via the "Respect transient pasteboard" Security setting.
+        let respectTransient = UserDefaults.standard.object(forKey: "pasta.respectTransientPasteboard") as? Bool ?? true
+        if respectTransient, pasteboard.isTransient() {
             PastaLogger.clipboard.debug("Skipped transient/concealed pasteboard contents")
             return
         }
