@@ -53,7 +53,7 @@ private struct RowData: Equatable, Identifiable {
         let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
         self.previewText = trimmed.isEmpty ? "(empty)" : String(trimmed.prefix(200))
         self.contentType = entry.contentType
-        self.sourceAppName = entry.sourceApp?.displayName
+        self.sourceAppName = entry.sourceApp?.appDisplayName
         self.timestamp = entry.timestamp
         self.copyCount = entry.copyCount
         self.isLarge = entry.content.utf8.count > 10 * 1024
@@ -618,13 +618,7 @@ private struct ContentTypeBadge: View {
 // MARK: - Extensions
 
 private extension String {
-    var displayName: String {
-        let parts = self.split(separator: ".")
-        if let last = parts.last {
-            return String(last).capitalized
-        }
-        return self
-    }
+    var displayName: String { appDisplayName }
 }
 
 // MARK: - Extracted Value Types

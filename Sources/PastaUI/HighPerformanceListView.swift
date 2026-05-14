@@ -47,7 +47,7 @@ public struct ClipboardRowData: Equatable {
             self.previewText = baseText
         }
         self.contentType = entry.contentType
-        self.sourceAppName = entry.sourceApp?.displayName
+        self.sourceAppName = entry.sourceApp?.appDisplayName
         self.timestamp = entry.timestamp
         self.copyCount = entry.copyCount
         self.isLarge = entry.content.utf8.count > 10 * 1024
@@ -165,13 +165,7 @@ private final class ColorSwatchParser {
 }
 
 private extension String {
-    var displayName: String {
-        let parts = self.split(separator: ".")
-        if let last = parts.last {
-            return String(last).capitalized
-        }
-        return self
-    }
+    var displayName: String { appDisplayName }
 }
 
 // MARK: - NSTableView Wrapper
@@ -670,7 +664,7 @@ private final class ClipboardCellView: NSTableCellView {
         if let app = row.sourceAppName {
             meta.append(app)
         }
-        meta.append(RelativeDateFormatter.shared.string(from: row.timestamp))
+        meta.append(row.timestamp.relativeFormatted)
         if row.copyCount > 1 {
             meta.append("×\(row.copyCount)")
         }
@@ -722,16 +716,5 @@ private final class ClipboardSectionHeaderView: NSTableCellView {
 
 // MARK: - Relative Date Formatter (cached)
 
-private final class RelativeDateFormatter {
-    static let shared = RelativeDateFormatter()
-    
-    private let formatter: RelativeDateTimeFormatter = {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .abbreviated
-        return f
-    }()
-    
-    func string(from date: Date) -> String {
-        formatter.localizedString(for: date, relativeTo: Date())
-    }
-}
+// Now provided by Formatting.swift.
+
