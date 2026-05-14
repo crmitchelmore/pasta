@@ -323,6 +323,15 @@ public struct FilterSidebarView: View {
             selection = .type(type)
             return
         }
+        // Preserve selections that don't map to type/domain bindings (.pinned,
+        // .sourceApp). `applySelection(.pinned)` deliberately clears the
+        // bindings, so seeing both nil here doesn't mean "reset to all".
+        switch selection {
+        case .pinned, .sourceApp:
+            return
+        default:
+            break
+        }
         selection = .all
     }
 

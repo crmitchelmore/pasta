@@ -456,8 +456,7 @@ public final class DatabaseManager: @unchecked Sendable {
                 arguments: [pinned, id.uuidString]
             )
             return db.changesCount > 0
-        }
-    }
+        }    }
 
     public func search(query: String, limit: Int = 50) throws -> [ClipboardEntry] {
         let pattern = "%\(query)%"
@@ -467,6 +466,16 @@ public final class DatabaseManager: @unchecked Sendable {
                 .order(Column("timestamp").desc)
                 .limit(limit)
                 .fetchAll(db)
+        }
+    }
+
+    /// Returns the total number of pinned entries.
+    public func pinnedCount() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM \(ClipboardEntry.databaseTableName) WHERE isPinned = 1"
+            ) ?? 0
         }
     }
 
@@ -486,7 +495,7 @@ public final class DatabaseManager: @unchecked Sendable {
     ///   - contentType: Optional filter by content type
     ///   - limit: Maximum results to return
     /// - Returns: Matching entries ordered by combined relevance + recency + popularity
-    public func searchFTS(query: String, contentType: ContentType?, limit: Int = 50) throws -> [ClipboardEntry] {
+    public func searchFTS(query: String, contentType: ContentType?, limit: Int = 50, pinnedOnly: Bool = false) throws -> [ClipboardEntry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
@@ -514,6 +523,10 @@ public final class DatabaseManager: @unchecked Sendable {
             if let contentType {
                 sql += " AND e.contentType = ?"
                 args.append(contentType.rawValue)
+            }
+
+            if pinnedOnly {
+                sql += " AND e.isPinned = 1"
             }
 
             // Combined score:

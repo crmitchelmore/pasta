@@ -431,22 +431,25 @@ public struct QuickSearchView: View {
     private var resultsList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 2, pinnedViews: []) {
+                LazyVStack(spacing: 2, pinnedViews: [.sectionHeaders]) {
                     ForEach(resultSections) { section in
-                        if let title = section.title {
-                            QuickSearchSectionHeader(title: title)
-                        }
-                        ForEach(section.items, id: \.entry.id) { item in
-                            QuickSearchRow(
-                                entry: item.entry,
-                                index: item.index + 1,
-                                isSelected: manager.selectedIndex == item.index,
-                                query: manager.query
-                            )
-                            .id(item.entry.id)
-                            .onTapGesture {
-                                onPaste(item.entry)
-                                onDismiss()
+                        Section {
+                            ForEach(section.items, id: \.entry.id) { item in
+                                QuickSearchRow(
+                                    entry: item.entry,
+                                    index: item.index + 1,
+                                    isSelected: manager.selectedIndex == item.index,
+                                    query: manager.query
+                                )
+                                .id(item.entry.id)
+                                .onTapGesture {
+                                    onPaste(item.entry)
+                                    onDismiss()
+                                }
+                            }
+                        } header: {
+                            if let title = section.title {
+                                QuickSearchSectionHeader(title: title)
                             }
                         }
                     }

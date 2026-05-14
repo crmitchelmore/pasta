@@ -1270,7 +1270,8 @@ struct PanelContentView: View {
                 let matches = try service.search(
                     query: query,
                     contentType: searchContentType,
-                    limit: Preload.limit
+                    limit: Preload.limit,
+                    pinnedOnly: pinnedOnly
                 )
                 guard !Task.isCancelled else { return }
                 result = Self.filterEntries(
