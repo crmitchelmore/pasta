@@ -79,16 +79,27 @@ public final class SearchService {
         // Tokenise the query, then locate each term in the content using
         // case-insensitive substring search. Avoids allocating a `lowercased()`
         // copy of the (potentially large) content/query strings on every result.
+        //
+        // Offsets are returned as **UTF-16 code-unit** distances so the
+        // ranges line up with `NSAttributedString` / `NSRange` highlighting
+        // APIs (which is what AppKit/SwiftUI text renderers consume). Using
+        // Character distances here would silently desync highlights for any
+        // content containing astral-plane characters (emoji, combining marks).
         let terms = query.split(whereSeparator: { $0.isWhitespace })
         guard !terms.isEmpty else { return [] }
+
+        let contentUTF16 = content.utf16
+        let utf16Start = contentUTF16.startIndex
 
         var ranges: [CountableClosedRange<Int>] = []
         ranges.reserveCapacity(terms.count)
 
         for term in terms {
             guard let range = content.range(of: term, options: .caseInsensitive) else { continue }
-            let start = content.distance(from: content.startIndex, to: range.lowerBound)
-            let end = content.distance(from: content.startIndex, to: range.upperBound) - 1
+            let lower = range.lowerBound.samePosition(in: contentUTF16) ?? range.lowerBound
+            let upper = range.upperBound.samePosition(in: contentUTF16) ?? range.upperBound
+            let start = contentUTF16.distance(from: utf16Start, to: lower)
+            let end = contentUTF16.distance(from: utf16Start, to: upper) - 1
             if start <= end {
                 ranges.append(start...end)
             }
