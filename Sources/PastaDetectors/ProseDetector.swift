@@ -52,16 +52,22 @@ public struct ProseDetector {
     }
 
     private func containsCodeSignals(_ s: String) -> Bool {
-        let lower = s.lowercased()
-        let tokens = [
+        // First, cheap case-sensitive scans for tokens we expect in the
+        // canonical case used in source code. Avoids the full `lowercased()`
+        // allocation for every prose paragraph (~4kB on the long-prose
+        // benchmark).
+        let plainTokens = [
             "```",
             "{", "}", ";",
             "#include", "import ", "func ", "struct ", "class ", "let ", "var ",
             "=>", "->", "::", ":=",
-            "select ", "from ", "where ",
             "<html", "</"
         ]
-        if tokens.contains(where: { lower.contains($0) }) { return true }
+        if plainTokens.contains(where: { s.contains($0) }) { return true }
+        // SQL keywords are case-insensitive; check both common cases without
+        // allocating a fully lowercased copy.
+        let sqlTokens = ["SELECT ", "FROM ", "WHERE ", "select ", "from ", "where "]
+        if sqlTokens.contains(where: { s.contains($0) }) { return true }
 
         // Many braces/semicolons strongly suggest code.
         let strongChars: Set<Character> = ["{", "}", ";"]
@@ -89,7 +95,7 @@ public struct ProseDetector {
             if let colon = line.firstIndex(of: ":"), colon != line.startIndex {
                 // Avoid treating normal sentences with ':' as structured.
                 let before = line[..<colon]
-                if before.range(of: "\\s", options: .regularExpression) == nil {
+                if !before.contains(" ") && !before.contains("\t") {
                     structured += 1
                     continue
                 }

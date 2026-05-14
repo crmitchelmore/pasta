@@ -46,6 +46,12 @@ public struct CodeDetector {
         // ```lang
         // code
         // ```
+        // Cheap pre-check: skip the regex sweep entirely when there are no
+        // backticks at all. Long prose without fences was paying ~2ms per call
+        // for an FTS-style regex that found nothing.
+        if !text.contains("```") {
+            return [text]
+        }
         guard let regex = Self.fencedRegex else {
             return [text]
         }
@@ -64,17 +70,20 @@ public struct CodeDetector {
     }
 
     private func classify(_ code: String) -> (CodeLanguage, Double) {
-        // Strong type checks first.
-        if let jsonConfidence = jsonConfidence(code) {
-            return (.json, jsonConfidence)
-        }
-        if htmlConfidence(code) >= 0.9 { return (.html, htmlConfidence(code)) }
-        if cssConfidence(code) >= 0.85 { return (.css, cssConfidence(code)) }
-
-        // Require at least some signal that this is code-ish (unless it already matched above).
+        // Cheap pre-checks first to short-circuit before the expensive
+        // `lowercased()` + JSON parsing paths on long prose inputs.
         if !looksLikeCode(code) {
             return (.unknown, 0.0)
         }
+
+        // Strong type checks.
+        if let jsonConfidence = jsonConfidence(code) {
+            return (.json, jsonConfidence)
+        }
+        let html = htmlConfidence(code)
+        if html >= 0.9 { return (.html, html) }
+        let css = cssConfidence(code)
+        if css >= 0.85 { return (.css, css) }
 
         let scores: [(CodeLanguage, Double)] = [
             (.swift, swiftScore(code)),
@@ -99,9 +108,50 @@ public struct CodeDetector {
     }
 
     private func looksLikeCode(_ s: String) -> Bool {
-        if s.contains("\n") { return true }
-        let tokens = ["{", "}", ";", "=>", "==", "!=", "()", "[]", ":=", "::", "#include", "import "]
-        return tokens.contains(where: { s.contains($0) })
+        // Require at least one strong code-typical token. We deliberately do
+        // NOT treat a bare newline as a code signal — long prose is multi-line
+        // too, and accepting `\n` alone forces every paragraph through the 12
+        // language scoring functions (each containing several substring scans
+        // and, for SQL, a full `uppercased()` allocation). That dominated the
+        // long-prose detect() benchmark.
+        let strongTokens = [
+            "{", "}", ";",
+            "=>", "==", "!=", "()", "[]",
+            ":=", "::", "->",
+            "#include", "#!/",
+            "import ", "func ", "def ", "class ", "struct ",
+            "let ", "var ", "const ", "fn ",
+            "export ", "cd ", "echo ",
+            "</", "<html", "<!doctype",
+            "SELECT ", "FROM ", "WHERE ", "INSERT ", "UPDATE ", "DELETE "
+        ]
+        if strongTokens.contains(where: { s.contains($0) }) { return true }
+        // YAML-style "key: value" lines (multiple) — only checked when no
+        // strong token matched, so we don't pay the line-split cost twice.
+        return looksLikeKeyValueList(s)
+    }
+
+    private func looksLikeKeyValueList(_ s: String) -> Bool {
+        // Bound the scan; long prose can't be a key/value list.
+        guard s.count <= 4_000 else { return false }
+        let lines = s.split(separator: "\n", omittingEmptySubsequences: true)
+        guard lines.count >= 2, lines.count <= 200 else { return false }
+        var keyValueLines = 0
+        for raw in lines {
+            // Cheap heuristic: a "key: value" line is short, contains a colon,
+            // and the part before the colon has no whitespace (i.e. it's an
+            // identifier-like key). Prose sentences with ":" typically have
+            // multiple words before the colon.
+            guard raw.count <= 200 else { return false }
+            let trimmed = raw.drop(while: { $0 == " " || $0 == "\t" || $0 == "-" })
+            guard let colon = trimmed.firstIndex(of: ":") else { continue }
+            let before = trimmed[..<colon]
+            if !before.isEmpty, !before.contains(" "), !before.contains("\t") {
+                keyValueLines += 1
+                if keyValueLines >= 2 { return true }
+            }
+        }
+        return false
     }
 
     private func jsonConfidence(_ s: String) -> Double? {
