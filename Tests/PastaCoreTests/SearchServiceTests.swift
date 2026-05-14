@@ -74,6 +74,24 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(results.count, 1)
         XCTAssertFalse(results.first!.ranges.isEmpty, "Should return match ranges for highlighting")
     }
+
+    func testSearchMatchRangesUseUTF16Offsets() throws {
+        let db = try DatabaseManager.inMemory()
+        // Emojis like "😀" are surrogate pairs in UTF-16 (2 code units),
+        // so Character-distance ranges desync from NSAttributedString-style
+        // highlighting. Verify matchRanges aligns with UTF-16.
+        let content = "😀 hello"
+        try db.insert(ClipboardEntry(content: content, contentType: .text, timestamp: Date(timeIntervalSince1970: 1)))
+
+        let service = SearchService(database: db)
+        let results = try service.search(query: "hello", limit: 10)
+
+        XCTAssertEqual(results.count, 1)
+        let range = try XCTUnwrap(results.first?.ranges.first)
+        let nsRange = NSRange(location: range.lowerBound, length: range.upperBound - range.lowerBound + 1)
+        let ns = content as NSString
+        XCTAssertEqual(ns.substring(with: nsRange), "hello")
+    }
     
     func testSearchPrioritizesExactMatches() throws {
         let db = try DatabaseManager.inMemory()
