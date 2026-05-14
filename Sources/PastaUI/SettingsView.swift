@@ -22,6 +22,7 @@ public struct SettingsView: View {
         static let skipAPIKeys = "pasta.skipAPIKeys"
         static let respectTransientPasteboard = "pasta.respectTransientPasteboard"
         static let extractContent = "pasta.extractContent"
+        static let showPinnedSectionInQuickSearch = "pasta.showPinnedSectionInQuickSearch"
     }
 
     private enum Layout {
@@ -44,6 +45,7 @@ public struct SettingsView: View {
     @AppStorage(Defaults.skipAPIKeys) private var skipAPIKeys: Bool = false
     @AppStorage(Defaults.respectTransientPasteboard) private var respectTransientPasteboard: Bool = true
     @AppStorage(Defaults.extractContent) private var extractContent: Bool = true
+    @AppStorage(Defaults.showPinnedSectionInQuickSearch) private var showPinnedSectionInQuickSearch: Bool = false
 
     @State private var selectedTab: SettingsTab = .general
     
@@ -96,7 +98,8 @@ public struct SettingsView: View {
                 extractContent: $extractContent,
                 playSounds: $playSounds,
                 showNotifications: $showNotifications,
-                excludedAppsText: $excludedAppsText
+                excludedAppsText: $excludedAppsText,
+                showPinnedSectionInQuickSearch: $showPinnedSectionInQuickSearch
             )
             .tabItem {
                 Label("Clipboard", systemImage: "doc.on.clipboard")

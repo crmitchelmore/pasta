@@ -407,6 +407,13 @@ public struct QuickSearchView: View {
             return [ResultSection(id: "pinned", title: "Pinned", items: indexed)]
         }
 
+        // Auto-injected Pinned/History split is opt-in — by default users
+        // reach pinned items via the Pinned filter chip.
+        let showPinnedSection = UserDefaults.standard.bool(forKey: "pasta.showPinnedSectionInQuickSearch")
+        guard showPinnedSection else {
+            return [ResultSection(id: "all", title: nil, items: indexed)]
+        }
+
         // Only inject Pinned/History split when no other filter/query is
         // narrowing the list — otherwise headers would be misleading.
         let isUnfiltered = manager.selectedFilter == nil

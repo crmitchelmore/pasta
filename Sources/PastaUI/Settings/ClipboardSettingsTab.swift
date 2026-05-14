@@ -97,6 +97,7 @@ struct ClipboardSettingsTab: View {
     @Binding var playSounds: Bool
     @Binding var showNotifications: Bool
     @Binding var excludedAppsText: String
+    @Binding var showPinnedSectionInQuickSearch: Bool
 
     @State private var multiCopyPreset: MultiCopyJoinSeparatorPreset = .newline
 
@@ -151,6 +152,15 @@ struct ClipboardSettingsTab: View {
                     .foregroundStyle(.secondary)
             } header: {
                 Label("Security", systemImage: "lock.shield")
+            }
+
+            Section {
+                Toggle("Show Pinned section at top of Quick Search", isOn: $showPinnedSectionInQuickSearch)
+                Text("When off, Quick Search omits the auto-injected Pinned section. You can still see pinned items by tapping the Pinned filter chip.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Quick Search", systemImage: "magnifyingglass")
             }
 
             Section {
