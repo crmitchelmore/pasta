@@ -81,11 +81,11 @@ public struct SearchBarView: View {
                 // Active content-type filter chip (also visible to confirm
                 // selections made via the ⌘P picker or sidebar).
                 if let activeType = contentType {
-                    ContentTypeFilterChip(type: activeType) {
+                    ContentTypeFilterChip.activeDismissable(type: activeType, onClear: {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                             contentType = nil
                         }
-                    }
+                    })
                     .padding(.trailing, 8)
                     .transition(.scale.combined(with: .opacity))
                 }
@@ -556,39 +556,7 @@ private struct SearchFieldWithSuggestions: NSViewRepresentable {
 
 // MARK: - Content Type Filter Chip
 
-private struct ContentTypeFilterChip: View {
-    let type: ContentType
-    let onClear: () -> Void
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: type.systemImageName)
-                .font(.system(size: 11, weight: .medium))
-            Text(type.displayTitle)
-                .font(.system(size: 12, weight: .semibold))
-            Button(action: onClear) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Clear content type filter")
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            Capsule()
-                .fill(type.tint.opacity(0.18))
-        )
-        .overlay(
-            Capsule()
-                .strokeBorder(type.tint.opacity(0.4), lineWidth: 1)
-        )
-        .foregroundStyle(type.tint)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Filtering by \(type.displayTitle)")
-    }
-}
+// `ContentTypeFilterChip` now lives in ContentTypeFilterChip.swift.
 
 // MARK: - Content Type Picker
 

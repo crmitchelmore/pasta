@@ -340,7 +340,7 @@ public struct QuickSearchView: View {
     private var filterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                FilterChip(
+                ContentTypeFilterChip.filterBar(
                     title: "All",
                     icon: "tray.full",
                     isSelected: manager.selectedFilter == nil && !manager.showPinnedOnly,
@@ -351,7 +351,7 @@ public struct QuickSearchView: View {
                 }
 
                 if manager.pinnedCount > 0 {
-                    FilterChip(
+                    ContentTypeFilterChip.filterBar(
                         title: "Pinned",
                         icon: "pin.fill",
                         isSelected: manager.showPinnedOnly,
@@ -362,7 +362,7 @@ public struct QuickSearchView: View {
                 }
 
                 ForEach(manager.availableFilters, id: \.type) { filter in
-                    FilterChip(
+                    ContentTypeFilterChip.filterBar(
                         title: filter.type.displayTitle,
                         icon: filter.type.systemImageName,
                         isSelected: manager.selectedFilter == filter.type,
@@ -470,10 +470,11 @@ public struct QuickSearchView: View {
             ScrollView {
                 LazyVStack(spacing: 2) {
                     ForEach(Array(manager.results.enumerated()), id: \.element.id) { index, entry in
-                        QuickSearchMicroRow(
+                        QuickSearchRow(
                             entry: entry,
                             index: index + 1,
-                            isSelected: manager.selectedIndex == index
+                            isSelected: manager.selectedIndex == index,
+                            style: .micro
                         )
                         .id(entry.id)
                         .onTapGesture {
@@ -679,12 +680,41 @@ private final class KeyInterceptingView: NSView {
 // MARK: - Quick Search Row
 
 private struct QuickSearchRow: View {
+    enum Style {
+        case standard
+        case micro
+    }
+
     let entry: ClipboardEntry
     let index: Int
     let isSelected: Bool
     let query: String
-    
+    let style: Style
+
+    init(
+        entry: ClipboardEntry,
+        index: Int,
+        isSelected: Bool,
+        query: String = "",
+        style: Style = .standard
+    ) {
+        self.entry = entry
+        self.index = index
+        self.isSelected = isSelected
+        self.query = query
+        self.style = style
+    }
+
     var body: some View {
+        switch style {
+        case .standard: standardBody
+        case .micro:    microBody
+        }
+    }
+
+    // MARK: standard
+
+    private var standardBody: some View {
         HStack(spacing: 12) {
             // Type icon or image thumbnail
             if (entry.contentType == .image || entry.contentType == .screenshot),
@@ -696,18 +726,18 @@ private struct QuickSearchRow: View {
                     .foregroundStyle(entry.contentType.tint)
                     .frame(width: 28)
             }
-            
+
             // Content preview
             VStack(alignment: .leading, spacing: 2) {
                 Text(previewText)
                     .lineLimit(1)
                     .font(.body)
-                
+
                 HStack(spacing: 6) {
                     Text(entry.contentType.displayTitle)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    
+
                     if let app = entry.sourceApp?.appDisplayName {
                         Text("•")
                             .foregroundStyle(.tertiary)
@@ -715,13 +745,13 @@ private struct QuickSearchRow: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
-                    
+
                     Text("•")
                         .foregroundStyle(.tertiary)
                     Text(entry.timestamp.relativeFormatted)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
-                    
+
                     Text("•")
                         .foregroundStyle(.tertiary)
                     Text("\(entry.content.count.formatted()) chars")
@@ -729,9 +759,9 @@ private struct QuickSearchRow: View {
                         .foregroundStyle(.tertiary)
                 }
             }
-            
+
             Spacer()
-            
+
             // Keyboard shortcut hint (first 9 items only)
             if index <= 9 {
                 Text("⌘\(index)")
@@ -750,7 +780,45 @@ private struct QuickSearchRow: View {
         )
         .contentShape(Rectangle())
     }
-    
+
+    // MARK: micro
+
+    private var microBody: some View {
+        VStack(spacing: 4) {
+            // Content type icon or image thumbnail
+            if (entry.contentType == .image || entry.contentType == .screenshot),
+               let imagePath = entry.imagePath {
+                ImageThumbnail(path: imagePath, size: 32)
+            } else {
+                Image(systemName: entry.contentType.systemImageName)
+                    .font(.title3)
+                    .foregroundStyle(entry.contentType.tint)
+            }
+
+            // App name (abbreviated)
+            if let app = entry.sourceApp?.appDisplayName {
+                Text(app.prefix(6))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            // Keyboard shortcut hint (first 9 items only)
+            if index <= 9 {
+                Text("⌘\(index)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+        )
+        .contentShape(Rectangle())
+    }
+
     private var previewText: String {
         let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
         let singleLine = trimmed.components(separatedBy: .newlines).joined(separator: " ")
@@ -835,47 +903,7 @@ private struct ImageThumbnail: View {
 
 // MARK: - Quick Search Micro Row (compact view for preview mode)
 
-private struct QuickSearchMicroRow: View {
-    let entry: ClipboardEntry
-    let index: Int
-    let isSelected: Bool
-    
-    var body: some View {
-        VStack(spacing: 4) {
-            // Content type icon or image thumbnail
-            if (entry.contentType == .image || entry.contentType == .screenshot),
-               let imagePath = entry.imagePath {
-                ImageThumbnail(path: imagePath, size: 32)
-            } else {
-                Image(systemName: entry.contentType.systemImageName)
-                    .font(.title3)
-                    .foregroundStyle(entry.contentType.tint)
-            }
-            
-            // App name (abbreviated)
-            if let app = entry.sourceApp?.appDisplayName {
-                Text(app.prefix(6))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            
-            // Keyboard shortcut hint (first 9 items only)
-            if index <= 9 {
-                Text("⌘\(index)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
-        )
-        .contentShape(Rectangle())
-    }
-}
+// `QuickSearchMicroRow` was unified into `QuickSearchRow(style: .micro)`.
 
 // MARK: - Quick Search Preview Panel
 
@@ -1037,41 +1065,6 @@ private struct QuickSearchSectionHeader: View {
         .padding(.top, 6)
         .padding(.bottom, 2)
         .accessibilityAddTraits(.isHeader)
-    }
-}
-
-private struct FilterChip: View {
-    let title: String
-    let icon: String
-    let isSelected: Bool
-    let count: Int?
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.caption)
-                Text(title)
-                    .font(.caption)
-                if let count, count > 0 {
-                    Text("\(count)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.5) : Color.clear, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
     }
 }
 
