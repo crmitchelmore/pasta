@@ -11,14 +11,14 @@ public struct QuickSearchView: View {
     private let onOpenFullApp: (() -> Void)?
     private let showOpenFullAppButton: Bool
     private let onExecuteCommand: ((Command) async -> CommandResult)?
-    
+
     @FocusState private var isSearchFocused: Bool
     @State private var commandFeedback: String? = nil
     @State private var showingConfirmation: Bool = false
     @State private var pendingConfirmAction: (@Sendable @MainActor () async -> CommandResult)? = nil
     @State private var confirmationMessage: String = ""
     @State private var isPreviewVisible: Bool = false
-    
+
     public init(
         onDismiss: @escaping () -> Void,
         onPaste: @escaping (ClipboardEntry) -> Void,
@@ -32,7 +32,7 @@ public struct QuickSearchView: View {
         self.showOpenFullAppButton = showOpenFullAppButton
         self.onExecuteCommand = onExecuteCommand
     }
-    
+
     public var body: some View {
         QuickSearchKeyHandler(
             onArrowUp: { manager.moveSelection(by: -1) },
@@ -65,15 +65,15 @@ public struct QuickSearchView: View {
                 VStack(spacing: 0) {
                     // Search field - always full width
                     searchField
-                    
+
                     // Quick filters (hidden in command mode) - always full width
                     if !manager.isCommandMode {
                         filterBar
                     }
-                    
+
                     Divider()
                         .opacity(0.5)
-                    
+
                     // Results area - changes layout when preview is visible
                     if manager.isCommandMode {
                         commandsList
@@ -85,10 +85,10 @@ public struct QuickSearchView: View {
                             if isPreviewVisible {
                                 microResultsList
                                     .frame(width: 100)
-                                
+
                                 Divider()
                                     .opacity(0.5)
-                                
+
                                 // Preview panel fills remaining space
                                 if let entry = manager.selectedEntry {
                                     QuickSearchPreviewPanel(entry: entry)
@@ -113,7 +113,7 @@ public struct QuickSearchView: View {
                             .padding(.vertical, 4)
                         }
                     }
-                    
+
                     // Command feedback
                     if let feedback = commandFeedback {
                         HStack {
@@ -133,7 +133,7 @@ public struct QuickSearchView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
                 .animation(.easeInOut(duration: 0.2), value: isPreviewVisible)
-                
+
                 // Confirmation dialog overlay
                 if showingConfirmation {
                     confirmationOverlay
@@ -154,13 +154,13 @@ public struct QuickSearchView: View {
             manager.searchQueryChanged()
         }
     }
-    
+
     private var dynamicHeight: CGFloat {
         let itemCount = manager.isCommandMode ? manager.commandResults.count : manager.results.count
         let baseHeight: CGFloat = manager.isCommandMode ? 80 : 100 // Less for command mode (no filter bar)
         return max(400, min(500, baseHeight + CGFloat(itemCount * 52)))
     }
-    
+
     private func handleReturn() {
         if manager.isCommandMode {
             if let command = manager.selectedCommand {
@@ -170,14 +170,14 @@ public struct QuickSearchView: View {
             pasteSelectedEntry()
         }
     }
-    
+
     private func pasteSelectedEntry() {
         if let entry = manager.selectedEntry {
             onPaste(entry)
             onDismiss()
         }
     }
-    
+
     private func executeCommand(_ command: Command) {
         Task { @MainActor in
             let result: CommandResult
@@ -186,62 +186,62 @@ public struct QuickSearchView: View {
             } else {
                 result = await CommandRegistry.shared.execute(command)
             }
-            
+
             switch result {
             case .success(let message):
                 commandFeedback = message
                 // Auto-dismiss after brief feedback
                 try? await Task.sleep(nanoseconds: 800_000_000)
                 onDismiss()
-                
+
             case .needsConfirmation(let message, let confirmAction):
                 confirmationMessage = message
                 pendingConfirmAction = confirmAction
                 showingConfirmation = true
-                
+
             case .error(let message):
                 commandFeedback = "Error: \(message)"
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 commandFeedback = nil
-                
+
             case .openMainWindow:
                 onDismiss()
                 // The handler in AppDelegate will open the main window
-                
+
             case .dismissed:
                 onDismiss()
             }
         }
     }
-    
+
     private var confirmationOverlay: some View {
         ZStack {
             Color.black.opacity(0.5)
                 .ignoresSafeArea()
-            
+
             VStack(spacing: 16) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.largeTitle)
                     .foregroundStyle(.yellow)
-                
+
                 Text(confirmationMessage)
                     .font(.body)
                     .multilineTextAlignment(.center)
-                
+
                 HStack(spacing: 12) {
                     Button("Cancel") {
                         showingConfirmation = false
                         pendingConfirmAction = nil
                     }
                     .keyboardShortcut(.escape)
-                    
+
                     Button("Confirm") {
                         Task { @MainActor in
                             showingConfirmation = false
                             if let action = pendingConfirmAction {
                                 let result = await action()
                                 pendingConfirmAction = nil
-                                
+
                                 if case .success(let message) = result {
                                     commandFeedback = message
                                     try? await Task.sleep(nanoseconds: 800_000_000)
@@ -260,7 +260,7 @@ public struct QuickSearchView: View {
             .shadow(radius: 10)
         }
     }
-    
+
     private var commandsList: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -287,13 +287,13 @@ public struct QuickSearchView: View {
             }
         }
     }
-    
+
     private var searchField: some View {
         HStack(spacing: 12) {
             Image(systemName: manager.isCommandMode ? "terminal" : "magnifyingglass")
                 .font(.title2)
                 .foregroundStyle(manager.isCommandMode ? .orange : .secondary)
-            
+
             TextField(manager.isCommandMode ? "Type a command..." : "Search clipboard history... (! for commands)", text: $manager.query)
                 .textFieldStyle(.plain)
                 .font(.title3)
@@ -301,7 +301,7 @@ public struct QuickSearchView: View {
                 .onSubmit {
                     handleReturn()
                 }
-            
+
             if !manager.query.isEmpty {
                 Button {
                     manager.query = ""
@@ -311,7 +311,7 @@ public struct QuickSearchView: View {
                 }
                 .buttonStyle(.plain)
             }
-            
+
             let hasItems = manager.isCommandMode ? !manager.commandResults.isEmpty : !manager.results.isEmpty
             Text("⌘\(hasItems ? "1-9" : "")")
                 .font(.caption)
@@ -319,7 +319,7 @@ public struct QuickSearchView: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
-            
+
             if showOpenFullAppButton, let onOpenFullApp {
                 Button {
                     onDismiss()
@@ -336,7 +336,7 @@ public struct QuickSearchView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
     }
-    
+
     private var filterBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -376,7 +376,7 @@ public struct QuickSearchView: View {
             .padding(.vertical, 8)
         }
     }
-    
+
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
@@ -388,7 +388,7 @@ public struct QuickSearchView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.vertical, 40)
     }
-    
+
     /// Sections to render in the results list. Used to inject "Pinned" /
     /// "History" headers when no query/filter is active (mirrors the main
     /// panel's grouping in HighPerformanceListView).
@@ -464,7 +464,7 @@ public struct QuickSearchView: View {
             }
         }
     }
-    
+
     private var microResultsList: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -494,575 +494,10 @@ public struct QuickSearchView: View {
     }
 }
 
-// MARK: - Key Handler (NSViewRepresentable to capture keys globally)
-
-private struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
-    let onArrowUp: () -> Void
-    let onArrowDown: () -> Void
-    let onArrowRight: () -> Void
-    let onArrowLeft: () -> Void
-    let onReturn: () -> Void
-    let onEscape: () -> Void
-    let onCommandNumber: (Int) -> Void
-    let content: Content
-    
-    init(
-        onArrowUp: @escaping () -> Void,
-        onArrowDown: @escaping () -> Void,
-        onArrowRight: @escaping () -> Void,
-        onArrowLeft: @escaping () -> Void,
-        onReturn: @escaping () -> Void,
-        onEscape: @escaping () -> Void,
-        onCommandNumber: @escaping (Int) -> Void,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.onArrowUp = onArrowUp
-        self.onArrowDown = onArrowDown
-        self.onArrowRight = onArrowRight
-        self.onArrowLeft = onArrowLeft
-        self.onReturn = onReturn
-        self.onEscape = onEscape
-        self.onCommandNumber = onCommandNumber
-        self.content = content()
-    }
-    
-    func makeNSView(context: Context) -> KeyInterceptingView {
-        KeyInterceptingView(
-            onArrowUp: onArrowUp,
-            onArrowDown: onArrowDown,
-            onArrowRight: onArrowRight,
-            onArrowLeft: onArrowLeft,
-            onReturn: onReturn,
-            onEscape: onEscape,
-            onCommandNumber: onCommandNumber,
-            content: content
-        )
-    }
-    
-    func updateNSView(_ nsView: KeyInterceptingView, context: Context) {
-        nsView.onArrowUp = onArrowUp
-        nsView.onArrowDown = onArrowDown
-        nsView.onArrowRight = onArrowRight
-        nsView.onArrowLeft = onArrowLeft
-        nsView.onReturn = onReturn
-        nsView.onEscape = onEscape
-        nsView.onCommandNumber = onCommandNumber
-        nsView.updateContent(content)
-    }
-}
-
-private final class KeyInterceptingView: NSView {
-    var onArrowUp: () -> Void
-    var onArrowDown: () -> Void
-    var onArrowRight: () -> Void
-    var onArrowLeft: () -> Void
-    var onReturn: () -> Void
-    var onEscape: () -> Void
-    var onCommandNumber: (Int) -> Void
-    
-    private var hostingView: NSHostingController<AnyView>?
-    private var localMonitor: Any?
-    
-    init<Content: View>(
-        onArrowUp: @escaping () -> Void,
-        onArrowDown: @escaping () -> Void,
-        onArrowRight: @escaping () -> Void,
-        onArrowLeft: @escaping () -> Void,
-        onReturn: @escaping () -> Void,
-        onEscape: @escaping () -> Void,
-        onCommandNumber: @escaping (Int) -> Void,
-        content: Content
-    ) {
-        self.onArrowUp = onArrowUp
-        self.onArrowDown = onArrowDown
-        self.onArrowRight = onArrowRight
-        self.onArrowLeft = onArrowLeft
-        self.onReturn = onReturn
-        self.onEscape = onEscape
-        self.onCommandNumber = onCommandNumber
-        super.init(frame: .zero)
-        
-        let hosting = NSHostingController(rootView: AnyView(content))
-        hosting.view.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(hosting.view)
-        NSLayoutConstraint.activate([
-            hosting.view.topAnchor.constraint(equalTo: topAnchor),
-            hosting.view.bottomAnchor.constraint(equalTo: bottomAnchor),
-            hosting.view.leadingAnchor.constraint(equalTo: leadingAnchor),
-            hosting.view.trailingAnchor.constraint(equalTo: trailingAnchor)
-        ])
-        hostingView = hosting
-    }
-    
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    func updateContent<Content: View>(_ content: Content) {
-        hostingView?.rootView = AnyView(content)
-    }
-    
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        
-        // Install monitor when we have a window, remove when we don't
-        if window != nil && localMonitor == nil {
-            // Use local monitor to intercept keys before TextField consumes them
-            localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self, self.window?.isKeyWindow == true else { return event }
-                return self.handleKeyEvent(event) ? nil : event
-            }
-        } else if window == nil, let monitor = localMonitor {
-            NSEvent.removeMonitor(monitor)
-            localMonitor = nil
-        }
-    }
-    
-    deinit {
-        if let monitor = localMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-    }
-    
-    private func handleKeyEvent(_ event: NSEvent) -> Bool {
-        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        
-        // Handle Cmd+1-9 (check if command is the only modifier)
-        if modifiers.contains(.command) && !modifiers.contains(.shift) && !modifiers.contains(.option) && !modifiers.contains(.control) {
-            if let chars = event.charactersIgnoringModifiers,
-               let digit = Int(chars),
-               digit >= 1 && digit <= 9 {
-                onCommandNumber(digit)
-                return true
-            }
-        }
-        
-        // Handle arrow keys and other keys (only when no modifiers except function/numericPad)
-        let baseModifiers = modifiers.subtracting([.function, .numericPad])
-        
-        switch event.keyCode {
-        case 126: // Up arrow
-            if baseModifiers.isEmpty {
-                onArrowUp()
-                return true
-            }
-        case 125: // Down arrow
-            if baseModifiers.isEmpty {
-                onArrowDown()
-                return true
-            }
-        case 124: // Right arrow
-            if baseModifiers.isEmpty {
-                onArrowRight()
-                return true
-            }
-        case 123: // Left arrow
-            if baseModifiers.isEmpty {
-                onArrowLeft()
-                return true
-            }
-        case 36: // Return
-            if baseModifiers.isEmpty {
-                onReturn()
-                return true
-            }
-        case 53: // Escape
-            onEscape()
-            return true
-        default:
-            break
-        }
-        
-        return false
-    }
-}
-
-// MARK: - Quick Search Row
-
-private struct QuickSearchRow: View {
-    enum Style {
-        case standard
-        case micro
-    }
-
-    let row: ClipboardRowData
-    let index: Int
-    let isSelected: Bool
-    let query: String
-    let style: Style
-
-    init(
-        entry: ClipboardEntry,
-        index: Int,
-        isSelected: Bool,
-        query: String = "",
-        style: Style = .standard
-    ) {
-        self.row = ClipboardRowData(from: entry)
-        self.index = index
-        self.isSelected = isSelected
-        self.query = query
-        self.style = style
-    }
-
-    var body: some View {
-        switch style {
-        case .standard: standardBody
-        case .micro:    microBody
-        }
-    }
-
-    // MARK: standard
-
-    private var standardBody: some View {
-        HStack(spacing: 12) {
-            // Type icon or image thumbnail
-            if row.prefersImageThumbnail, let imagePath = row.imagePath {
-                ImageThumbnail(path: imagePath, size: 36)
-            } else {
-                Image(systemName: row.contentType.systemImageName)
-                    .font(.title3)
-                    .foregroundStyle(row.contentType.tint)
-                    .frame(width: 28)
-            }
-
-            // Content preview — single-line preview comes from the shared
-            // row data so the main panel and QuickSearch render identical text.
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.singleLinePreview)
-                    .lineLimit(1)
-                    .font(.body)
-
-                // Metadata segments come from `quickSearchMetadataSegments`
-                // (shared with the main panel via `ClipboardRowData`).
-                // First two pieces (type, app) render secondary; trailing
-                // pieces (timestamp, char count) render tertiary, matching
-                // the previous visual hierarchy.
-                let segments = row.quickSearchMetadataSegments
-                let secondaryCount = row.sourceAppName == nil ? 1 : 2
-                HStack(spacing: 6) {
-                    ForEach(Array(segments.enumerated()), id: \.offset) { idx, segment in
-                        if idx > 0 {
-                            Text("•")
-                                .foregroundStyle(.tertiary)
-                        }
-                        Text(segment)
-                            .font(.caption2)
-                            .foregroundStyle(idx < secondaryCount ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
-                    }
-                }
-            }
-
-            Spacer()
-
-            // Keyboard shortcut hint (first 9 items only)
-            if index <= 9 {
-                Text("⌘\(index)")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
-        )
-        .contentShape(Rectangle())
-    }
-
-    // MARK: micro
-
-    private var microBody: some View {
-        VStack(spacing: 4) {
-            // Content type icon or image thumbnail
-            if row.prefersImageThumbnail, let imagePath = row.imagePath {
-                ImageThumbnail(path: imagePath, size: 32)
-            } else {
-                Image(systemName: row.contentType.systemImageName)
-                    .font(.title3)
-                    .foregroundStyle(row.contentType.tint)
-            }
-
-            // App name (abbreviated)
-            if let app = row.sourceAppName {
-                Text(app.prefix(6))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            // Keyboard shortcut hint (first 9 items only)
-            if index <= 9 {
-                Text("⌘\(index)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
-        )
-        .contentShape(Rectangle())
-    }
-}
-
-// MARK: - Image Thumbnail
-
-private let thumbnailCache: NSCache<NSString, NSImage> = {
-    let cache = NSCache<NSString, NSImage>()
-    cache.countLimit = 300
-    cache.totalCostLimit = 64 * 1024 * 1024
-    return cache
-}()
-
-private struct ImageThumbnail: View {
-    let path: String
-    let size: CGFloat
-    @State private var image: NSImage?
-    @State private var loadedPath: String = ""
-
-    var body: some View {
-        Group {
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: size, height: size)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            } else {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Color.primary.opacity(0.08))
-                    .frame(width: size, height: size)
-            }
-        }
-        .onAppear {
-            loadImageIfNeeded()
-        }
-        .onChange(of: path) { _, newPath in
-            loadImage(from: newPath)
-        }
-    }
-
-    private func loadImageIfNeeded() {
-        guard loadedPath != path else { return }
-        loadImage(from: path)
-    }
-
-    private func loadImage(from imagePath: String) {
-        loadedPath = imagePath
-        let cacheKey = NSString(string: imagePath)
-
-        if let cached = thumbnailCache.object(forKey: cacheKey) {
-            image = cached
-            return
-        }
-
-        image = nil
-        let pixelSize = size * 2 // retina
-        Task.detached(priority: .userInitiated) {
-            let thumbnail = ImageDownsampler.load(path: imagePath, maxPixelSize: pixelSize)
-            if let thumbnail {
-                let cost = Int(thumbnail.size.width * thumbnail.size.height * 4)
-                thumbnailCache.setObject(thumbnail, forKey: cacheKey, cost: cost)
-            }
-            await MainActor.run {
-                if loadedPath == imagePath {
-                    image = thumbnail
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Quick Search Micro Row (compact view for preview mode)
-
-// `QuickSearchMicroRow` was unified into `QuickSearchRow(style: .micro)`.
-
-// MARK: - Quick Search Preview Panel
-
-private struct QuickSearchPreviewPanel: View {
-    let entry: ClipboardEntry
-    
-    var body: some View {
-        let isImageEntry = (entry.contentType == .image || entry.contentType == .screenshot) && entry.imagePath != nil
-
-        VStack(alignment: .leading, spacing: 0) {
-            // Header with metadata
-            HStack(spacing: 8) {
-                Image(systemName: entry.contentType.systemImageName)
-                    .font(.title3)
-                    .foregroundStyle(entry.contentType.tint)
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.contentType.displayTitle)
-                        .font(.headline)
-                    
-                    HStack(spacing: 6) {
-                        if let app = entry.sourceApp?.appDisplayName {
-                            Text(app)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text("•")
-                                .foregroundStyle(.tertiary)
-                        }
-                        Text(entry.timestamp.relativeFormatted)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                
-                Spacer()
-                
-                // Character count badge or "Image" badge
-                Text(isImageEntry ? "Image" : "\(entry.content.count.formatted()) chars")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            
-            Divider()
-                .opacity(0.5)
-            
-            // Scrollable content
-            ScrollView {
-                if let imagePath = entry.imagePath, isImageEntry {
-                    ImagePreview(path: imagePath)
-                        .padding(16)
-                } else {
-                    Text(entry.content)
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                }
-            }
-            
-            Divider()
-                .opacity(0.5)
-            
-            // Footer with hint
-            HStack {
-                Text("← to close")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                Spacer()
-                Text("↵ to paste")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-        }
-    }
-}
-
-// MARK: - Command Row
-
-private struct CommandRow: View {
-    let command: Command
-    let index: Int
-    let isSelected: Bool
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            // Command icon
-            Image(systemName: command.icon)
-                .font(.title3)
-                .foregroundStyle(command.isDestructive ? .red : .orange)
-                .frame(width: 28)
-            
-            // Command info
-            VStack(alignment: .leading, spacing: 2) {
-                Text("!\(command.trigger)")
-                    .font(.body.monospaced())
-                    .fontWeight(.medium)
-                
-                HStack(spacing: 6) {
-                    Text(command.description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            
-            Spacer()
-            
-            // Category badge
-            Text(command.category.rawValue)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
-            
-            // Keyboard shortcut hint
-            Text("⌘\(index)")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? Color.orange.opacity(0.2) : Color.clear)
-        )
-        .contentShape(Rectangle())
-    }
-}
-
-// MARK: - Filter Chip
-
-private struct QuickSearchSectionHeader: View {
-    let title: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if title == "Pinned" {
-                Image(systemName: "pin.fill")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.orange)
-            }
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(.secondary)
-                .tracking(0.5)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 6)
-        .padding(.bottom, 2)
-        .accessibilityAddTraits(.isHeader)
-    }
-}
-
-// MARK: - Visual Effect View
-
-// `VisualEffectView` now lives in GlassEffectView.swift.
-
-// MARK: - Date Formatting Extension
-
-// `Date.relativeFormatted` now lives in Formatting.swift.
-
-// MARK: - String Extensions
-
-// `String.appDisplayName` now lives in Formatting.swift.
-
-// MARK: - Safe Array Access
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
-    }
-}
+// Subviews and helper types extracted to QuickSearch/:
+//   - QuickSearchKeyHandler.swift  (NSEvent key interception)
+//   - QuickSearchRow.swift         (standard + micro row)
+//   - ImageThumbnail.swift         (thumbnail loader/cache)
+//   - QuickSearchPreviewPanel.swift (preview panel)
+//   - QuickSearchSupport.swift     (CommandRow, section header,
+//                                   Array safe subscript)
