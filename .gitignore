@@ -24,3 +24,8 @@ Package.resolved
 entitlements.plist
 release_notes.md
 .env
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
