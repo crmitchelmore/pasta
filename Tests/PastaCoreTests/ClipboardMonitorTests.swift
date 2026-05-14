@@ -137,7 +137,8 @@ final class ClipboardMonitorTests: XCTestCase {
             pasteboard: pasteboard,
             workspace: MockWorkspace(identifier: "com.example.PasswordManager"),
             exclusionManager: ExclusionManager(userDefaults: UserDefaults(suiteName: "ClipboardMonitorTests.transient")!),
-            tickPublisher: ticks.eraseToAnyPublisher()
+            tickPublisher: ticks.eraseToAnyPublisher(),
+            respectTransientPasteboard: { true }
         )
 
         var received: [ClipboardEntry] = []
@@ -155,6 +156,40 @@ final class ClipboardMonitorTests: XCTestCase {
 
         cancellable.cancel()
         XCTAssertEqual(received.count, 0, "Transient/concealed pasteboard contents must not be recorded")
+    }
+
+    func testTransientPasteboardIsCapturedWhenRespectDisabled() throws {
+        let pasteboard = MockPasteboard()
+        pasteboard.changeCount = 1
+        pasteboard.contents = .text("captured-anyway")
+        pasteboard.transient = true
+
+        let ticks = PassthroughSubject<Void, Never>()
+        let monitor = ClipboardMonitor(
+            pasteboard: pasteboard,
+            workspace: MockWorkspace(identifier: nil),
+            exclusionManager: ExclusionManager(userDefaults: UserDefaults(suiteName: "ClipboardMonitorTests.transientOptOut")!),
+            tickPublisher: ticks.eraseToAnyPublisher(),
+            respectTransientPasteboard: { false }
+        )
+
+        var received: [ClipboardEntry] = []
+        let expectation = XCTestExpectation(description: "receives transient entry when respect disabled")
+        let cancellable = monitor.publisher.sink { entry in
+            received.append(entry)
+            expectation.fulfill()
+        }
+
+        monitor.start()
+
+        pasteboard.changeCount = 2
+        ticks.send(())
+
+        wait(for: [expectation], timeout: 1.0)
+        cancellable.cancel()
+
+        XCTAssertEqual(received.count, 1, "Transient pasteboard must be captured when user opts out of respect")
+        XCTAssertEqual(received.first?.content, "captured-anyway")
     }
 
     func testTransientTypeSetIncludesNSPasteboardOrgIdentifiers() {

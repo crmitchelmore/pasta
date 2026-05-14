@@ -119,12 +119,23 @@ public final class QuickSearchManager: ObservableObject {
     
     private func computeAvailableFilters() {
         var counts: [ContentType: Int] = [:]
-        var pinned = 0
         for entry in allEntries.prefix(1000) {
             counts[entry.contentType, default: 0] += 1
-            if entry.isPinned { pinned += 1 }
         }
-        pinnedCount = pinned
+
+        // Pinned counts are typically tiny but pinned items are often older than
+        // the 1000-entry sample. Prefer the database for an accurate total; fall
+        // back to a full scan when the database isn't available (tests).
+        if let database {
+            do {
+                pinnedCount = try database.pinnedCount()
+            } catch {
+                PastaLogger.search.error("pinnedCount() failed: \(error.localizedDescription)")
+                pinnedCount = allEntries.reduce(0) { $0 + ($1.isPinned ? 1 : 0) }
+            }
+        } else {
+            pinnedCount = allEntries.reduce(0) { $0 + ($1.isPinned ? 1 : 0) }
+        }
 
         availableFilters = counts
             .filter { $0.value > 0 }
@@ -182,14 +193,10 @@ public final class QuickSearchManager: ObservableObject {
     private func updateResultsImmediate() {
         selectedIndex = 0
 
-        var seq: [ClipboardEntry] = allEntries
-        if showPinnedOnly {
-            seq = seq.filter { $0.isPinned }
-        }
-        if let filter = selectedFilter {
-            seq = seq.filter { $0.contentType == filter }
-        }
-        results = Array(seq.prefix(50))
+        results = Array(allEntries.lazy
+            .filter { !self.showPinnedOnly || $0.isPinned }
+            .filter { self.selectedFilter == nil || $0.contentType == self.selectedFilter }
+            .prefix(50))
     }
     
     private func performSearch() {
@@ -213,10 +220,10 @@ public final class QuickSearchManager: ObservableObject {
                 if let dbSnapshot {
                     do {
                         let startTime = CFAbsoluteTimeGetCurrent()
-                        let matches = try dbSnapshot.searchFTS(query: querySnapshot, contentType: filterSnapshot, limit: 20)
+                        let matches = try dbSnapshot.searchFTS(query: querySnapshot, contentType: filterSnapshot, limit: 20, pinnedOnly: pinnedSnapshot)
                         let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
                         PastaLogger.search.debug("FTS5 search '\(querySnapshot)': \(matches.count) results in \(String(format: "%.1f", elapsed))ms")
-                        return pinnedSnapshot ? matches.filter { $0.isPinned } : matches
+                        return matches
                     } catch {
                         PastaLogger.search.error("FTS5 search failed: \(error.localizedDescription)")
                     }

@@ -30,6 +30,28 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(results.first?.entry.content, "hello world", "Best match should be 'hello world'")
     }
 
+    func testSearchSupportsPinnedOnlyFilter() throws {
+        let db = try DatabaseManager.inMemory()
+        try db.insert(ClipboardEntry(content: "hello pinned", contentType: .text, timestamp: Date(timeIntervalSince1970: 1), isPinned: true))
+        try db.insert(ClipboardEntry(content: "hello unpinned", contentType: .text, timestamp: Date(timeIntervalSince1970: 2), isPinned: false))
+        try db.insert(ClipboardEntry(content: "another hello also pinned", contentType: .text, timestamp: Date(timeIntervalSince1970: 3), isPinned: true))
+
+        // Direct DatabaseManager.searchFTS call
+        let dbResults = try db.searchFTS(query: "hello", contentType: nil, limit: 10, pinnedOnly: true)
+        XCTAssertEqual(dbResults.count, 2)
+        XCTAssertTrue(dbResults.allSatisfy { $0.isPinned })
+
+        // SearchService surfaces pinnedOnly through to FTS
+        let service = SearchService(database: db)
+        let serviceResults = try service.search(query: "hello", limit: 10, pinnedOnly: true)
+        XCTAssertEqual(serviceResults.count, 2)
+        XCTAssertTrue(serviceResults.allSatisfy { $0.entry.isPinned })
+
+        // Without pinnedOnly we still see all three
+        let allResults = try service.search(query: "hello", limit: 10)
+        XCTAssertEqual(allResults.count, 3)
+    }
+
     func testSearchSupportsContentTypeFiltering() throws {
         let db = try DatabaseManager.inMemory()
         try db.insert(ClipboardEntry(content: "hello world", contentType: .text, timestamp: Date(timeIntervalSince1970: 1)))

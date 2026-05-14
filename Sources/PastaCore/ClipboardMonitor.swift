@@ -154,6 +154,7 @@ public final class ClipboardMonitor {
     private let exclusionManager: ExclusionManager
     private let tickPublisher: AnyPublisher<Void, Never>
     private let now: () -> Date
+    private let respectTransientPasteboard: () -> Bool
 
     private let subject = PassthroughSubject<ClipboardEntry, Never>()
     private var cancellable: AnyCancellable?
@@ -167,12 +168,16 @@ public final class ClipboardMonitor {
         exclusionManager: ExclusionManager = ExclusionManager(),
         pollInterval: TimeInterval = 0.5,
         tickPublisher: AnyPublisher<Void, Never>? = nil,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        respectTransientPasteboard: @escaping () -> Bool = {
+            UserDefaults.standard.object(forKey: "pasta.respectTransientPasteboard") as? Bool ?? true
+        }
     ) {
         self.pasteboard = pasteboard
         self.workspace = workspace
         self.exclusionManager = exclusionManager
         self.now = now
+        self.respectTransientPasteboard = respectTransientPasteboard
 
         if let tickPublisher {
             self.tickPublisher = tickPublisher
@@ -214,7 +219,7 @@ public final class ClipboardMonitor {
         // Privacy: skip transient/concealed clipboards (password managers, etc.)
         // Check BEFORE reading contents so we never even materialize the secret.
         // User can opt out via the "Respect transient pasteboard" Security setting.
-        let respectTransient = UserDefaults.standard.object(forKey: "pasta.respectTransientPasteboard") as? Bool ?? true
+        let respectTransient = respectTransientPasteboard()
         if respectTransient, pasteboard.isTransient() {
             PastaLogger.clipboard.debug("Skipped transient/concealed pasteboard contents")
             return

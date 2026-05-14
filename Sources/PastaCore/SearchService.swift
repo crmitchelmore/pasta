@@ -29,7 +29,8 @@ public final class SearchService {
     public func search(
         query: String,
         contentType: ContentType? = nil,
-        limit: Int = 50
+        limit: Int = 50,
+        pinnedOnly: Bool = false
     ) throws -> [Match] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -37,13 +38,13 @@ public final class SearchService {
             return []
         }
 
-        PastaLogger.search.debug("FTS5 search for '\(trimmed)' contentType=\(String(describing: contentType)) limit=\(limit)")
+        PastaLogger.search.debug("FTS5 search for '\(trimmed)' contentType=\(String(describing: contentType)) limit=\(limit) pinnedOnly=\(pinnedOnly)")
         let startTime = CFAbsoluteTimeGetCurrent()
 
         // Use FTS5 for blazing fast search
-        var entries = try database.searchFTS(query: trimmed, contentType: contentType, limit: limit)
+        var entries = try database.searchFTS(query: trimmed, contentType: contentType, limit: limit, pinnedOnly: pinnedOnly)
         if entries.isEmpty, let relaxed = relaxedQuery(from: trimmed) {
-            entries = try database.searchFTS(query: relaxed, contentType: contentType, limit: limit)
+            entries = try database.searchFTS(query: relaxed, contentType: contentType, limit: limit, pinnedOnly: pinnedOnly)
         }
         
         // Convert to Match objects. FTS5 already returns results in our combined
