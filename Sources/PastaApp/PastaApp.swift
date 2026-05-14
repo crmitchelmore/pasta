@@ -81,7 +81,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "pasta.storeImages": true,
             "pasta.deduplicateEntries": true,
             "pasta.appMode": "both",
-            "pasta.multiCopyJoinSeparator": "\n"
+            "pasta.multiCopyJoinSeparator": "\n",
+            "pasta.respectTransientPasteboard": true
         ])
         
         configureAppIcon()
