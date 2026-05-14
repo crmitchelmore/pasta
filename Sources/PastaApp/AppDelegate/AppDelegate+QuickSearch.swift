@@ -7,7 +7,7 @@ import PastaUI
 extension AppDelegate {
     func setupQuickSearch() {
         quickSearchController?.setContent { [weak self] in
-            let isDockOnly = UserDefaults.standard.string(forKey: "pasta.appMode") == "dock"
+            let isDockOnly = UserDefaults.standard.string(forKey: AppDelegate.Defaults.appMode) == AppDelegate.AppMode.dock.rawValue
             return QuickSearchView(
                 onDismiss: {
                     self?.quickSearchController?.hide()
@@ -63,7 +63,7 @@ extension AppDelegate {
         CommandRegistry.shared.handlers = handlers
     }
 
-    func handleCommandResult(_ command: Command) async -> CommandResult {
+    private func handleCommandResult(_ command: Command) async -> CommandResult {
         let result = await CommandRegistry.shared.execute(command)
 
         // Handle special results that need app-level actions

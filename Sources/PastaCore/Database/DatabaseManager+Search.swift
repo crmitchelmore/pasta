@@ -54,7 +54,7 @@ extension DatabaseManager {
                    + (CASE WHEN LOWER(TRIM(e.content)) = ? THEN -\(Self.exactEqualityBonus) ELSE 0.0 END)
                    AS rank
             FROM clipboard_entries_fts
-            JOIN clipboard_entries e ON e.rowid = clipboard_entries_fts.rowid
+            JOIN \(ClipboardEntry.databaseTableName) e ON e.rowid = clipboard_entries_fts.rowid
             WHERE clipboard_entries_fts MATCH ?
             """
 
@@ -76,7 +76,7 @@ extension DatabaseManager {
             WITH ranked AS (\(rankSQL))
             SELECT e.*
             FROM ranked
-            JOIN clipboard_entries e ON e.rowid = ranked.rid
+            JOIN \(ClipboardEntry.databaseTableName) e ON e.rowid = ranked.rid
             ORDER BY ranked.rank ASC
             """
 

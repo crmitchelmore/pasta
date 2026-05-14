@@ -3,54 +3,7 @@ import GRDB
 
 extension DatabaseManager {
     public func insert(_ entry: ClipboardEntry) throws {
-        let contentHash = entry.contentHash
-
-        do {
-            try dbQueue.write { db in
-                if let existingID: String = try String.fetchOne(
-                    db,
-                    sql: "SELECT id FROM \(ClipboardEntry.databaseTableName) WHERE contentHash = ? LIMIT 1",
-                    arguments: [contentHash]
-                ) {
-                    try db.execute(
-                        sql: """
-                        UPDATE \(ClipboardEntry.databaseTableName)
-                        SET copyCount = copyCount + 1, timestamp = ?
-                        WHERE id = ?
-                        """,
-                        arguments: [entry.timestamp, existingID]
-                    )
-                    PastaLogger.database.debug("Updated duplicate entry with hash \(contentHash)")
-                    return
-                }
-
-                try db.execute(
-                    sql: """
-                    INSERT INTO \(ClipboardEntry.databaseTableName)
-                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isPinned)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    arguments: [
-                        entry.id.uuidString,
-                        entry.content,
-                        entry.contentType.rawValue,
-                        entry.rawData,
-                        entry.imagePath,
-                        entry.timestamp,
-                        entry.copyCount,
-                        entry.sourceApp,
-                        entry.metadata,
-                        contentHash,
-                        entry.parentEntryId?.uuidString,
-                        entry.isPinned,
-                    ]
-                )
-                PastaLogger.database.debug("Inserted new entry with type \(entry.contentType.rawValue)")
-            }
-        } catch {
-            PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert entry")
-            throw error
-        }
+        try insert(entry, deduplicate: true)
     }
 
     /// Inserts an entry, optionally deduplicating by content hash.
@@ -154,11 +107,7 @@ extension DatabaseManager {
 
     /// Fetches an entry by its ID.
     public func fetchEntry(id: UUID) throws -> ClipboardEntry? {
-        try dbQueue.read { db in
-            try ClipboardEntry
-                .filter(Column("id") == id.uuidString)
-                .fetchOne(db)
-        }
+        try fetch(id: id)
     }
 
     /// Fetches all extracted entries for a given parent entry.

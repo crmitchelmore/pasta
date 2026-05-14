@@ -8,7 +8,7 @@ extension AppDelegate {
         NSApplication.shared.dockTile.display()
     }
 
-    static func makeFallbackIcon(size: CGFloat) -> NSImage {
+    static private func makeFallbackIcon(size: CGFloat) -> NSImage {
         let image = NSImage(size: NSSize(width: size, height: size))
         image.lockFocus()
         defer { image.unlockFocus() }

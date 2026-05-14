@@ -51,10 +51,10 @@ extension DatabaseManager {
                 db,
                 sql: """
                 SELECT imagePath
-                FROM clipboard_entries
+                FROM \(ClipboardEntry.databaseTableName)
                 WHERE rowid IN (
                     SELECT rowid
-                    FROM clipboard_entries
+                    FROM \(ClipboardEntry.databaseTableName)
                     WHERE isPinned = 0
                     ORDER BY timestamp DESC
                     LIMIT -1 OFFSET ?
@@ -65,10 +65,10 @@ extension DatabaseManager {
 
             try db.execute(
                 sql: """
-                DELETE FROM clipboard_entries
+                DELETE FROM \(ClipboardEntry.databaseTableName)
                 WHERE rowid IN (
                     SELECT rowid
-                    FROM clipboard_entries
+                    FROM \(ClipboardEntry.databaseTableName)
                     WHERE isPinned = 0
                     ORDER BY timestamp DESC
                     LIMIT -1 OFFSET ?
