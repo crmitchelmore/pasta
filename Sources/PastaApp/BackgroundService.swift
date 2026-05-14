@@ -50,36 +50,49 @@ final class BackgroundService: ObservableObject {
     }
     
     private init() {
-        // Initialize database with fallback to in-memory on error
+        // Initialize database with fallback to in-memory on error.
+        // If even the in-memory fallback fails (only possible under extreme
+        // resource pressure or a broken GRDB build) we surface the error and
+        // crash deliberately with a descriptive message rather than via try!.
         var dbError: PastaError? = nil
-        let db: DatabaseManager
-        do {
-            db = try DatabaseManager()
-        } catch let error as PastaError {
-            PastaLogger.logError(error, logger: PastaLogger.database, context: "Database initialization failed, using in-memory fallback")
-            db = try! DatabaseManager.inMemory()
-            dbError = error
-        } catch {
-            PastaLogger.logError(error, logger: PastaLogger.database, context: "Unexpected database error, using in-memory fallback")
-            db = try! DatabaseManager.inMemory()
-            dbError = PastaError.unknown(underlying: error)
-        }
+        let db: DatabaseManager = {
+            do {
+                return try DatabaseManager()
+            } catch {
+                let wrapped = (error as? PastaError) ?? PastaError.unknown(underlying: error)
+                PastaLogger.logError(wrapped, logger: PastaLogger.database, context: "Database initialization failed, using in-memory fallback")
+                SentryManager.capture(error: wrapped, context: ["stage": "database-init"])
+                dbError = wrapped
+                do {
+                    return try DatabaseManager.inMemory()
+                } catch {
+                    SentryManager.capture(error: error, context: ["stage": "database-inmemory-fallback"])
+                    PastaLogger.logError(error, logger: PastaLogger.database, context: "In-memory database fallback also failed")
+                    fatalError("Pasta could not initialize even an in-memory database: \(error)")
+                }
+            }
+        }()
         self.database = db
-        
-        // Initialize image storage with fallback to temporary directory
+
+        // Initialize image storage with fallback to temporary directory.
         var storageError: PastaError? = nil
-        let storage: ImageStorageManager
-        do {
-            storage = try ImageStorageManager()
-        } catch let error as PastaError {
-            PastaLogger.logError(error, logger: PastaLogger.storage, context: "Image storage initialization failed, using temporary fallback")
-            storage = try! ImageStorageManager(imagesDirectoryURL: .temporaryDirectory)
-            storageError = error
-        } catch {
-            PastaLogger.logError(error, logger: PastaLogger.storage, context: "Unexpected storage error, using temporary fallback")
-            storage = try! ImageStorageManager(imagesDirectoryURL: .temporaryDirectory)
-            storageError = PastaError.unknown(underlying: error)
-        }
+        let storage: ImageStorageManager = {
+            do {
+                return try ImageStorageManager()
+            } catch {
+                let wrapped = (error as? PastaError) ?? PastaError.unknown(underlying: error)
+                PastaLogger.logError(wrapped, logger: PastaLogger.storage, context: "Image storage initialization failed, using temporary fallback")
+                SentryManager.capture(error: wrapped, context: ["stage": "image-storage-init"])
+                storageError = wrapped
+                do {
+                    return try ImageStorageManager(imagesDirectoryURL: .temporaryDirectory)
+                } catch {
+                    SentryManager.capture(error: error, context: ["stage": "image-storage-tmp-fallback"])
+                    PastaLogger.logError(error, logger: PastaLogger.storage, context: "Temporary image-storage fallback also failed")
+                    fatalError("Pasta could not initialize image storage in any location: \(error)")
+                }
+            }
+        }()
         self.imageStorage = storage
         self.syncManager = SyncManager(containerIdentifier: "iCloud.com.pasta.ios")
         

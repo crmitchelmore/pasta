@@ -2,9 +2,13 @@
 
 ## Supported Versions
 
+The latest 1.x release is supported. Older 0.x preview releases are no longer
+maintained — please update to 1.x to receive security fixes.
+
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
+| 1.x     | :white_check_mark: |
+| 0.x     | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -22,8 +26,8 @@ Instead, report security issues via one of these methods:
    - Fill out the advisory form
 
 2. **Email** (Alternative)
-   - Send details to: [your-email@example.com]
-   - Use PGP encryption if available (key: [link to public key])
+   - Send details to: chrismitchelmore@gmail.com
+   - Mark the subject line `[Pasta Security]` so it bypasses filters.
 
 ### What to Include
 
@@ -48,15 +52,16 @@ Please provide:
 
 Pasta is designed with privacy and security in mind:
 
-- ✅ **100% local storage** - No cloud sync, no data leaves your machine
-- ✅ **No network requests** - App doesn't connect to the internet
-- ✅ **SQLite encryption** - Database can be encrypted at rest (future feature)
-- ✅ **Sandboxed permissions** - Only requests necessary macOS permissions
+- ✅ **Local-first storage** - Clipboard contents are stored on-device by default.
+- ✅ **No telemetry by default** - Crash reporting (Sentry) is **off** until you opt in via Settings → General → Diagnostics. No clipboard contents are ever included in crash reports.
+- ✅ **Optional iCloud sync** - CloudKit sync is opt-in and uses your private iCloud database. Disable it in Settings → iCloud if you prefer purely local storage.
+- ✅ **Auto-updates via Sparkle** - Pasta checks for updates from the project's signed appcast. You can disable automatic checks in Settings → About.
+- ✅ **Sandboxed permissions** - Only requests necessary macOS permissions.
 
 ### Data Storage
 
 Clipboard data is stored locally at:
-- Database: `~/Library/Application Support/Pasta/pasta.db`
+- Database: `~/Library/Application Support/Pasta/pasta.sqlite`
 - Images: `~/Library/Application Support/Pasta/Images/`
 
 **Security Note:** This data is **not encrypted** by default. Ensure your macOS user account is protected with:
@@ -134,7 +139,7 @@ None yet (project is new).
 
 ## Contact
 
-For non-security issues, please use [GitHub Issues](https://github.com/yourusername/pasta/issues).
+For non-security issues, please use [GitHub Issues](https://github.com/crmitchelmore/pasta/issues).
 
 For security concerns, use the reporting methods above.
 

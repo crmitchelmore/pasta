@@ -13,6 +13,8 @@ struct GeneralSettingsTab: View {
     @Binding var appearance: String
     let onReplayWalkthrough: (() -> Void)?
 
+    @AppStorage("pasta.crashReportingEnabled") private var crashReportingEnabled: Bool = false
+
     var body: some View {
         Form {
             Section {
@@ -86,6 +88,15 @@ struct GeneralSettingsTab: View {
                     .foregroundStyle(.secondary)
             } header: {
                 Label("Help", systemImage: "sparkles")
+            }
+
+            Section {
+                Toggle("Send anonymous crash reports", isOn: $crashReportingEnabled)
+                Text("Off by default. When enabled, Pasta sends crash reports and minimal performance traces to Sentry to help diagnose issues. No clipboard contents are ever transmitted. Restart Pasta after changing this setting.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Diagnostics", systemImage: "ladybug")
             }
         }
         .formStyle(.grouped)

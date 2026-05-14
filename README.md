@@ -12,7 +12,7 @@ A blazing-fast, local-first clipboard history manager for macOS with intelligent
 - **Ultra-Fast Search** — Full-text search with fuzzy matching
 - **Keyboard-First** — Global hotkey (`⌃⌘V`) and full keyboard navigation
 - **Preview Everything** — Images, decoded base64, syntax-highlighted code
-- **Privacy-First** — 100% local storage, no cloud sync. Pasta also ignores pasteboard items marked transient/concealed/auto-generated ([nspasteboard.org](http://nspasteboard.org) convention used by password managers), so secrets are never recorded.
+- **Privacy-First** — Local-first storage. Pasta ignores pasteboard items marked transient/concealed/auto-generated ([nspasteboard.org](http://nspasteboard.org) convention used by password managers), so secrets are never recorded. Optional iCloud sync (off by default) and opt-in anonymous crash reporting are the only network features; clipboard contents never leave your machine.
 
 ## Installation
 
