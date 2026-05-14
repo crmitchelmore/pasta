@@ -150,6 +150,9 @@ public struct QuickSearchView: View {
         .onChange(of: manager.selectedFilter) { _, _ in
             manager.searchQueryChanged()
         }
+        .onChange(of: manager.showPinnedOnly) { _, _ in
+            manager.searchQueryChanged()
+        }
     }
     
     private var dynamicHeight: CGFloat {
@@ -340,12 +343,24 @@ public struct QuickSearchView: View {
                 FilterChip(
                     title: "All",
                     icon: "tray.full",
-                    isSelected: manager.selectedFilter == nil,
+                    isSelected: manager.selectedFilter == nil && !manager.showPinnedOnly,
                     count: nil
                 ) {
+                    manager.showPinnedOnly = false
                     manager.selectedFilter = nil
                 }
-                
+
+                if manager.pinnedCount > 0 {
+                    FilterChip(
+                        title: "Pinned",
+                        icon: "pin.fill",
+                        isSelected: manager.showPinnedOnly,
+                        count: manager.pinnedCount
+                    ) {
+                        manager.showPinnedOnly.toggle()
+                    }
+                }
+
                 ForEach(manager.availableFilters, id: \.type) { filter in
                     FilterChip(
                         title: filter.type.displayTitle,
@@ -374,21 +389,65 @@ public struct QuickSearchView: View {
         .padding(.vertical, 40)
     }
     
+    /// Sections to render in the results list. Used to inject "Pinned" /
+    /// "History" headers when no query/filter is active (mirrors the main
+    /// panel's grouping in HighPerformanceListView).
+    private struct ResultSection: Identifiable {
+        let id: String
+        let title: String?
+        let items: [(index: Int, entry: ClipboardEntry)]
+    }
+
+    private var resultSections: [ResultSection] {
+        let indexed = Array(manager.results.enumerated()).map { (index: $0.offset, entry: $0.element) }
+
+        // When the user has explicitly filtered to pinned-only, label the
+        // single section "Pinned" so they know what they're looking at.
+        if manager.showPinnedOnly {
+            return [ResultSection(id: "pinned", title: "Pinned", items: indexed)]
+        }
+
+        // Only inject Pinned/History split when no other filter/query is
+        // narrowing the list — otherwise headers would be misleading.
+        let isUnfiltered = manager.selectedFilter == nil
+            && manager.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard isUnfiltered else {
+            return [ResultSection(id: "all", title: nil, items: indexed)]
+        }
+
+        let pinned = indexed.filter { $0.entry.isPinned }
+        let unpinned = indexed.filter { !$0.entry.isPinned }
+        guard !pinned.isEmpty else {
+            return [ResultSection(id: "all", title: nil, items: indexed)]
+        }
+
+        var sections: [ResultSection] = [ResultSection(id: "pinned", title: "Pinned", items: pinned)]
+        if !unpinned.isEmpty {
+            sections.append(ResultSection(id: "history", title: "History", items: unpinned))
+        }
+        return sections
+    }
+
     private var resultsList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(Array(manager.results.enumerated()), id: \.element.id) { index, entry in
-                        QuickSearchRow(
-                            entry: entry,
-                            index: index + 1,
-                            isSelected: manager.selectedIndex == index,
-                            query: manager.query
-                        )
-                        .id(entry.id)
-                        .onTapGesture {
-                            onPaste(entry)
-                            onDismiss()
+                LazyVStack(spacing: 2, pinnedViews: []) {
+                    ForEach(resultSections) { section in
+                        if let title = section.title {
+                            QuickSearchSectionHeader(title: title)
+                        }
+                        ForEach(section.items, id: \.entry.id) { item in
+                            QuickSearchRow(
+                                entry: item.entry,
+                                index: item.index + 1,
+                                isSelected: manager.selectedIndex == item.index,
+                                query: manager.query
+                            )
+                            .id(item.entry.id)
+                            .onTapGesture {
+                                onPaste(item.entry)
+                                onDismiss()
+                            }
                         }
                     }
                 }
@@ -954,6 +1013,29 @@ private struct CommandRow: View {
 }
 
 // MARK: - Filter Chip
+
+private struct QuickSearchSectionHeader: View {
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if title == "Pinned" {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.orange)
+            }
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
 
 private struct FilterChip: View {
     let title: String

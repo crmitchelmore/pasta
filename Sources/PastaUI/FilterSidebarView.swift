@@ -47,6 +47,17 @@ public struct FilterSidebarView: View {
                     count: entries.count,
                     selectionValue: .all
                 )
+
+                let pinnedCount = entries.lazy.filter(\.isPinned).count
+                if pinnedCount > 0 {
+                    sidebarRow(
+                        title: "Pinned",
+                        systemImageName: "pin.fill",
+                        count: pinnedCount,
+                        tint: .orange,
+                        selectionValue: .pinned
+                    )
+                }
             }
 
             Section {
@@ -279,6 +290,12 @@ public struct FilterSidebarView: View {
     private func applySelection(_ selection: FilterSelection?) {
         switch selection {
         case .none, .all:
+            selectedContentType = nil
+            selectedURLDomain = nil
+        case .pinned:
+            // Pinned-only filtering is consumed by the parent panel via
+            // `selection`; clear other type/domain filters so they don't
+            // narrow the list further.
             selectedContentType = nil
             selectedURLDomain = nil
         case .type(let type):

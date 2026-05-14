@@ -12,9 +12,11 @@ public final class QuickSearchManager: ObservableObject {
     
     @Published public var query: String = ""
     @Published public var selectedFilter: ContentType? = nil
+    @Published public var showPinnedOnly: Bool = false
     @Published public private(set) var results: [ClipboardEntry] = []
     @Published public var selectedIndex: Int = 0
     @Published public private(set) var availableFilters: [FilterInfo] = []
+    @Published public private(set) var pinnedCount: Int = 0
     @Published public private(set) var isReady: Bool = false
     
     // Command mode state
@@ -63,6 +65,7 @@ public final class QuickSearchManager: ObservableObject {
     public func prepareForSearch() {
         query = ""
         selectedFilter = nil
+        showPinnedOnly = false
         selectedIndex = 0
         isCommandMode = false
         commandResults = []
@@ -116,10 +119,13 @@ public final class QuickSearchManager: ObservableObject {
     
     private func computeAvailableFilters() {
         var counts: [ContentType: Int] = [:]
+        var pinned = 0
         for entry in allEntries.prefix(1000) {
             counts[entry.contentType, default: 0] += 1
+            if entry.isPinned { pinned += 1 }
         }
-        
+        pinnedCount = pinned
+
         availableFilters = counts
             .filter { $0.value > 0 }
             .sorted { $0.value > $1.value }
@@ -175,12 +181,15 @@ public final class QuickSearchManager: ObservableObject {
     
     private func updateResultsImmediate() {
         selectedIndex = 0
-        
-        if let filter = selectedFilter {
-            results = allEntries.lazy.filter { $0.contentType == filter }.prefix(50).map { $0 }
-        } else {
-            results = Array(allEntries.prefix(50))
+
+        var seq: [ClipboardEntry] = allEntries
+        if showPinnedOnly {
+            seq = seq.filter { $0.isPinned }
         }
+        if let filter = selectedFilter {
+            seq = seq.filter { $0.contentType == filter }
+        }
+        results = Array(seq.prefix(50))
     }
     
     private func performSearch() {
@@ -194,6 +203,7 @@ public final class QuickSearchManager: ObservableObject {
 
         let querySnapshot = trimmed
         let filterSnapshot = selectedFilter
+        let pinnedSnapshot = showPinnedOnly
         let dbSnapshot = database
         let entriesSnapshot = allEntries
 
@@ -206,28 +216,31 @@ public final class QuickSearchManager: ObservableObject {
                         let matches = try dbSnapshot.searchFTS(query: querySnapshot, contentType: filterSnapshot, limit: 20)
                         let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
                         PastaLogger.search.debug("FTS5 search '\(querySnapshot)': \(matches.count) results in \(String(format: "%.1f", elapsed))ms")
-                        return matches
+                        return pinnedSnapshot ? matches.filter { $0.isPinned } : matches
                     } catch {
                         PastaLogger.search.error("FTS5 search failed: \(error.localizedDescription)")
                     }
                 }
 
-                return Self.fallbackMatches(query: querySnapshot, entries: entriesSnapshot, filter: filterSnapshot)
+                return Self.fallbackMatches(query: querySnapshot, entries: entriesSnapshot, filter: filterSnapshot, pinnedOnly: pinnedSnapshot)
             }.result
 
             guard !Task.isCancelled else { return }
             guard query.trimmingCharacters(in: .whitespacesAndNewlines) == querySnapshot else { return }
             guard selectedFilter == filterSnapshot else { return }
+            guard showPinnedOnly == pinnedSnapshot else { return }
             if case .success(let result) = searchResult {
                 results = result
             }
         }
     }
-    
-    private nonisolated static func fallbackMatches(query: String, entries: [ClipboardEntry], filter: ContentType?) -> [ClipboardEntry] {
+
+    private nonisolated static func fallbackMatches(query: String, entries: [ClipboardEntry], filter: ContentType?, pinnedOnly: Bool) -> [ClipboardEntry] {
         let lower = query.lowercased()
         let filtered = entries.lazy.filter {
-            $0.content.lowercased().contains(lower) && (filter == nil || $0.contentType == filter)
+            $0.content.lowercased().contains(lower)
+                && (filter == nil || $0.contentType == filter)
+                && (!pinnedOnly || $0.isPinned)
         }
         return Array(filtered.prefix(20))
     }

@@ -793,6 +793,7 @@ struct PanelContentView: View {
     @State private var urlDomainFilter: String? = nil
     @State private var filterSelection: FilterSelection? = .all
     @State private var sourceAppFilter: String = ""
+    @State private var pinnedOnlyFilter: Bool = false
 
     @State private var selectedEntryID: UUID? = nil
     @State private var selectedEntryIDs: Set<UUID> = []
@@ -1002,12 +1003,23 @@ struct PanelContentView: View {
                     sourceAppFilter = app
                     contentTypeFilter = nil
                     urlDomainFilter = nil
+                    pinnedOnlyFilter = false
+                } else if case .pinned = newValue {
+                    pinnedOnlyFilter = true
+                    sourceAppFilter = ""
+                    contentTypeFilter = nil
+                    urlDomainFilter = nil
+                    triggerSearchUpdate()
                 } else if case .type = newValue {
                     sourceAppFilter = ""
+                    pinnedOnlyFilter = false
                 } else if case .domain = newValue {
                     sourceAppFilter = ""
+                    pinnedOnlyFilter = false
                 } else if newValue == .all || newValue == nil {
                     sourceAppFilter = ""
+                    pinnedOnlyFilter = false
+                    triggerSearchUpdate()
                 }
             }
             .onChange(of: displayedEntryIDs) { oldValue, newValue in
@@ -1148,6 +1160,7 @@ struct PanelContentView: View {
         guard searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         guard urlDomainFilter == nil else { return nil }
         guard sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        guard !pinnedOnlyFilter else { return nil }
         return preloadedEntriesByType[contentTypeFilter]
     }
 
@@ -1172,9 +1185,14 @@ struct PanelContentView: View {
         contentTypeFilter: ContentType?,
         sourceFilter: String,
         urlDomainFilter: String?,
+        pinnedOnly: Bool,
         limit: Int
     ) -> [ClipboardEntry] {
         var out = input
+
+        if pinnedOnly {
+            out = out.filter { $0.isPinned }
+        }
 
         if let contentTypeFilter {
             if MetadataParser.extractableTypes.contains(contentTypeFilter) {
@@ -1207,8 +1225,9 @@ struct PanelContentView: View {
         let typeFilter = contentTypeFilter
         let srcFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines)
         let domainFilter = urlDomainFilter
+        let pinnedOnly = pinnedOnlyFilter
         let limit = Preload.limit
-        
+
         filterTask = Task {
             let result = await Task.detached(priority: .userInitiated) { () -> [ClipboardEntry] in
                 Self.filterEntries(
@@ -1216,10 +1235,11 @@ struct PanelContentView: View {
                     contentTypeFilter: typeFilter,
                     sourceFilter: srcFilter,
                     urlDomainFilter: domainFilter,
+                    pinnedOnly: pinnedOnly,
                     limit: limit
                 )
             }.value
-            
+
             guard !Task.isCancelled else { return }
             displayedEntries = result
         }
@@ -1235,6 +1255,7 @@ struct PanelContentView: View {
         let typeFilter = contentTypeFilter
         let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines)
         let domainFilter = urlDomainFilter
+        let pinnedOnly = pinnedOnlyFilter
         let limit = Preload.limit
         let searchContentType: ContentType?
         if let typeFilter, MetadataParser.extractableTypes.contains(typeFilter) {
@@ -1257,6 +1278,7 @@ struct PanelContentView: View {
                     contentTypeFilter: typeFilter,
                     sourceFilter: sourceFilter,
                     urlDomainFilter: domainFilter,
+                    pinnedOnly: pinnedOnly,
                     limit: limit
                 )
             } catch {
