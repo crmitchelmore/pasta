@@ -685,7 +685,7 @@ private struct QuickSearchRow: View {
         case micro
     }
 
-    let entry: ClipboardEntry
+    let row: ClipboardRowData
     let index: Int
     let isSelected: Bool
     let query: String
@@ -698,7 +698,7 @@ private struct QuickSearchRow: View {
         query: String = "",
         style: Style = .standard
     ) {
-        self.entry = entry
+        self.row = ClipboardRowData(from: entry)
         self.index = index
         self.isSelected = isSelected
         self.query = query
@@ -717,46 +717,39 @@ private struct QuickSearchRow: View {
     private var standardBody: some View {
         HStack(spacing: 12) {
             // Type icon or image thumbnail
-            if (entry.contentType == .image || entry.contentType == .screenshot),
-               let imagePath = entry.imagePath {
+            if row.prefersImageThumbnail, let imagePath = row.imagePath {
                 ImageThumbnail(path: imagePath, size: 36)
             } else {
-                Image(systemName: entry.contentType.systemImageName)
+                Image(systemName: row.contentType.systemImageName)
                     .font(.title3)
-                    .foregroundStyle(entry.contentType.tint)
+                    .foregroundStyle(row.contentType.tint)
                     .frame(width: 28)
             }
 
-            // Content preview
+            // Content preview — single-line preview comes from the shared
+            // row data so the main panel and QuickSearch render identical text.
             VStack(alignment: .leading, spacing: 2) {
-                Text(previewText)
+                Text(row.singleLinePreview)
                     .lineLimit(1)
                     .font(.body)
 
+                // Metadata segments come from `quickSearchMetadataSegments`
+                // (shared with the main panel via `ClipboardRowData`).
+                // First two pieces (type, app) render secondary; trailing
+                // pieces (timestamp, char count) render tertiary, matching
+                // the previous visual hierarchy.
+                let segments = row.quickSearchMetadataSegments
+                let secondaryCount = row.sourceAppName == nil ? 1 : 2
                 HStack(spacing: 6) {
-                    Text(entry.contentType.displayTitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-
-                    if let app = entry.sourceApp?.appDisplayName {
-                        Text("•")
-                            .foregroundStyle(.tertiary)
-                        Text(app)
+                    ForEach(Array(segments.enumerated()), id: \.offset) { idx, segment in
+                        if idx > 0 {
+                            Text("•")
+                                .foregroundStyle(.tertiary)
+                        }
+                        Text(segment)
                             .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(idx < secondaryCount ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
                     }
-
-                    Text("•")
-                        .foregroundStyle(.tertiary)
-                    Text(entry.timestamp.relativeFormatted)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-
-                    Text("•")
-                        .foregroundStyle(.tertiary)
-                    Text("\(entry.content.count.formatted()) chars")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
                 }
             }
 
@@ -786,17 +779,16 @@ private struct QuickSearchRow: View {
     private var microBody: some View {
         VStack(spacing: 4) {
             // Content type icon or image thumbnail
-            if (entry.contentType == .image || entry.contentType == .screenshot),
-               let imagePath = entry.imagePath {
+            if row.prefersImageThumbnail, let imagePath = row.imagePath {
                 ImageThumbnail(path: imagePath, size: 32)
             } else {
-                Image(systemName: entry.contentType.systemImageName)
+                Image(systemName: row.contentType.systemImageName)
                     .font(.title3)
-                    .foregroundStyle(entry.contentType.tint)
+                    .foregroundStyle(row.contentType.tint)
             }
 
             // App name (abbreviated)
-            if let app = entry.sourceApp?.appDisplayName {
+            if let app = row.sourceAppName {
                 Text(app.prefix(6))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -817,19 +809,6 @@ private struct QuickSearchRow: View {
                 .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
         )
         .contentShape(Rectangle())
-    }
-
-    private var previewText: String {
-        let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        let singleLine = trimmed.components(separatedBy: .newlines).joined(separator: " ")
-        if singleLine.isEmpty {
-            switch entry.contentType {
-            case .image: return "Image"
-            case .screenshot: return "Screenshot"
-            default: return "(empty)"
-            }
-        }
-        return String(singleLine.prefix(100))
     }
 }
 
