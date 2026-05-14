@@ -1077,56 +1077,15 @@ private struct FilterChip: View {
 
 // MARK: - Visual Effect View
 
-private struct VisualEffectView: NSViewRepresentable {
-    let material: NSVisualEffectView.Material
-    let blendingMode: NSVisualEffectView.BlendingMode
-    
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = material
-        view.blendingMode = blendingMode
-        view.state = .active
-        return view
-    }
-    
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = material
-        nsView.blendingMode = blendingMode
-    }
-}
+// `VisualEffectView` now lives in GlassEffectView.swift.
 
 // MARK: - Date Formatting Extension
 
-private extension Date {
-    var relativeFormatted: String {
-        let interval = Date().timeIntervalSince(self)
-        if interval < 60 {
-            return "Just now"
-        } else if interval < 3600 {
-            let mins = Int(interval / 60)
-            return "\(mins)m ago"
-        } else if interval < 86400 {
-            let hours = Int(interval / 3600)
-            return "\(hours)h ago"
-        } else {
-            let days = Int(interval / 86400)
-            return "\(days)d ago"
-        }
-    }
-}
+// `Date.relativeFormatted` now lives in Formatting.swift.
 
 // MARK: - String Extensions
 
-private extension String {
-    /// Extracts a readable app name from a bundle identifier
-    var appDisplayName: String {
-        let parts = self.split(separator: ".")
-        if let last = parts.last {
-            return String(last).capitalized
-        }
-        return self
-    }
-}
+// `String.appDisplayName` now lives in Formatting.swift.
 
 // MARK: - Safe Array Access
 
