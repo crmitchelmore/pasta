@@ -38,7 +38,7 @@ extension AppDelegate {
         statusItem?.menu = menu
     }
 
-    @objc func statusItemClicked() {
+    @objc private func statusItemClicked() {
         panelController?.toggle()
     }
 

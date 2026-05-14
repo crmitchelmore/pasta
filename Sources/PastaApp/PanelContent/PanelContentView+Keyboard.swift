@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 
 import PastaCore
-import PastaDetectors
 import PastaUI
 
 extension PanelContentView {

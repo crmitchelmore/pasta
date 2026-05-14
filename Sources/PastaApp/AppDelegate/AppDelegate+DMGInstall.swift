@@ -21,7 +21,7 @@ extension AppDelegate {
         let volumesPrefix = "/Volumes/"
         guard bundlePath.hasPrefix(volumesPrefix) else { return }
 
-        // Check if already asked this session
+        // Check if we've already asked the user (persists across launches via UserDefaults)
         let hasAskedKey = "pasta.hasAskedToMoveToApplications"
         if UserDefaults.standard.bool(forKey: hasAskedKey) {
             return
@@ -54,7 +54,7 @@ extension AppDelegate {
                     // Skip if we've already asked about this volume
                     if askedVolumes.contains(volume) {
                         PastaLogger.app.debug("Already asked about volume: \(volume), skipping")
-                        return
+                        continue
                     }
 
                     // Remember we asked about this volume
