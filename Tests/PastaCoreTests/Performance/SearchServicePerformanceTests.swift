@@ -87,4 +87,36 @@ final class SearchServicePerformanceTests: XCTestCase {
             }
         }
     }
+
+    /// Stress test for the two-stage FTS5 query: a populated DB where most
+    /// entries carry a non-trivial rawData BLOB. The benefit of ranking
+    /// rowids first (without dragging the BLOB into the rank stage) only
+    /// shows up when the un-ranked rows would otherwise be hydrated.
+    func testSearchOnDatabaseWithBlobs() throws {
+        let db = try Self.makeBlobDatabase()
+        let service = SearchService(database: db)
+        measure {
+            for _ in 0..<10 {
+                _ = try? service.search(query: "alpha", limit: 50)
+            }
+        }
+    }
+
+    private static func makeBlobDatabase() throws -> DatabaseManager {
+        let db = try DatabaseManager.inMemory()
+        let now = Date()
+        let words = ["alpha", "beta", "gamma", "delta", "epsilon"]
+        // ~4kB blob per entry — modest but enough to make hydration measurable.
+        let blob = Data(repeating: 0x5A, count: 32_768)
+        for i in 0..<2_000 {
+            let word = words[i % words.count]
+            try db.insert(ClipboardEntry(
+                content: "\(word) entry number \(i) with mixed text",
+                contentType: .text,
+                rawData: blob,
+                timestamp: now.addingTimeInterval(-Double(i))
+            ))
+        }
+        return db
+    }
 }

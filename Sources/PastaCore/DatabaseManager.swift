@@ -506,8 +506,14 @@ public final class DatabaseManager: @unchecked Sendable {
         let normalisedExact = trimmed.lowercased()
 
         return try dbQueue.read { db in
-            var sql = """
-            SELECT e.*,
+            // Two-stage query: rank rowids inside the FTS5 virtual table first
+            // (touching only the FTS index + the small `content`/`contentType`
+            // columns needed for the rank + filters), then hydrate the top
+            // `limit` rows from the main table. This avoids reading the
+            // potentially-large `rawData` BLOB and other ClipboardEntry fields
+            // for every FTS match before sorting and trimming.
+            var rankSQL = """
+            SELECT clipboard_entries_fts.rowid AS rid,
                    bm25(clipboard_entries_fts)
                    + \(Self.recencyPenaltyCoefficient) * ln(1.0 + max(julianday('now') - julianday(e.timestamp), 0.0))
                    - \(Self.copyCountBonusCoefficient) * ln(1.0 + e.copyCount)
@@ -518,26 +524,29 @@ public final class DatabaseManager: @unchecked Sendable {
             WHERE clipboard_entries_fts MATCH ?
             """
 
-            var args: [DatabaseValueConvertible] = [normalisedExact, ftsQuery]
+            var rankArgs: [DatabaseValueConvertible] = [normalisedExact, ftsQuery]
 
             if let contentType {
-                sql += " AND e.contentType = ?"
-                args.append(contentType.rawValue)
+                rankSQL += " AND e.contentType = ?"
+                rankArgs.append(contentType.rawValue)
             }
 
             if pinnedOnly {
-                sql += " AND e.isPinned = 1"
+                rankSQL += " AND e.isPinned = 1"
             }
 
-            // Combined score:
-            //   bm25                 — FTS relevance, lower = better
-            //   + recency penalty    — pushes ancient entries down
-            //   - copyCount bonus    — frequently-pasted entries float up
-            //   + exact equality     — content == query trumps everything else
-            sql += " ORDER BY rank ASC LIMIT ?"
-            args.append(limit)
+            rankSQL += " ORDER BY rank ASC LIMIT ?"
+            rankArgs.append(limit)
 
-            let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+            let sql = """
+            WITH ranked AS (\(rankSQL))
+            SELECT e.*
+            FROM ranked
+            JOIN clipboard_entries e ON e.rowid = ranked.rid
+            ORDER BY ranked.rank ASC
+            """
+
+            let rows = try Row.fetchAll(db, sql: sql, arguments: StatementArguments(rankArgs))
             return rows.compactMap { row in
                 try? ClipboardEntry(row: row)
             }
