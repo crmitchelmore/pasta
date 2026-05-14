@@ -296,6 +296,14 @@ public struct ContentTypeDetector {
             .text,
             .unknown
         ]
+        // Pre-build a lookup so the tiebreaker comparator below is O(1) per
+        // candidate instead of an O(n) `firstIndex(of:)` scan repeated for
+        // every pairwise comparison in `candidates.max`.
+        var priorityIndex: [ContentType: Int] = [:]
+        priorityIndex.reserveCapacity(priorities.count)
+        for (i, type) in priorities.enumerated() {
+            priorityIndex[type] = i
+        }
 
         var candidates: [(ContentType, Double)] = []
         candidates.reserveCapacity(12)
@@ -420,8 +428,8 @@ public struct ContentTypeDetector {
 
         guard let best = candidates.max(by: { a, b in
             if a.1 != b.1 { return a.1 < b.1 }
-            let ia = priorities.firstIndex(of: a.0) ?? priorities.count
-            let ib = priorities.firstIndex(of: b.0) ?? priorities.count
+            let ia = priorityIndex[a.0] ?? priorities.count
+            let ib = priorityIndex[b.0] ?? priorities.count
             return ia > ib
         }) else {
             return (.unknown, 0.0)
