@@ -12,9 +12,11 @@ public struct PreviewPanelView: View {
     }
 
     public let entry: ClipboardEntry?
+    private let onCopy: ((ClipboardEntry) -> Void)?
 
-    public init(entry: ClipboardEntry?) {
+    public init(entry: ClipboardEntry?, onCopy: ((ClipboardEntry) -> Void)? = nil) {
         self.entry = entry
+        self.onCopy = onCopy
     }
 
     public var body: some View {
@@ -41,6 +43,20 @@ public struct PreviewPanelView: View {
                         ExtractedItemsSection(entry: entry)
 
                         SectionBox(title: "Content") {
+                            if onCopy != nil {
+                                HStack {
+                                    Spacer(minLength: 0)
+                                    Button {
+                                        onCopy?(entry)
+                                    } label: {
+                                        Label("Copy", systemImage: "doc.on.doc")
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .controlSize(.small)
+                                    .help("Copy this item")
+                                }
+                            }
+
                             if (entry.contentType == .image || entry.contentType == .screenshot), let imagePath = entry.imagePath {
                                 ImagePreview(path: imagePath)
                             } else if entry.contentType == .filePath, let filePreview = filePathPreview(from: entry) {

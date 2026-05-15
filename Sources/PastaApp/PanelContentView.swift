@@ -123,6 +123,14 @@ struct PanelContentView: View {
                 searchFocused: $searchFocused
             )
 
+            if backgroundService.isLoadingEntries {
+                HistoryLoadingLine(
+                    loadedCount: backgroundService.loadedEntryCount,
+                    totalCount: backgroundService.totalEntryCount
+                )
+                .transition(.opacity)
+            }
+
             mainContentView
 
             footerView
@@ -167,6 +175,7 @@ struct PanelContentView: View {
                     showExtractedValuesOnly: $showExtractedValuesOnly,
                     hasClipboardHistory: !backgroundService.entries.isEmpty,
                     isFiltered: hasActiveListFilters,
+                    isLoading: backgroundService.isLoadingEntries,
                     onClearSearch: clearSearch,
                     onClearFilters: clearFilters,
                     onCopy: { entry in copyEntry(entry) },
@@ -190,7 +199,10 @@ struct PanelContentView: View {
                 )
                 .gesture(previewDividerDrag(totalWidth: proxy.size.width, widths: widths))
 
-                PreviewPanelView(entry: displayedEntries.first(where: { $0.id == selectedEntryID }))
+                PreviewPanelView(
+                    entry: displayedEntries.first(where: { $0.id == selectedEntryID }),
+                    onCopy: { copyEntry($0) }
+                )
                     .frame(width: widths.preview)
                     .frame(maxHeight: .infinity)
                     .accessibilitySortPriority(1)
@@ -342,7 +354,9 @@ struct PanelContentView: View {
 
     private func handleOnAppear() {
         PastaLogger.ui.debug("Panel appeared")
-        refreshEntries()
+        if !backgroundService.isLoadingEntries {
+            refreshEntries()
+        }
 
         // Initialize search service if needed
         if searchService == nil {
@@ -577,5 +591,36 @@ private struct CopyFeedbackToast: View {
             .background(Color.green.opacity(0.92), in: Capsule())
             .shadow(radius: 8, y: 3)
             .accessibilityLabel(message)
+    }
+}
+
+private struct HistoryLoadingLine: View {
+    let loadedCount: Int
+    let totalCount: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let totalCount, totalCount > 0 {
+                ProgressView(value: Double(min(loadedCount, totalCount)), total: Double(totalCount))
+            } else {
+                ProgressView()
+                    .progressViewStyle(.linear)
+            }
+
+            Text(statusText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 2)
+        .accessibilityLabel(statusText)
+    }
+
+    private var statusText: String {
+        if let totalCount, totalCount > 0 {
+            "Loading clipboard history \(min(loadedCount, totalCount).formatted()) of \(totalCount.formatted())"
+        } else {
+            "Loading clipboard history"
+        }
     }
 }

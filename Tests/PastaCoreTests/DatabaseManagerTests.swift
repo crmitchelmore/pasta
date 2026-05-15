@@ -49,6 +49,23 @@ final class DatabaseManagerTests: XCTestCase {
         XCTAssertEqual(recent.map(\.content), ["newer", "older"])
     }
 
+    func testFetchRecentSupportsOffsetAndCountsEntries() throws {
+        let db = try DatabaseManager.inMemory()
+
+        for index in 0..<5 {
+            try db.insert(ClipboardEntry(
+                content: "entry \(index)",
+                contentType: .text,
+                timestamp: Date(timeIntervalSince1970: Double(index))
+            ))
+        }
+
+        XCTAssertEqual(try db.countEntries(), 5)
+
+        let page = try db.fetchRecent(limit: 2, offset: 2)
+        XCTAssertEqual(page.map(\.content), ["entry 2", "entry 1"])
+    }
+
     func testInsertDeduplicatesAndIncrementsCopyCount() throws {
         let db = try DatabaseManager.inMemory()
 

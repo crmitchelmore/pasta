@@ -17,6 +17,9 @@ final class BackgroundService: ObservableObject {
     static let shared = BackgroundService()
     
     @Published private(set) var entries: [ClipboardEntry] = []
+    @Published private(set) var isLoadingEntries: Bool = false
+    @Published private(set) var loadedEntryCount: Int = 0
+    @Published private(set) var totalEntryCount: Int? = nil
     @Published var lastError: PastaError? = nil
     
     let database: DatabaseManager
@@ -30,9 +33,12 @@ final class BackgroundService: ObservableObject {
     
     private var cancellables: Set<AnyCancellable> = []
     private var pruneTimer: Timer?
+    private var refreshTask: Task<Void, Never>?
 
     private enum RefreshTuning {
         static let fallbackDisplayLimit = 10_000
+        static let initialDisplayLimit = 200
+        static let backgroundPageSize = 1_000
         static let minHeadFetchLimit = 100
         static let insertedCountMultiplier = 4
     }
@@ -146,6 +152,8 @@ final class BackgroundService: ObservableObject {
     func stop() {
         clipboardMonitor.stop()
         screenshotMonitor.stop()
+        refreshTask?.cancel()
+        refreshTask = nil
         pruneTimer?.invalidate()
         pruneTimer = nil
         PastaLogger.app.info("Background clipboard monitoring stopped")
@@ -154,12 +162,70 @@ final class BackgroundService: ObservableObject {
     func refresh() {
         let db = self.database
         let limit = displayLimit
-        Task {
-            let latest = await Task.detached(priority: .userInitiated) {
-                (try? db.fetchRecent(limit: limit)) ?? []
-            }.value
-            self.entries = latest
-            PastaLogger.ui.debug("Refreshed entries: \(latest.count) items")
+        let initialLimit = min(limit, RefreshTuning.initialDisplayLimit)
+        let pageSize = RefreshTuning.backgroundPageSize
+
+        refreshTask?.cancel()
+        isLoadingEntries = true
+        loadedEntryCount = entries.isEmpty ? 0 : min(entries.count, limit)
+        totalEntryCount = nil
+
+        refreshTask = Task {
+            do {
+                let totalTask = Task.detached(priority: .utility) {
+                    try db.countEntries()
+                }
+
+                let firstPage = try await Task.detached(priority: .userInitiated) {
+                    try db.fetchRecent(limit: initialLimit, offset: 0)
+                }.value
+                guard !Task.isCancelled else { return }
+
+                let total = try await totalTask.value
+                let expectedCount = min(total, limit)
+                totalEntryCount = expectedCount
+                if entries.isEmpty {
+                    entries = firstPage
+                }
+                loadedEntryCount = firstPage.count
+                PastaLogger.ui.debug("Loaded initial clipboard history page: \(firstPage.count)/\(expectedCount) items")
+
+                guard firstPage.count < expectedCount else {
+                    isLoadingEntries = false
+                    refreshTask = nil
+                    return
+                }
+
+                var allEntries = firstPage
+                allEntries.reserveCapacity(expectedCount)
+
+                while allEntries.count < expectedCount {
+                    guard !Task.isCancelled else { return }
+                    let offset = allEntries.count
+                    let nextLimit = min(pageSize, expectedCount - offset)
+                    let nextPage = try await Task.detached(priority: .utility) {
+                        try db.fetchRecent(limit: nextLimit, offset: offset)
+                    }.value
+                    guard !Task.isCancelled else { return }
+                    guard !nextPage.isEmpty else { break }
+
+                    allEntries.append(contentsOf: nextPage)
+                    loadedEntryCount = allEntries.count
+                }
+
+                entries = allEntries
+                loadedEntryCount = allEntries.count
+                isLoadingEntries = false
+                refreshTask = nil
+                PastaLogger.ui.debug("Refreshed entries incrementally: \(allEntries.count) items")
+            } catch {
+                guard !Task.isCancelled else { return }
+                let wrapped = (error as? PastaError) ?? PastaError.unknown(underlying: error)
+                PastaLogger.logError(wrapped, logger: PastaLogger.database, context: "Failed to refresh clipboard history")
+                lastError = wrapped
+                isLoadingEntries = false
+                refreshTask = nil
+            }
         }
     }
 
@@ -170,6 +236,9 @@ final class BackgroundService: ObservableObject {
 
     private func refreshAfterInsert(insertedCount: Int) async {
         guard insertedCount > 0 else { return }
+        refreshTask?.cancel()
+        refreshTask = nil
+        isLoadingEntries = false
 
         let displayLimit = self.displayLimit
         let headLimit = min(

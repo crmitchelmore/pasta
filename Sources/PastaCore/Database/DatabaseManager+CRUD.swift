@@ -65,6 +65,14 @@ extension DatabaseManager {
     }
 
     public func fetchRecent(contentType: ContentType?, limit: Int = 50) throws -> [ClipboardEntry] {
+        try fetchRecent(contentType: contentType, limit: limit, offset: 0)
+    }
+
+    public func fetchRecent(limit: Int, offset: Int) throws -> [ClipboardEntry] {
+        try fetchRecent(contentType: nil, limit: limit, offset: offset)
+    }
+
+    public func fetchRecent(contentType: ContentType?, limit: Int, offset: Int) throws -> [ClipboardEntry] {
         try dbQueue.read { db in
             var request = ClipboardEntry
                 .order(Column("timestamp").desc)
@@ -74,8 +82,17 @@ extension DatabaseManager {
             }
 
             return try request
-                .limit(limit)
+                .limit(limit, offset: offset)
                 .fetchAll(db)
+        }
+    }
+
+    public func countEntries() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(
+                db,
+                sql: "SELECT COUNT(*) FROM \(ClipboardEntry.databaseTableName)"
+            ) ?? 0
         }
     }
 

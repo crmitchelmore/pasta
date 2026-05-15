@@ -83,6 +83,7 @@ public struct ClipboardListView: View {
     @Binding private var showExtractedValuesOnly: Bool
     private let hasClipboardHistory: Bool
     private let isFiltered: Bool
+    private let isLoading: Bool
     private let onClearSearch: (() -> Void)?
     private let onClearFilters: (() -> Void)?
     private let onCopy: (ClipboardEntry) -> Void
@@ -135,6 +136,7 @@ public struct ClipboardListView: View {
         showExtractedValuesOnly: Binding<Bool> = .constant(false),
         hasClipboardHistory: Bool? = nil,
         isFiltered: Bool = false,
+        isLoading: Bool = false,
         onClearSearch: (() -> Void)? = nil,
         onClearFilters: (() -> Void)? = nil,
         onCopy: @escaping (ClipboardEntry) -> Void,
@@ -155,6 +157,7 @@ public struct ClipboardListView: View {
         _showExtractedValuesOnly = showExtractedValuesOnly
         self.hasClipboardHistory = hasClipboardHistory ?? !entries.isEmpty
         self.isFiltered = isFiltered
+        self.isLoading = isLoading
         self.onClearSearch = onClearSearch
         self.onClearFilters = onClearFilters
         self.onCopy = onCopy
@@ -271,7 +274,14 @@ public struct ClipboardListView: View {
 
     @ViewBuilder
     private var emptyState: some View {
-        if hasClipboardHistory && isFiltered {
+        if isLoading {
+            ContentUnavailableView(
+                "Loading clipboard history",
+                systemImage: "clock.arrow.circlepath",
+                description: Text("Recent items will appear shortly.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if hasClipboardHistory && isFiltered {
             ContentUnavailableView {
                 Label("No Results", systemImage: "magnifyingglass")
             } description: {
