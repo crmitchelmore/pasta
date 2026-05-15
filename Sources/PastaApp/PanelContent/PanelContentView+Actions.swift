@@ -75,13 +75,49 @@ extension PanelContentView {
 
     func copyEntry(_ entry: ClipboardEntry) {
         PastaLogger.ui.debug("Copying entry: \(entry.contentType.rawValue)")
-        _ = PasteService().copy(entry)
+        if PasteService().copy(entry) {
+            showCopyFeedback("Copied")
+        }
     }
 
     func copyEntries(_ entries: [ClipboardEntry]) {
         guard !entries.isEmpty else { return }
         PastaLogger.ui.debug("Copying \(entries.count) entries")
-        _ = PasteService().copy(entries, joinedBy: multiCopyJoinSeparator)
+        if PasteService().copy(entries, joinedBy: multiCopyJoinSeparator) {
+            showCopyFeedback(entries.count == 1 ? "Copied" : "Copied \(entries.count) items")
+        }
+    }
+
+    func showCopyFeedback(_ message: String) {
+        copyFeedbackTask?.cancel()
+        withAnimation(.easeInOut(duration: 0.18)) {
+            copyFeedbackMessage = message
+        }
+
+        copyFeedbackTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.18)) {
+                copyFeedbackMessage = nil
+            }
+        }
+    }
+
+    func clearSearch() {
+        searchQuery = ""
+        triggerSearchUpdate()
+    }
+
+    func clearFilters() {
+        searchQuery = ""
+        contentTypeFilter = nil
+        urlDomainFilter = nil
+        filterSelection = .all
+        sourceAppFilter = ""
+        pinnedOnlyFilter = false
+        showExtractedValuesOnly = false
+        isShowingContentTypePicker = false
+        triggerSearchUpdate()
     }
 
     func pasteEntry(_ entry: ClipboardEntry) {

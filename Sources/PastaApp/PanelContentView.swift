@@ -10,10 +10,14 @@ struct PanelContentView: View {
     enum Defaults {
         static let didCompleteOnboarding = "pasta.onboarding.completed"
         static let multiCopyJoinSeparator = "pasta.multiCopyJoinSeparator"
+        static let sidebarColumnWidth = "pasta.mainPanel.sidebarColumnWidth"
+        static let listColumnWidth = "pasta.mainPanel.listColumnWidth"
     }
 
     @AppStorage(Defaults.didCompleteOnboarding) var didCompleteOnboarding: Bool = false
     @AppStorage(Defaults.multiCopyJoinSeparator) var multiCopyJoinSeparator: String = "\n"
+    @AppStorage(Defaults.sidebarColumnWidth) var persistedSidebarColumnWidth: Double = 200
+    @AppStorage(Defaults.listColumnWidth) var persistedListColumnWidth: Double = 320
 
     @ObservedObject var backgroundService = BackgroundService.shared
 
@@ -26,11 +30,17 @@ struct PanelContentView: View {
 
     @State var selectedEntryID: UUID? = nil
     @State var selectedEntryIDs: Set<UUID> = []
+    @State var lastSelectedEntryID: UUID? = nil
     @State var showExtractedValuesOnly: Bool = false
 
     @State var isShowingOnboarding: Bool = false
     @State var isShowingErrorAlert: Bool = false
     @State var isShowingContentTypePicker: Bool = false
+    @State var copyFeedbackMessage: String? = nil
+    @State var copyFeedbackTask: Task<Void, Never>? = nil
+    @State private var liveSidebarColumnWidth: CGFloat? = nil
+    @State private var liveListColumnWidth: CGFloat? = nil
+    @State private var activeSplitDrag: SplitDrag? = nil
 
     // Cache search service to avoid recreation per keystroke
     @State var searchService: SearchService? = nil
@@ -55,6 +65,14 @@ struct PanelContentView: View {
 
     private var displayedEntryIDs: [UUID] {
         displayedEntries.map(\.id)
+    }
+
+    private var hasActiveListFilters: Bool {
+        !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            contentTypeFilter != nil ||
+            urlDomainFilter != nil ||
+            !sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            pinnedOnlyFilter
     }
 
     /// Content types that have at least one entry in the current history,
@@ -118,45 +136,67 @@ struct PanelContentView: View {
 
     @ViewBuilder
     private var mainContentView: some View {
-        HSplitView {
-            FilterSidebarView(
-                entries: backgroundService.entries,
-                effectiveTypeCounts: preloadedEffectiveTypeCounts,
-                sourceAppCounts: preloadedSourceAppCounts,
-                domainCounts: preloadedDomainCounts,
-                selectedContentType: $contentTypeFilter,
-                selectedURLDomain: $urlDomainFilter,
-                selection: $filterSelection
-            )
-            .frame(minWidth: 160, idealWidth: 200, maxWidth: 360)
-            .accessibilitySortPriority(3)
+        GeometryReader { proxy in
+            let widths = columnWidths(totalWidth: proxy.size.width)
 
-            ClipboardListView(
-                entries: displayedEntries,
-                selectedEntryID: $selectedEntryID,
-                selectedEntryIDs: $selectedEntryIDs,
-                filterType: contentTypeFilter,
-                showExtractedValuesOnly: $showExtractedValuesOnly,
-                onCopy: { entry in copyEntry(entry) },
-                onCopyMultiple: { entries in copyEntries(entries) },
-                onPaste: { entry in pasteEntry(entry) },
-                onDelete: { entry in deleteEntry(entry) },
-                onDeleteMultiple: { ids in deleteEntries(ids) },
-                onReveal: { entry in revealEntry(entry) },
-                onOpenURL: { entry in _ = openEntryURL(entry) },
-                onTogglePin: { entry in togglePin(entry) }
-            )
-            .frame(minWidth: 240, idealWidth: 320)
-            .focusable()
-            .focused($listFocused)
-            .focusEffectDisabled()
-            .accessibilitySortPriority(2)
+            HStack(spacing: 0) {
+                FilterSidebarView(
+                    entries: backgroundService.entries,
+                    effectiveTypeCounts: preloadedEffectiveTypeCounts,
+                    sourceAppCounts: preloadedSourceAppCounts,
+                    domainCounts: preloadedDomainCounts,
+                    selectedContentType: $contentTypeFilter,
+                    selectedURLDomain: $urlDomainFilter,
+                    selection: $filterSelection
+                )
+                .frame(width: widths.sidebar)
+                .accessibilitySortPriority(3)
 
-            PreviewPanelView(entry: displayedEntries.first(where: { $0.id == selectedEntryID }))
-                .frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilitySortPriority(1)
+                SplitDivider(
+                    label: "Drag to resize sidebar",
+                    width: SplitLayout.dividerWidth
+                )
+                .gesture(sidebarDividerDrag(totalWidth: proxy.size.width, widths: widths))
+
+                ClipboardListView(
+                    entries: displayedEntries,
+                    selectedEntryID: $selectedEntryID,
+                    selectedEntryIDs: $selectedEntryIDs,
+                    searchQuery: searchQuery,
+                    filterType: contentTypeFilter,
+                    showExtractedValuesOnly: $showExtractedValuesOnly,
+                    hasClipboardHistory: !backgroundService.entries.isEmpty,
+                    isFiltered: hasActiveListFilters,
+                    onClearSearch: clearSearch,
+                    onClearFilters: clearFilters,
+                    onCopy: { entry in copyEntry(entry) },
+                    onCopyMultiple: { entries in copyEntries(entries) },
+                    onPaste: { entry in pasteEntry(entry) },
+                    onDelete: { entry in deleteEntry(entry) },
+                    onDeleteMultiple: { ids in deleteEntries(ids) },
+                    onReveal: { entry in revealEntry(entry) },
+                    onOpenURL: { entry in _ = openEntryURL(entry) },
+                    onTogglePin: { entry in togglePin(entry) }
+                )
+                .frame(width: widths.list)
+                .focusable()
+                .focused($listFocused)
+                .focusEffectDisabled()
+                .accessibilitySortPriority(2)
+
+                SplitDivider(
+                    label: "Drag to resize list and preview",
+                    width: SplitLayout.dividerWidth
+                )
+                .gesture(previewDividerDrag(totalWidth: proxy.size.width, widths: widths))
+
+                PreviewPanelView(entry: displayedEntries.first(where: { $0.id == selectedEntryID }))
+                    .frame(width: widths.preview)
+                    .frame(maxHeight: .infinity)
+                    .accessibilitySortPriority(1)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -170,12 +210,23 @@ struct PanelContentView: View {
             .frame(minWidth: 600, minHeight: 400)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.regularMaterial)
+            .overlay(alignment: .topTrailing) {
+                if let copyFeedbackMessage {
+                    CopyFeedbackToast(message: copyFeedbackMessage)
+                        .padding(.top, 8)
+                        .padding(.trailing, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
             .onAppear(perform: handleOnAppear)
             .onDisappear {
                 // Reset the content-type filter and close the picker when the
                 // panel hides so each new session starts unfiltered.
                 contentTypeFilter = nil
                 isShowingContentTypePicker = false
+                copyFeedbackTask?.cancel()
+                copyFeedbackTask = nil
+                copyFeedbackMessage = nil
             }
             .onReceive(backgroundService.$lastError) { error in
                 if error != nil {
@@ -256,6 +307,11 @@ struct PanelContentView: View {
             .onChange(of: displayedEntryIDs) { oldValue, newValue in
                 handleDisplayedEntriesChange(oldValue, newValue)
             }
+            .onChange(of: selectedEntryID) { _, newValue in
+                if let newValue {
+                    lastSelectedEntryID = newValue
+                }
+            }
             .onKeyPress { keyPress in
                 handleKeyPress(keyPress)
             }
@@ -310,22 +366,28 @@ struct PanelContentView: View {
     }
 
     private func handleDisplayedEntriesChange(_ oldValue: [UUID], _ ids: [UUID]) {
+        let hadSelection = selectedEntryID != nil || !selectedEntryIDs.isEmpty
         let visibleIDs = Set(ids)
         let filteredSelection = selectedEntryIDs.intersection(visibleIDs)
+        let rememberedID = lastSelectedEntryID.flatMap { visibleIDs.contains($0) ? $0 : nil }
 
         if filteredSelection != selectedEntryIDs {
             selectedEntryIDs = filteredSelection
         }
 
         if let selectedEntryID, !visibleIDs.contains(selectedEntryID) {
-            self.selectedEntryID = filteredSelection.first
+            self.selectedEntryID = filteredSelection.first ?? rememberedID
         }
 
-        if self.selectedEntryID == nil, let fallbackID = filteredSelection.first ?? ids.first {
+        if self.selectedEntryID == nil,
+           (hadSelection || oldValue.isEmpty),
+           let fallbackID = filteredSelection.first ?? rememberedID ?? ids.first {
             self.selectedEntryID = fallbackID
+            lastSelectedEntryID = fallbackID
         }
 
         if let selectedEntryID {
+            lastSelectedEntryID = selectedEntryID
             if selectedEntryIDs.isEmpty {
                 selectedEntryIDs = [selectedEntryID]
             } else if !selectedEntryIDs.contains(selectedEntryID),
@@ -354,5 +416,166 @@ struct PanelContentView: View {
 
     func closePanel() {
         NSApp.keyWindow?.close()
+    }
+}
+
+private enum SplitLayout {
+    static let dividerWidth: CGFloat = 8
+    static let sidebarMin: CGFloat = 150
+    static let sidebarMax: CGFloat = 360
+    static let listMin: CGFloat = 220
+    static let previewMin: CGFloat = 180
+}
+
+private struct ColumnWidths {
+    let sidebar: CGFloat
+    let list: CGFloat
+    let preview: CGFloat
+}
+
+private struct ColumnMinimums {
+    let sidebar: CGFloat
+    let list: CGFloat
+    let preview: CGFloat
+}
+
+private struct SplitDrag {
+    let sidebar: CGFloat
+    let list: CGFloat
+    let preview: CGFloat
+}
+
+private extension PanelContentView {
+    func columnWidths(totalWidth: CGFloat) -> ColumnWidths {
+        let minimums = columnMinimums(totalWidth: totalWidth)
+        let available = max(totalWidth - (SplitLayout.dividerWidth * 2), 1)
+        let requestedSidebar = liveSidebarColumnWidth ?? CGFloat(persistedSidebarColumnWidth)
+        let requestedList = liveListColumnWidth ?? CGFloat(persistedListColumnWidth)
+        let sidebarMax = min(
+            SplitLayout.sidebarMax,
+            max(minimums.sidebar, available - minimums.list - minimums.preview)
+        )
+        let sidebar = clamp(requestedSidebar, minimums.sidebar, sidebarMax)
+        let listMax = max(minimums.list, available - sidebar - minimums.preview)
+        let list = clamp(requestedList, minimums.list, listMax)
+        let preview = max(minimums.preview, available - sidebar - list)
+        return ColumnWidths(sidebar: sidebar, list: list, preview: preview)
+    }
+
+    func columnMinimums(totalWidth: CGFloat) -> ColumnMinimums {
+        let available = max(totalWidth - (SplitLayout.dividerWidth * 2), 1)
+        let fullMinimum = SplitLayout.sidebarMin + SplitLayout.listMin + SplitLayout.previewMin
+        let compression = min(1, available / fullMinimum)
+        return ColumnMinimums(
+            sidebar: SplitLayout.sidebarMin * compression,
+            list: SplitLayout.listMin * compression,
+            preview: SplitLayout.previewMin * compression
+        )
+    }
+
+    func sidebarDividerDrag(totalWidth: CGFloat, widths: ColumnWidths) -> some Gesture {
+        DragGesture(minimumDistance: 1)
+            .onChanged { value in
+                let drag = activeSplitDrag ?? SplitDrag(
+                    sidebar: widths.sidebar,
+                    list: widths.list,
+                    preview: widths.preview
+                )
+                activeSplitDrag = drag
+
+                let minimums = columnMinimums(totalWidth: totalWidth)
+                let minimumDelta = minimums.sidebar - drag.sidebar
+                let maximumDelta = drag.list - minimums.list
+                let delta = clamp(value.translation.width, minimumDelta, maximumDelta)
+                liveSidebarColumnWidth = drag.sidebar + delta
+                liveListColumnWidth = drag.list - delta
+            }
+            .onEnded { _ in
+                persistLiveColumnWidths(totalWidth: totalWidth)
+            }
+    }
+
+    func previewDividerDrag(totalWidth: CGFloat, widths: ColumnWidths) -> some Gesture {
+        DragGesture(minimumDistance: 1)
+            .onChanged { value in
+                let drag = activeSplitDrag ?? SplitDrag(
+                    sidebar: widths.sidebar,
+                    list: widths.list,
+                    preview: widths.preview
+                )
+                activeSplitDrag = drag
+
+                let minimums = columnMinimums(totalWidth: totalWidth)
+                let minimumDelta = minimums.list - drag.list
+                let maximumDelta = drag.preview - minimums.preview
+                let delta = clamp(value.translation.width, minimumDelta, maximumDelta)
+                liveSidebarColumnWidth = drag.sidebar
+                liveListColumnWidth = drag.list + delta
+            }
+            .onEnded { _ in
+                persistLiveColumnWidths(totalWidth: totalWidth)
+            }
+    }
+
+    func persistLiveColumnWidths(totalWidth: CGFloat) {
+        let widths = columnWidths(totalWidth: totalWidth)
+        persistedSidebarColumnWidth = Double(widths.sidebar)
+        persistedListColumnWidth = Double(widths.list)
+        liveSidebarColumnWidth = nil
+        liveListColumnWidth = nil
+        activeSplitDrag = nil
+    }
+
+    func clamp(_ value: CGFloat, _ lower: CGFloat, _ upper: CGFloat) -> CGFloat {
+        min(max(value, lower), max(lower, upper))
+    }
+}
+
+private struct SplitDivider: View {
+    let label: String
+    let width: CGFloat
+    @State private var isHovering = false
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(width: width)
+            .overlay {
+                Capsule()
+                    .fill(isHovering ? Color.accentColor.opacity(0.55) : Color.secondary.opacity(0.28))
+                    .frame(width: isHovering ? 3 : 1)
+            }
+            .contentShape(Rectangle())
+            .help(label)
+            .accessibilityLabel(label)
+            .onHover { hovering in
+                if hovering && !isHovering {
+                    NSCursor.resizeLeftRight.push()
+                } else if !hovering && isHovering {
+                    NSCursor.pop()
+                }
+                isHovering = hovering
+            }
+            .onDisappear {
+                if isHovering {
+                    NSCursor.pop()
+                    isHovering = false
+                }
+            }
+    }
+}
+
+private struct CopyFeedbackToast: View {
+    let message: String
+
+    var body: some View {
+        Label(message, systemImage: "checkmark.circle.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.green.opacity(0.92), in: Capsule())
+            .shadow(radius: 8, y: 3)
+            .accessibilityLabel(message)
     }
 }

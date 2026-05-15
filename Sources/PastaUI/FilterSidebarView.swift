@@ -284,7 +284,7 @@ public struct FilterSidebarView: View {
         }
         .tag(selectionValue)
         .disabled(isDisabled)
-        .help(title)
+        .help("\(title) — \(count.formatted()) \(count == 1 ? "item" : "items")")
     }
 
     private func applySelection(_ selection: FilterSelection?) {

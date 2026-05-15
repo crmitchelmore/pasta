@@ -81,6 +81,10 @@ public struct ClipboardListView: View {
     private let filterType: ContentType?
     private let filterApp: String?
     @Binding private var showExtractedValuesOnly: Bool
+    private let hasClipboardHistory: Bool
+    private let isFiltered: Bool
+    private let onClearSearch: (() -> Void)?
+    private let onClearFilters: (() -> Void)?
     private let onCopy: (ClipboardEntry) -> Void
     private let onCopyMultiple: ([ClipboardEntry]) -> Void
     private let onPaste: (ClipboardEntry) -> Void
@@ -109,6 +113,18 @@ public struct ClipboardListView: View {
         entries.filter { bulkSelectedIDs.contains($0.id) }
     }
 
+    private var selectedEntriesInDisplayOrder: [ClipboardEntry] {
+        let ids = selectedEntryIDs.isEmpty ? Set([selectedEntryID].compactMap { $0 }) : selectedEntryIDs
+        return entries.filter { ids.contains($0.id) }
+    }
+
+    private var primarySelectedEntry: ClipboardEntry? {
+        if let selectedEntryID, let entry = entries.first(where: { $0.id == selectedEntryID }) {
+            return entry
+        }
+        return selectedEntriesInDisplayOrder.first
+    }
+
     public init(
         entries: [ClipboardEntry],
         selectedEntryID: Binding<UUID?> = .constant(nil),
@@ -117,6 +133,10 @@ public struct ClipboardListView: View {
         filterType: ContentType? = nil,
         filterApp: String? = nil,
         showExtractedValuesOnly: Binding<Bool> = .constant(false),
+        hasClipboardHistory: Bool? = nil,
+        isFiltered: Bool = false,
+        onClearSearch: (() -> Void)? = nil,
+        onClearFilters: (() -> Void)? = nil,
         onCopy: @escaping (ClipboardEntry) -> Void,
         onCopyMultiple: @escaping ([ClipboardEntry]) -> Void = { _ in },
         onPaste: @escaping (ClipboardEntry) -> Void,
@@ -133,6 +153,10 @@ public struct ClipboardListView: View {
         self.filterType = filterType
         self.filterApp = filterApp
         _showExtractedValuesOnly = showExtractedValuesOnly
+        self.hasClipboardHistory = hasClipboardHistory ?? !entries.isEmpty
+        self.isFiltered = isFiltered
+        self.onClearSearch = onClearSearch
+        self.onClearFilters = onClearFilters
         self.onCopy = onCopy
         self.onCopyMultiple = onCopyMultiple
         self.onPaste = onPaste
@@ -209,12 +233,7 @@ public struct ClipboardListView: View {
             }
             
             if entries.isEmpty {
-                ContentUnavailableView(
-                    "No clipboard history",
-                    systemImage: "doc.on.clipboard",
-                    description: Text("Copy anything to build your history.")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                emptyState
             } else {
                 listContent
             }
@@ -249,12 +268,45 @@ public struct ClipboardListView: View {
             }
         }
     }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        if hasClipboardHistory && isFiltered {
+            ContentUnavailableView {
+                Label("No Results", systemImage: "magnifyingglass")
+            } description: {
+                Text("No clipboard items match the current search or filters.")
+            } actions: {
+                HStack(spacing: 8) {
+                    if !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let onClearSearch {
+                        Button("Clear Search", action: onClearSearch)
+                            .buttonStyle(.bordered)
+                    }
+                    if let onClearFilters {
+                        Button("Clear Filters", action: onClearFilters)
+                            .buttonStyle(.borderedProminent)
+                    }
+                }
+                .controlSize(.small)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ContentUnavailableView(
+                "No clipboard history",
+                systemImage: "doc.on.clipboard",
+                description: Text("Copy anything to build your history.")
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
     
     @ViewBuilder
     private var listToolbar: some View {
         let bulkSelectedEntries = bulkSelectedEntriesInDisplayOrder
         let bulkSelectedCount = bulkSelectedEntries.count
-        let normalSelectedCount = selectedEntryIDs.count
+        let selectedEntries = selectedEntriesInDisplayOrder
+        let normalSelectedCount = selectedEntries.count
+        let primaryEntry = primarySelectedEntry
 
         Group {
             if isSelectionMode {
@@ -311,11 +363,57 @@ public struct ClipboardListView: View {
                 .controlSize(.small)
             } else {
                 HStack {
-                    Text(normalSelectedCount > 1 ? "\(normalSelectedCount) selected" : "\(entries.count) items")
+                    Text(normalSelectedCount > 0 ? "\(normalSelectedCount) selected" : "\(entries.count) items")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
                     Spacer()
+
+                    if !selectedEntries.isEmpty {
+                        Button {
+                            if selectedEntries.count > 1 {
+                                onCopyMultiple(selectedEntries)
+                            } else if let primaryEntry {
+                                onCopy(primaryEntry)
+                            }
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                        .help(selectedEntries.count > 1 ? "Copy selected items" : "Copy selected item")
+
+                        Button {
+                            if let primaryEntry {
+                                onPaste(primaryEntry)
+                            }
+                        } label: {
+                            Image(systemName: "arrowshape.turn.up.right")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(normalSelectedCount != 1 || primaryEntry == nil)
+                        .help("Paste selected item")
+
+                        if let onTogglePin, let primaryEntry, normalSelectedCount == 1 {
+                            Button {
+                                onTogglePin(primaryEntry)
+                            } label: {
+                                Image(systemName: primaryEntry.isPinned ? "pin.slash" : "pin")
+                            }
+                            .buttonStyle(.borderless)
+                            .help(primaryEntry.isPinned ? "Unpin selected item" : "Pin selected item")
+                        }
+
+                        Button(role: .destructive) {
+                            if let primaryEntry {
+                                deleteConfirmEntry = primaryEntry
+                            }
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(normalSelectedCount != 1 || primaryEntry == nil)
+                        .help("Delete selected item")
+                    }
 
                     // Show "Values Only" toggle when filtering by extractable type
                     if canShowValuesToggle {
@@ -326,7 +424,9 @@ public struct ClipboardListView: View {
                     }
 
                     Button {
-                        bulkSelectedIDs = selectedEntryIDs
+                        bulkSelectedIDs = selectedEntryIDs.isEmpty
+                            ? Set([selectedEntryID].compactMap { $0 })
+                            : selectedEntryIDs
                         isSelectionMode = true
                     } label: {
                         Label("Select", systemImage: "checkmark.circle")

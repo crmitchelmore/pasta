@@ -131,6 +131,7 @@ extension PanelContentView {
 
     func setSingleSelection(_ id: UUID) {
         selectedEntryID = id
+        lastSelectedEntryID = id
         selectedEntryIDs = [id]
     }
 

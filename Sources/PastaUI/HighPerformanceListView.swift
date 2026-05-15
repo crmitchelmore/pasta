@@ -368,6 +368,9 @@ private final class ClipboardCellView: NSTableCellView {
     private let syncIndicator = NSImageView()
     private let copyButton = NSButton()
     private var copyHandler: (() -> Void)?
+    private var currentRowID: UUID?
+    private var copiedRowID: UUID?
+    private var copiedFeedbackWorkItem: DispatchWorkItem?
     private var hoverTrackingArea: NSTrackingArea?
     
     override init(frame frameRect: NSRect) {
@@ -449,7 +452,7 @@ private final class ClipboardCellView: NSTableCellView {
         copyButton.target = self
         copyButton.action = #selector(copyButtonClicked(_:))
         copyButton.toolTip = "Copy to clipboard"
-        copyButton.isHidden = true
+        copyButton.alphaValue = 0
         copyButton.setContentHuggingPriority(.required, for: .horizontal)
         addSubview(copyButton)
         
@@ -462,7 +465,12 @@ private final class ClipboardCellView: NSTableCellView {
             
             titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
             titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: extractedIndicator.leadingAnchor, constant: -8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: copyButton.leadingAnchor, constant: -8),
+
+            copyButton.trailingAnchor.constraint(equalTo: extractedIndicator.leadingAnchor, constant: -6),
+            copyButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            copyButton.widthAnchor.constraint(equalToConstant: 22),
+            copyButton.heightAnchor.constraint(equalToConstant: 22),
             
             extractedIndicator.trailingAnchor.constraint(equalTo: largeIndicator.leadingAnchor, constant: -6),
             extractedIndicator.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
@@ -486,11 +494,6 @@ private final class ClipboardCellView: NSTableCellView {
             syncIndicator.widthAnchor.constraint(equalToConstant: 12),
             syncIndicator.heightAnchor.constraint(equalToConstant: 10),
             syncIndicator.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
-
-            copyButton.trailingAnchor.constraint(equalTo: largeIndicator.leadingAnchor, constant: -6),
-            copyButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            copyButton.widthAnchor.constraint(equalToConstant: 22),
-            copyButton.heightAnchor.constraint(equalToConstant: 22),
         ])
     }
 
@@ -510,15 +513,32 @@ private final class ClipboardCellView: NSTableCellView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        copyButton.isHidden = false
+        copyButton.alphaValue = 1
     }
 
     override func mouseExited(with event: NSEvent) {
-        copyButton.isHidden = true
+        if copiedRowID == nil {
+            copyButton.alphaValue = 0
+        }
     }
 
     @objc private func copyButtonClicked(_ sender: NSButton) {
         copyHandler?()
+        guard let currentRowID else { return }
+        copiedFeedbackWorkItem?.cancel()
+        copiedRowID = currentRowID
+        setCopyButtonCopied(true)
+
+        let workItem = DispatchWorkItem { [weak self, currentRowID] in
+            guard let self, self.copiedRowID == currentRowID else { return }
+            self.copiedRowID = nil
+            self.setCopyButtonCopied(false)
+            if self.hoverTrackingArea != nil, !self.bounds.contains(self.convert(self.window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)) {
+                self.copyButton.alphaValue = 0
+            }
+        }
+        copiedFeedbackWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: workItem)
     }
 
     func configure(with row: ClipboardRowData, onCopy: @escaping () -> Void) {
@@ -527,6 +547,14 @@ private final class ClipboardCellView: NSTableCellView {
     }
     
     func configure(with row: ClipboardRowData) {
+        currentRowID = row.id
+        if copiedRowID != row.id {
+            copiedFeedbackWorkItem?.cancel()
+            copiedRowID = nil
+            setCopyButtonCopied(false)
+            copyButton.alphaValue = 0
+        }
+
         // Icon (or color swatch)
         if let swatch = row.swatchColor {
             iconView.image = nil
@@ -572,6 +600,16 @@ private final class ClipboardCellView: NSTableCellView {
         // Sync indicator
         syncIndicator.isHidden = !row.isSynced
     }
+
+    private func setCopyButtonCopied(_ copied: Bool) {
+        copyButton.image = NSImage(
+            systemSymbolName: copied ? "checkmark.circle.fill" : "doc.on.doc",
+            accessibilityDescription: copied ? "Copied" : "Copy"
+        )
+        copyButton.contentTintColor = copied ? .systemGreen : .secondaryLabelColor
+        copyButton.toolTip = copied ? "Copied" : "Copy to clipboard"
+        copyButton.alphaValue = copied ? 1 : copyButton.alphaValue
+    }
 }
 
 // MARK: - Section Header Cell
@@ -610,4 +648,3 @@ private final class ClipboardSectionHeaderView: NSTableCellView {
 // MARK: - Relative Date Formatter (cached)
 
 // Now provided by Formatting.swift.
-
