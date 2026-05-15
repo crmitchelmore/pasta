@@ -118,7 +118,7 @@ struct PanelContentView: View {
 
     @ViewBuilder
     private var mainContentView: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HSplitView {
             FilterSidebarView(
                 entries: backgroundService.entries,
                 effectiveTypeCounts: preloadedEffectiveTypeCounts,
@@ -128,7 +128,7 @@ struct PanelContentView: View {
                 selectedURLDomain: $urlDomainFilter,
                 selection: $filterSelection
             )
-            .frame(width: 180)
+            .frame(minWidth: 160, idealWidth: 200, maxWidth: 360)
             .accessibilitySortPriority(3)
 
             ClipboardListView(
@@ -146,14 +146,14 @@ struct PanelContentView: View {
                 onOpenURL: { entry in _ = openEntryURL(entry) },
                 onTogglePin: { entry in togglePin(entry) }
             )
-            .frame(width: 320)
+            .frame(minWidth: 240, idealWidth: 320)
             .focusable()
             .focused($listFocused)
             .focusEffectDisabled()
             .accessibilitySortPriority(2)
 
             PreviewPanelView(entry: displayedEntries.first(where: { $0.id == selectedEntryID }))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilitySortPriority(1)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

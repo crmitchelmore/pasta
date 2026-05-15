@@ -198,7 +198,10 @@ public struct HighPerformanceListView: NSViewRepresentable {
                 cell.identifier = Self.cellIdentifier
             }
 
-            cell.configure(with: rowData)
+            let id = rowData.id
+            cell.configure(with: rowData) { [weak self] in
+                self?.parent.onCopy(id)
+            }
             return cell
         }
 
@@ -363,6 +366,9 @@ private final class ClipboardCellView: NSTableCellView {
     private let largeIndicator = NSImageView()
     private let extractedIndicator = NSImageView()
     private let syncIndicator = NSImageView()
+    private let copyButton = NSButton()
+    private var copyHandler: (() -> Void)?
+    private var hoverTrackingArea: NSTrackingArea?
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -432,6 +438,20 @@ private final class ClipboardCellView: NSTableCellView {
         syncIndicator.setContentHuggingPriority(.required, for: .horizontal)
         syncIndicator.toolTip = "Synced to iCloud"
         addSubview(syncIndicator)
+
+        // Copy button (revealed on hover)
+        copyButton.translatesAutoresizingMaskIntoConstraints = false
+        copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy")
+        copyButton.bezelStyle = .accessoryBarAction
+        copyButton.isBordered = false
+        copyButton.imagePosition = .imageOnly
+        copyButton.contentTintColor = .secondaryLabelColor
+        copyButton.target = self
+        copyButton.action = #selector(copyButtonClicked(_:))
+        copyButton.toolTip = "Copy to clipboard"
+        copyButton.isHidden = true
+        copyButton.setContentHuggingPriority(.required, for: .horizontal)
+        addSubview(copyButton)
         
         // Layout
         NSLayoutConstraint.activate([
@@ -466,7 +486,44 @@ private final class ClipboardCellView: NSTableCellView {
             syncIndicator.widthAnchor.constraint(equalToConstant: 12),
             syncIndicator.heightAnchor.constraint(equalToConstant: 10),
             syncIndicator.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+
+            copyButton.trailingAnchor.constraint(equalTo: largeIndicator.leadingAnchor, constant: -6),
+            copyButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            copyButton.widthAnchor.constraint(equalToConstant: 22),
+            copyButton.heightAnchor.constraint(equalToConstant: 22),
         ])
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = hoverTrackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        copyButton.isHidden = false
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        copyButton.isHidden = true
+    }
+
+    @objc private func copyButtonClicked(_ sender: NSButton) {
+        copyHandler?()
+    }
+
+    func configure(with row: ClipboardRowData, onCopy: @escaping () -> Void) {
+        copyHandler = onCopy
+        configure(with: row)
     }
     
     func configure(with row: ClipboardRowData) {
@@ -494,6 +551,7 @@ private final class ClipboardCellView: NSTableCellView {
         
         // Title - fixed layout, no movement
         titleLabel.stringValue = row.previewText
+        titleLabel.toolTip = row.previewText
         
         // Badge
         badgeView.stringValue = " \(row.contentType.badgeTitle) "
