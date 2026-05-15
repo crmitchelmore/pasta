@@ -105,6 +105,7 @@ public struct FilterSidebarView: View {
                             sidebarRow(
                                 title: item.displayName,
                                 systemImageName: "app",
+                                sourceAppIdentifier: item.app,
                                 count: item.count,
                                 selectionValue: .sourceApp(item.app)
                             )
@@ -220,28 +221,13 @@ public struct FilterSidebarView: View {
                 if a.value == b.value { return a.key < b.key }
                 return a.value > b.value
             }
-            .map { (app: $0.key, displayName: appDisplayName($0.key), count: $0.value) }
+            .map { (app: $0.key, displayName: $0.key.appDisplayName, count: $0.value) }
     }
     
     private var hasHiddenApps: Bool {
         sortedSourceApps.contains { $0.count == 0 }
     }
     
-    private func appDisplayName(_ bundleId: String) -> String {
-        if bundleId == "Unknown" || bundleId.isEmpty {
-            return "Unknown"
-        }
-        if bundleId == "Continuity" {
-            return "📱 Continuity"
-        }
-        // Extract app name from bundle identifier
-        let parts = bundleId.split(separator: ".")
-        if let last = parts.last {
-            return String(last).capitalized
-        }
-        return bundleId
-    }
-
     private var domainCounts: [String: Int] {
         if let domainCountsOverride {
             return domainCountsOverride
@@ -262,6 +248,7 @@ public struct FilterSidebarView: View {
     private func sidebarRow(
         title: String,
         systemImageName: String,
+        sourceAppIdentifier: String? = nil,
         count: Int,
         tint: Color? = nil,
         selectionValue: FilterSelection
@@ -279,8 +266,12 @@ public struct FilterSidebarView: View {
                 }
             }
         } icon: {
-            Image(systemName: systemImageName)
-                .foregroundStyle(tint ?? .secondary)
+            if let sourceAppIdentifier {
+                SourceAppIconView(sourceApp: sourceAppIdentifier, size: 16)
+            } else {
+                Image(systemName: systemImageName)
+                    .foregroundStyle(tint ?? .secondary)
+            }
         }
         .tag(selectionValue)
         .disabled(isDisabled)

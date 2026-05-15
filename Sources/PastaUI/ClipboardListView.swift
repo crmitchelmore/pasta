@@ -40,6 +40,7 @@ private struct RowData: Equatable, Identifiable {
     let id: UUID
     let previewText: String
     let contentType: ContentType
+    let sourceAppIdentifier: String?
     let sourceAppName: String?
     let timestamp: Date
     let copyCount: Int
@@ -53,6 +54,7 @@ private struct RowData: Equatable, Identifiable {
         let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
         self.previewText = trimmed.isEmpty ? "(empty)" : String(trimmed.prefix(200))
         self.contentType = entry.contentType
+        self.sourceAppIdentifier = entry.sourceApp
         self.sourceAppName = entry.sourceApp?.appDisplayName
         self.timestamp = entry.timestamp
         self.copyCount = entry.copyCount
@@ -680,9 +682,12 @@ private struct SelectionModeRowView: View {
                     ContentTypeBadge(type: row.contentType)
                     
                     if let appName = row.sourceAppName {
-                        Text(appName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        HStack(spacing: 3) {
+                            SourceAppIconView(sourceApp: row.sourceAppIdentifier, size: 12)
+                            Text(appName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     Text(row.timestamp, style: .relative)

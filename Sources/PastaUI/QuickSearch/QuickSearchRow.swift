@@ -71,9 +71,14 @@ struct QuickSearchRow: View {
                             Text("•")
                                 .foregroundStyle(.tertiary)
                         }
-                        Text(segment)
-                            .font(.caption2)
-                            .foregroundStyle(idx < secondaryCount ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+                        HStack(spacing: 3) {
+                            if idx == 1, row.sourceAppIdentifier != nil {
+                                SourceAppIconView(sourceApp: row.sourceAppIdentifier, size: 11)
+                            }
+                            Text(segment)
+                                .font(.caption2)
+                                .foregroundStyle(idx < secondaryCount ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
+                        }
                     }
                 }
             }
@@ -114,6 +119,7 @@ struct QuickSearchRow: View {
 
             // App name (abbreviated)
             if let app = row.sourceAppName {
+                SourceAppIconView(sourceApp: row.sourceAppIdentifier, size: 12)
                 Text(app.prefix(6))
                     .font(.caption2)
                     .foregroundStyle(.secondary)

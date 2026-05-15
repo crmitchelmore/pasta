@@ -174,10 +174,13 @@ public struct PreviewPanelView: View {
                 }
 
                 if let source = entry.sourceApp, !source.isEmpty {
-                    Text(source)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        SourceAppIconView(sourceApp: source, size: 13)
+                        Text(source.appDisplayName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
         }

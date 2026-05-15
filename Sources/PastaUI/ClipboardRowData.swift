@@ -19,6 +19,7 @@ public struct ClipboardRowData: Equatable {
     public let id: UUID
     public let previewText: String
     public let contentType: ContentType
+    public let sourceAppIdentifier: String?
     public let sourceAppName: String?
     public let timestamp: Date
     public let copyCount: Int
@@ -64,6 +65,7 @@ public struct ClipboardRowData: Equatable {
             self.previewText = baseText
         }
         self.contentType = entry.contentType
+        self.sourceAppIdentifier = entry.sourceApp
         self.sourceAppName = entry.sourceApp?.appDisplayName
         self.timestamp = entry.timestamp
         self.copyCount = entry.copyCount
@@ -128,6 +130,7 @@ public struct ClipboardRowData: Equatable {
         self.id = UUID()
         self.previewText = ""
         self.contentType = .text
+        self.sourceAppIdentifier = nil
         self.sourceAppName = nil
         self.timestamp = .distantPast
         self.copyCount = 0

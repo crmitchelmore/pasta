@@ -363,6 +363,7 @@ private final class ClipboardCellView: NSTableCellView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let metadataLabel = NSTextField(labelWithString: "")
     private let badgeView = NSTextField(labelWithString: "")
+    private let sourceAppIconView = NSImageView()
     private let largeIndicator = NSImageView()
     private let extractedIndicator = NSImageView()
     private let syncIndicator = NSImageView()
@@ -372,6 +373,7 @@ private final class ClipboardCellView: NSTableCellView {
     private var copiedRowID: UUID?
     private var copiedFeedbackWorkItem: DispatchWorkItem?
     private var hoverTrackingArea: NSTrackingArea?
+    private var sourceAppIconWidthConstraint: NSLayoutConstraint?
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -418,6 +420,12 @@ private final class ClipboardCellView: NSTableCellView {
         badgeView.alignment = .center
         badgeView.setContentHuggingPriority(.required, for: .horizontal)
         addSubview(badgeView)
+
+        // Source app icon
+        sourceAppIconView.translatesAutoresizingMaskIntoConstraints = false
+        sourceAppIconView.imageScaling = .scaleProportionallyUpOrDown
+        sourceAppIconView.setContentHuggingPriority(.required, for: .horizontal)
+        addSubview(sourceAppIconView)
         
         // Extracted indicator (link icon)
         extractedIndicator.translatesAutoresizingMaskIntoConstraints = false
@@ -457,6 +465,8 @@ private final class ClipboardCellView: NSTableCellView {
         addSubview(copyButton)
         
         // Layout
+        let sourceIconWidth = sourceAppIconView.widthAnchor.constraint(equalToConstant: 0)
+        sourceAppIconWidthConstraint = sourceIconWidth
         NSLayoutConstraint.activate([
             iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -485,8 +495,13 @@ private final class ClipboardCellView: NSTableCellView {
             badgeView.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             badgeView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
             badgeView.heightAnchor.constraint(equalToConstant: 18),
+
+            sourceAppIconView.leadingAnchor.constraint(equalTo: badgeView.trailingAnchor, constant: 8),
+            sourceAppIconView.centerYAnchor.constraint(equalTo: badgeView.centerYAnchor),
+            sourceIconWidth,
+            sourceAppIconView.heightAnchor.constraint(equalToConstant: 14),
             
-            metadataLabel.leadingAnchor.constraint(equalTo: badgeView.trailingAnchor, constant: 8),
+            metadataLabel.leadingAnchor.constraint(equalTo: sourceAppIconView.trailingAnchor, constant: 4),
             metadataLabel.centerYAnchor.constraint(equalTo: badgeView.centerYAnchor),
             
             syncIndicator.leadingAnchor.constraint(equalTo: metadataLabel.trailingAnchor, constant: 6),
@@ -586,6 +601,8 @@ private final class ClipboardCellView: NSTableCellView {
         let tint = NSColor(row.contentType.tint)
         badgeView.textColor = tint
         badgeView.backgroundColor = tint.withAlphaComponent(0.15)
+
+        configureSourceAppIcon(row.sourceAppIdentifier)
         
         // Metadata (derived from shared ClipboardRowData computed property
         // so this never drifts from the QuickSearch row).
@@ -609,6 +626,29 @@ private final class ClipboardCellView: NSTableCellView {
         copyButton.contentTintColor = copied ? .systemGreen : .secondaryLabelColor
         copyButton.toolTip = copied ? "Copied" : "Copy to clipboard"
         copyButton.alphaValue = copied ? 1 : copyButton.alphaValue
+    }
+
+    private func configureSourceAppIcon(_ sourceApp: String?) {
+        guard let sourceApp, !sourceApp.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            sourceAppIconView.image = nil
+            sourceAppIconView.isHidden = true
+            sourceAppIconWidthConstraint?.constant = 0
+            return
+        }
+
+        sourceAppIconWidthConstraint?.constant = 14
+        sourceAppIconView.isHidden = false
+        if let image = SourceAppIconResolver.image(for: sourceApp) {
+            sourceAppIconView.image = image
+            sourceAppIconView.contentTintColor = nil
+        } else {
+            sourceAppIconView.image = NSImage(
+                systemSymbolName: SourceAppIconResolver.fallbackSystemImageName(for: sourceApp),
+                accessibilityDescription: sourceApp.appDisplayName
+            )
+            sourceAppIconView.contentTintColor = .secondaryLabelColor
+        }
+        sourceAppIconView.toolTip = sourceApp.appDisplayName
     }
 }
 

@@ -22,9 +22,12 @@ struct QuickSearchPreviewPanel: View {
 
                     HStack(spacing: 6) {
                         if let app = entry.sourceApp?.appDisplayName {
-                            Text(app)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            HStack(spacing: 3) {
+                                SourceAppIconView(sourceApp: entry.sourceApp, size: 12)
+                                Text(app)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                             Text("•")
                                 .foregroundStyle(.tertiary)
                         }

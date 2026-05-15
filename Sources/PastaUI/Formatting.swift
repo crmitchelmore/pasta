@@ -23,10 +23,17 @@ extension String {
     /// (e.g. "com.apple.Safari" -> "Safari"). Returns the input unchanged if it
     /// has no dots.
     var appDisplayName: String {
-        let parts = self.split(separator: ".")
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "Unknown" {
+            return "Unknown"
+        }
+        if trimmed == "Continuity" {
+            return "Continuity"
+        }
+        let parts = trimmed.split(separator: ".")
         if let last = parts.last {
             return String(last).capitalized
         }
-        return self
+        return trimmed
     }
 }
