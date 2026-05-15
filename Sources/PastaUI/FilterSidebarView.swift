@@ -210,9 +210,9 @@ public struct FilterSidebarView: View {
 
     private var sourceAppCounts: [String: Int] {
         if let sourceAppCountsOverride {
-            return sourceAppCountsOverride
+            return SourceAppDisplay.groupedCounts(sourceAppCountsOverride)
         }
-        return fallbackSourceAppCounts
+        return SourceAppDisplay.groupedCounts(fallbackSourceAppCounts)
     }
     
     private var sortedSourceApps: [(app: String, displayName: String, count: Int)] {
@@ -221,7 +221,7 @@ public struct FilterSidebarView: View {
                 if a.value == b.value { return a.key < b.key }
                 return a.value > b.value
             }
-            .map { (app: $0.key, displayName: $0.key.appDisplayName, count: $0.value) }
+            .map { (app: $0.key, displayName: SourceAppDisplay.displayName(for: $0.key), count: $0.value) }
     }
     
     private var hasHiddenApps: Bool {

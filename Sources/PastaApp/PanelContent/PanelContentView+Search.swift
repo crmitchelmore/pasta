@@ -94,7 +94,7 @@ extension PanelContentView {
                     out[type] = matches
                 }
 
-                return (out, counts, sourceAppCounts, domainCounts)
+                return (out, counts, SourceAppDisplay.groupedCounts(sourceAppCounts), domainCounts)
             }.value
 
             await MainActor.run {
@@ -161,7 +161,7 @@ extension PanelContentView {
 
         if !sourceFilter.isEmpty {
             out = out.filter { entry in
-                entry.sourceApp?.localizedCaseInsensitiveContains(sourceFilter) == true
+                SourceAppDisplay.matches(entry.sourceApp, filter: sourceFilter)
             }
         }
 
