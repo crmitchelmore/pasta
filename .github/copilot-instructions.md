@@ -104,6 +104,15 @@ If counts/derived data depend on `entries`, precompute once when entries change
 For large datasets (5k+), also preload first-page results per filter (e.g. per ContentType)
 off-main-thread so switching filters is instant.
 
+### Source App Identity
+When displaying or filtering source apps, canonicalise source identifiers before grouping:
+- Treat bundle identifiers and display names for the same installed app as one identity.
+- Keep every raw alias behind that identity so selecting a single sidebar row filters all matching entries.
+- Use one shared resolver for app display names and icons across the sidebar, list rows, preview headers, and Quick Search, with fallbacks for imported names and Continuity.
+
+### Copy Affordances Across Content Surfaces
+When adding copy affordances for clipboard entries, cover both the list row and the preview/content pane. Users expect easy copying from the full content view as well as from each item in the list.
+
 ### Pathological Metadata Resilience
 When entries contain large detector metadata (hundreds/thousands of matches), preserve interactivity first:
 - Never do unbounded metadata parsing/rendering on the main thread.
