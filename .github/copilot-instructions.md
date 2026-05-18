@@ -104,6 +104,12 @@ If counts/derived data depend on `entries`, precompute once when entries change
 For large datasets (5k+), also preload first-page results per filter (e.g. per ContentType)
 off-main-thread so switching filters is instant.
 
+### Initial History Load Performance
+For large clipboard histories, preserve perceived launch speed:
+- Publish a small first page immediately (currently 200 recent entries), then load the remaining history in bounded background pages.
+- Show lightweight loading/progress feedback in the main window while history is still loading.
+- Avoid duplicate startup refreshes between app launch and main-panel appearance.
+
 ### Source App Identity
 When displaying or filtering source apps, canonicalise source identifiers before grouping:
 - Treat bundle identifiers and display names for the same installed app as one identity.
