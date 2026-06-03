@@ -1,0 +1,74 @@
+# Candidate conformance profile for Pasta.
+# Advisory pilot artefact only: review and ratify before treating as adopted.
+version: 1
+status: candidate
+projectSize: medium
+
+philosophies:
+  adopt:
+    - id: information-hiding
+      weight: primary
+      reason: "Keep detector, core, UI, sync, and app concerns behind explicit module seams."
+    - id: design-for-production
+      weight: primary
+      reason: "Clipboard privacy, detector performance, CI, and release correctness are production-critical."
+    - id: classicist-tdd
+      weight: secondary
+      reason: "Existing tests favour real detector/core behaviours and performance checks."
+    - id: human-centered-design
+      weight: secondary
+      reason: "Clipboard UX should remain predictable, fast, and privacy-preserving."
+  reject: []
+
+patterns:
+  high:
+    adopt:
+      - id: modular-monolith
+        enforcement: advise
+        reason: "Swift package modules separate PastaCore, PastaDetectors, PastaUI, PastaSync, and PastaApp."
+      - id: layered-architecture
+        enforcement: advise
+        reason: "Core/domain-ish detector logic, UI, sync, and app surfaces have distinct responsibilities."
+  medium:
+    adopt:
+      - id: strategy
+        enforcement: warn
+        reason: "Detectors and detector configuration are central extension points."
+      - id: specification
+        enforcement: advise
+        reason: "Detector configuration expresses matching rules and strictness policies."
+      - id: factory-method
+        enforcement: advise
+        reason: "Detector/config construction should stay centralised rather than duplicated."
+      - id: dependency-injection
+        enforcement: advise
+        reason: "UI/app/sync surfaces should receive core services explicitly."
+  low:
+    adopt:
+      - id: guard-clause
+        enforcement: advise
+        reason: "Detector and sync paths should reject unsafe or unsupported states early."
+      - id: arrange-act-assert
+        enforcement: advise
+        reason: "Tests should keep detector behaviours and performance expectations reviewable."
+  ban: []
+
+practicePatterns:
+  adopt:
+    - id: privacy-by-default-ux
+      enforcement: advise
+      reason: "Clipboard history is sensitive; privacy should be the default product posture."
+    - id: keyboard-shortcuts
+      enforcement: advise
+      reason: "Power-user clipboard workflows depend on keyboard efficiency."
+    - id: command-palette
+      enforcement: advise
+      reason: "Fast recall and action over clipboard history benefits from command-style interaction."
+    - id: system-status-visibility
+      enforcement: advise
+      reason: "Users need clear sync, permission, detector, and failure state feedback."
+
+phases:
+  write: { enabled: true, mode: advise, failMode: open, llm: false, block: false, maxFindings: 1 }
+  pr: { enabled: true, llm: true, failOn: block }
+  later: { enabled: true }
