@@ -1,0 +1,63 @@
+# Candidate conformance evidence map for Pasta.
+# Best-effort advisory evidence; not an adopted contract until ratified.
+version: 1
+meta:
+  detector: human-review-plus-codebase-onboarding
+  limitations:
+    - Based on repository inspection, not a full generated conformance onboard run.
+    - SwiftUI and SwiftPM architectural checks need native validation before any rule can block.
+patterns:
+  - id: modular-monolith
+    altitude: high
+    confidence: medium
+    evidence:
+      - "Swift package modules split core, detector, UI, sync, and app responsibilities."
+    anchors:
+      - Package.swift
+      - Sources/PastaCore/
+      - Sources/PastaDetectors/
+      - Sources/PastaUI/
+      - Sources/PastaSync/
+      - Sources/PastaApp/
+  - id: strategy
+    altitude: medium
+    confidence: high
+    evidence:
+      - "Detector configuration and detector evaluator code are central extension points for matching behaviour."
+    anchors:
+      - Sources/PastaDetectors/DetectorConfiguration.swift
+      - Sources/PastaDetectors/RegexPerformanceEvaluator.swift
+      - Sources/PastaDetectors/PastaDetectors.swift
+  - id: specification
+    altitude: medium
+    confidence: medium
+    evidence:
+      - "Detector strictness and custom detector configuration encode matching policies."
+    anchors:
+      - Sources/PastaDetectors/DetectorConfiguration.swift
+  - id: arrange-act-assert
+    altitude: low
+    confidence: medium
+    evidence:
+      - "Core and detector tests exercise detector correctness and performance expectations."
+    anchors:
+      - Tests/PastaCoreTests/
+      - Tests/PastaDetectorsTests/
+capabilities:
+  - id: detector-configuration
+    title: Detector configuration
+    status: canonical-bypassed
+    canonical: Sources/PastaDetectors/DetectorConfiguration.swift
+    usedIn: 3
+    sample:
+      - Sources/PastaDetectors/
+      - Tests/PastaDetectorsTests/
+      - README.md
+  - id: regex-performance
+    title: Regex performance evaluation
+    status: canonical-bypassed
+    canonical: Sources/PastaDetectors/RegexPerformanceEvaluator.swift
+    usedIn: 2
+    sample:
+      - Tests/PastaDetectorsTests/
+      - .github/workflows/ci.yml

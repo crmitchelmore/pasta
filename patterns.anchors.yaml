@@ -1,0 +1,28 @@
+# Candidate canonical anchors for Pasta. Review before trusting.
+version: 1
+anchors:
+  - symbol: Detector configuration
+    path: Sources/PastaDetectors/DetectorConfiguration.swift
+    confidence: high
+    reasons:
+      - Central home for detector strictness and custom detector configuration.
+  - symbol: Regex performance evaluation
+    path: Sources/PastaDetectors/RegexPerformanceEvaluator.swift
+    confidence: high
+    reasons:
+      - Canonical performance guard for regex detector behaviour.
+  - symbol: Detector module
+    path: Sources/PastaDetectors/PastaDetectors.swift
+    confidence: medium
+    reasons:
+      - Detector package entry point.
+  - symbol: Project conventions
+    path: .github/copilot-instructions.md
+    confidence: medium
+    reasons:
+      - Existing engineering and performance guidance for agents.
+  - symbol: Sync design notes
+    path: Sources/PastaSync/README.md
+    confidence: medium
+    reasons:
+      - Canonical CloudKit/iCloud sync constraints and conventions.
