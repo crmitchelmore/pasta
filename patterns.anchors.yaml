@@ -2,7 +2,7 @@
 version: 1
 anchors:
   - symbol: Detector configuration
-    path: Sources/PastaCore/DetectorConfiguration.swift
+    path: Sources/PastaDetectors/DetectorConfiguration.swift
     confidence: high
     reasons:
       - Central home for detector strictness and custom detector configuration.

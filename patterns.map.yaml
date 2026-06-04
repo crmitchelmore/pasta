@@ -25,7 +25,7 @@ patterns:
     evidence:
       - "Detector configuration and detector evaluator code are central extension points for matching behaviour."
     anchors:
-      - Sources/PastaCore/DetectorConfiguration.swift
+      - Sources/PastaDetectors/DetectorConfiguration.swift
       - Sources/PastaDetectors/RegexPerformanceEvaluator.swift
       - Sources/PastaDetectors/PastaDetectors.swift
   - id: specification
@@ -34,7 +34,7 @@ patterns:
     evidence:
       - "Detector strictness and custom detector configuration encode matching policies."
     anchors:
-      - Sources/PastaCore/DetectorConfiguration.swift
+      - Sources/PastaDetectors/DetectorConfiguration.swift
   - id: arrange-act-assert
     altitude: low
     confidence: medium
@@ -47,7 +47,7 @@ capabilities:
   - id: detector-configuration
     title: Detector configuration
     status: canonical-bypassed
-    canonical: Sources/PastaCore/DetectorConfiguration.swift
+    canonical: Sources/PastaDetectors/DetectorConfiguration.swift
     usedIn: 3
     sample:
       - Sources/PastaDetectors/
