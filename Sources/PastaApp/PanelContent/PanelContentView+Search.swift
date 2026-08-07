@@ -8,6 +8,16 @@ import PastaUI
 extension PanelContentView {
     enum Preload {
         static let limit = 200
+        /// Coalesce bursts of copies so a rapid series of clipboard changes
+        /// triggers one full rescan instead of one per emission.
+        static let debounceNanoseconds: UInt64 = 250_000_000
+    }
+
+    struct PreloadResult: Sendable {
+        var entriesByType: [ContentType?: [ClipboardEntry]]
+        var effectiveTypeCounts: [ContentType: Int]
+        var sourceAppCounts: [String: Int]
+        var domainCounts: [String: Int]
     }
 
     func schedulePreload(for entries: [ClipboardEntry]) {
@@ -15,7 +25,10 @@ extension PanelContentView {
         let snapshot = entries
 
         preloadTask = Task {
-            let result = await Task.detached(priority: .utility) { () -> (entriesByType: [ContentType?: [ClipboardEntry]], effectiveTypeCounts: [ContentType: Int], sourceAppCounts: [String: Int], domainCounts: [String: Int]) in
+            try? await Task.sleep(nanoseconds: Preload.debounceNanoseconds)
+            guard !Task.isCancelled else { return }
+
+            let result = await withCancellableDetachedTask(priority: .utility) { () -> PreloadResult? in
                 func filePathIsImage(_ metadata: String?) -> Bool {
                     guard let meta = metadata,
                           let data = meta.data(using: .utf8),
@@ -36,7 +49,18 @@ extension PanelContentView {
                 var domainCounts: [String: Int] = [:]
                 let urlDetector = URLDetector()
 
+                let extractableTypes = MetadataParser.extractableTypes
+                var buckets: [ContentType: [ClipboardEntry]] = [:]
+                for type in ContentType.allCases {
+                    buckets[type] = []
+                }
+
+                // Single pass builds counts and every per-type bucket at once;
+                // the previous per-type passes rescanned the whole history once
+                // per content type.
                 for entry in snapshot {
+                    guard !Task.isCancelled else { return nil }
+
                     counts[entry.contentType, default: 0] += 1
                     let app = entry.sourceApp ?? "Unknown"
                     sourceAppCounts[app, default: 0] += 1
@@ -46,56 +70,45 @@ extension PanelContentView {
                             domainCounts[domain, default: 0] += 1
                         }
                     }
-                }
 
-                let imageFilePathCount = snapshot.reduce(0) { acc, entry in
-                    guard entry.contentType == .filePath else { return acc }
-                    return acc + (filePathIsImage(entry.metadata) ? 1 : 0)
-                }
-
-                if imageFilePathCount > 0 {
-                    counts[.image, default: 0] += imageFilePathCount
-                }
-
-                for type in MetadataParser.extractableTypes {
-                    var containsCount = 0
-                    for entry in snapshot {
-                        guard entry.contentType != type else { continue }
-                        if MetadataParser.containsType(type, in: entry.metadata) {
-                            containsCount += 1
-                        }
+                    if entry.contentType == .filePath, filePathIsImage(entry.metadata) {
+                        counts[.image, default: 0] += 1
                     }
 
-                    if containsCount > 0 {
-                        counts[type, default: 0] += containsCount
+                    if !extractableTypes.contains(entry.contentType),
+                       buckets[entry.contentType, default: []].count < Preload.limit {
+                        buckets[entry.contentType, default: []].append(entry)
+                    }
+
+                    for type in extractableTypes {
+                        let isPrimary = entry.contentType == type
+                        let containsType = isPrimary || MetadataParser.containsType(type, in: entry.metadata)
+                        guard containsType else { continue }
+
+                        if !isPrimary {
+                            counts[type, default: 0] += 1
+                        }
+                        if buckets[type, default: []].count < Preload.limit {
+                            buckets[type, default: []].append(entry)
+                        }
                     }
                 }
 
-                for type in ContentType.allCases {
-                    var matches: [ClipboardEntry] = []
-                    matches.reserveCapacity(Preload.limit)
+                guard !Task.isCancelled else { return nil }
 
-                    if MetadataParser.extractableTypes.contains(type) {
-                        for entry in snapshot {
-                            if entry.containsType(type) {
-                                matches.append(entry)
-                                if matches.count >= Preload.limit { break }
-                            }
-                        }
-                    } else {
-                        for entry in snapshot {
-                            if entry.contentType == type {
-                                matches.append(entry)
-                                if matches.count >= Preload.limit { break }
-                            }
-                        }
-                    }
-
+                for (type, matches) in buckets {
                     out[type] = matches
                 }
 
-                return (out, counts, SourceAppDisplay.groupedCounts(sourceAppCounts), domainCounts)
-            }.value
+                return PreloadResult(
+                    entriesByType: out,
+                    effectiveTypeCounts: counts,
+                    sourceAppCounts: SourceAppDisplay.groupedCounts(sourceAppCounts),
+                    domainCounts: domainCounts
+                )
+            }
+
+            guard !Task.isCancelled, let result else { return }
 
             await MainActor.run {
                 preloadedEntriesByType = result.entriesByType
@@ -221,26 +234,29 @@ extension PanelContentView {
             searchContentType = typeFilter
         }
 
-        searchTask = Task(priority: .userInitiated) {
-            let result: [ClipboardEntry]
-            do {
-                let matches = try service.search(
-                    query: query,
-                    contentType: searchContentType,
-                    limit: Preload.limit,
-                    pinnedOnly: pinnedOnly
-                )
-                guard !Task.isCancelled else { return }
-                result = Self.filterEntries(
-                    matches.map { $0.entry },
-                    contentTypeFilter: typeFilter,
-                    sourceFilter: sourceFilter,
-                    urlDomainFilter: domainFilter,
-                    pinnedOnly: pinnedOnly,
-                    limit: limit
-                )
-            } catch {
-                result = []
+        searchTask = Task {
+            // The FTS read plus row hydration and filtering must stay off the
+            // main actor; a plain `Task` here would inherit it.
+            let result = await withCancellableDetachedTask(priority: .userInitiated) { () -> [ClipboardEntry] in
+                do {
+                    let matches = try service.search(
+                        query: query,
+                        contentType: searchContentType,
+                        limit: Preload.limit,
+                        pinnedOnly: pinnedOnly
+                    )
+                    guard !Task.isCancelled else { return [] }
+                    return Self.filterEntries(
+                        matches.map { $0.entry },
+                        contentTypeFilter: typeFilter,
+                        sourceFilter: sourceFilter,
+                        urlDomainFilter: domainFilter,
+                        pinnedOnly: pinnedOnly,
+                        limit: limit
+                    )
+                } catch {
+                    return []
+                }
             }
 
             guard !Task.isCancelled else { return }
