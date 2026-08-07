@@ -133,6 +133,53 @@ final class DeleteServiceTests: XCTestCase {
         XCTAssertEqual(try db.fetchAll().count, 0)
     }
 
+    func testBulkDeleteRemovesEntriesAndCleansUpImages() throws {
+        let db = try DatabaseManager.inMemory()
+
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot)
+
+        let imagePathA = try imageStorage.saveImage(Data([0x01]))
+        let imagePathB = try imageStorage.saveImage(Data([0x02]))
+
+        let withImageA = ClipboardEntry(content: "a", contentType: .image, imagePath: imagePathA)
+        let withImageB = ClipboardEntry(content: "b", contentType: .image, imagePath: imagePathB)
+        let pinned = ClipboardEntry(content: "pinned", contentType: .text, isPinned: true)
+        let survivor = ClipboardEntry(content: "survivor", contentType: .text)
+
+        for entry in [withImageA, withImageB, pinned, survivor] {
+            try db.insert(entry, deduplicate: false)
+        }
+
+        let service = DeleteService(database: db, imageStorage: imageStorage)
+
+        // Bulk delete honours the exact selection, pinned included — matching
+        // the single-ID delete rather than deleteAll's pin protection.
+        let deleted = try service.delete(ids: [withImageA.id, withImageB.id, pinned.id])
+        XCTAssertEqual(deleted, 3)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: imagePathA))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: imagePathB))
+
+        let remaining = try db.fetchAll()
+        XCTAssertEqual(remaining.map(\.id), [survivor.id])
+    }
+
+    func testBulkDeleteWithNoIDsIsANoOp() throws {
+        let db = try DatabaseManager.inMemory()
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot)
+
+        try db.insert(ClipboardEntry(content: "keep", contentType: .text))
+
+        let service = DeleteService(database: db, imageStorage: imageStorage)
+        XCTAssertEqual(try service.delete(ids: []), 0)
+        XCTAssertEqual(try db.fetchAll().count, 1)
+    }
+
     func testSetPinnedPersists() throws {
         let db = try DatabaseManager.inMemory()
         let id = UUID()

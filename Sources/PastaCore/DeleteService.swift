@@ -29,6 +29,30 @@ public final class DeleteService {
         }
     }
 
+    /// Deletes many entries at once and cleans up any associated image files.
+    ///
+    /// Prefer this over looping `delete(id:)`: that costs two write
+    /// transactions per ID (and fires the FTS delete trigger inside each),
+    /// whereas this uses a single transaction with chunked `IN` lists.
+    @discardableResult
+    public func delete(ids: [UUID]) throws -> Int {
+        guard !ids.isEmpty else { return 0 }
+
+        do {
+            let result = try database.delete(ids: ids)
+
+            for imagePath in result.imagePaths {
+                try imageStorage.deleteImage(path: imagePath)
+            }
+
+            PastaLogger.database.debug("Deleted \(result.count) entries in bulk")
+            return result.count
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to delete entries")
+            throw error
+        }
+    }
+
     /// Deletes entries from the last X minutes and cleans up any associated image files.
     @discardableResult
     public func deleteRecent(minutes: Int, now: Date = Date()) throws -> Int {

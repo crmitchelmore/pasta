@@ -60,6 +60,92 @@ extension DatabaseManager {
         }
     }
 
+    /// Outcome of a batched insert.
+    public struct BatchInsertResult: Sendable {
+        public let inserted: Int
+        public let skipped: Int
+
+        public init(inserted: Int, skipped: Int) {
+            self.inserted = inserted
+            self.skipped = skipped
+        }
+    }
+
+    /// Rows written per transaction, and IDs per `IN (...)` list. Keeps bound
+    /// argument counts well under SQLite's default 999-variable limit while
+    /// still amortising transaction (and fsync) overhead across many rows.
+    static let batchChunkSize = 500
+
+    /// Inserts many entries using one write transaction per chunk instead of
+    /// one transaction (plus one dedup read) per row.
+    ///
+    /// - Parameter deduplicate: when `true`, entries whose `contentHash`
+    ///   already exists are skipped rather than inserted. The lookup happens
+    ///   inside the same transaction and uses `idx_clipboard_entries_contentHash`,
+    ///   so duplicates *within* the batch are skipped too. This matches the
+    ///   importers' previous "check then skip" semantics — unlike
+    ///   `insert(_:deduplicate:)`, which bumps `copyCount` on a hash hit.
+    @discardableResult
+    public func insertBatch(_ entries: [ClipboardEntry], deduplicate: Bool = true) throws -> BatchInsertResult {
+        guard !entries.isEmpty else { return BatchInsertResult(inserted: 0, skipped: 0) }
+
+        var inserted = 0
+        var skipped = 0
+
+        do {
+            for start in stride(from: 0, to: entries.count, by: Self.batchChunkSize) {
+                let chunk = entries[start..<min(start + Self.batchChunkSize, entries.count)]
+
+                try dbQueue.write { db in
+                    for entry in chunk {
+                        let contentHash = entry.contentHash
+
+                        if deduplicate {
+                            let existing = try String.fetchOne(
+                                db,
+                                sql: "SELECT id FROM \(ClipboardEntry.databaseTableName) WHERE contentHash = ? LIMIT 1",
+                                arguments: [contentHash]
+                            )
+                            if existing != nil {
+                                skipped += 1
+                                continue
+                            }
+                        }
+
+                        try db.execute(
+                            sql: """
+                            INSERT INTO \(ClipboardEntry.databaseTableName)
+                            (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isPinned)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            arguments: [
+                                entry.id.uuidString,
+                                entry.content,
+                                entry.contentType.rawValue,
+                                entry.rawData,
+                                entry.imagePath,
+                                entry.timestamp,
+                                entry.copyCount,
+                                entry.sourceApp,
+                                entry.metadata,
+                                contentHash,
+                                entry.parentEntryId?.uuidString,
+                                entry.isPinned,
+                            ]
+                        )
+                        inserted += 1
+                    }
+                }
+            }
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert entry batch")
+            throw error
+        }
+
+        PastaLogger.database.debug("Batch inserted \(inserted) entries (\(skipped) duplicates skipped)")
+        return BatchInsertResult(inserted: inserted, skipped: skipped)
+    }
+
     public func fetchRecent(limit: Int = 50) throws -> [ClipboardEntry] {
         try fetchRecent(contentType: nil, limit: limit)
     }
@@ -145,6 +231,47 @@ extension DatabaseManager {
                 arguments: [id.uuidString]
             )
             return db.changesCount > 0
+        }
+    }
+
+    /// Deletes many entries in a single write transaction (chunked `IN` lists)
+    /// instead of one fetch + one delete transaction per ID.
+    ///
+    /// Like `delete(id:)`, this ignores `isPinned` — the caller decides what to
+    /// select.
+    ///
+    /// - Returns: the number of rows deleted and the image paths of the deleted
+    ///   entries, so the caller can clean up the files.
+    @discardableResult
+    public func delete(ids: [UUID]) throws -> (count: Int, imagePaths: [String]) {
+        guard !ids.isEmpty else { return (0, []) }
+
+        return try dbQueue.write { db in
+            var deleted = 0
+            var imagePaths: [String] = []
+
+            for start in stride(from: 0, to: ids.count, by: Self.batchChunkSize) {
+                let chunk = Array(ids[start..<min(start + Self.batchChunkSize, ids.count)])
+                let placeholders = chunk.map { _ in "?" }.joined(separator: ", ")
+                let arguments = StatementArguments(chunk.map { $0.uuidString })
+
+                imagePaths.append(contentsOf: try String.fetchAll(
+                    db,
+                    sql: """
+                    SELECT imagePath FROM \(ClipboardEntry.databaseTableName)
+                    WHERE id IN (\(placeholders)) AND imagePath IS NOT NULL
+                    """,
+                    arguments: arguments
+                ))
+
+                try db.execute(
+                    sql: "DELETE FROM \(ClipboardEntry.databaseTableName) WHERE id IN (\(placeholders))",
+                    arguments: arguments
+                )
+                deleted += db.changesCount
+            }
+
+            return (deleted, imagePaths)
         }
     }
 
