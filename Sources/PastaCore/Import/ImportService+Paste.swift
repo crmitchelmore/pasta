@@ -10,11 +10,7 @@ extension ImportService {
         }
 
         let pasteDb = try DatabaseQueue(path: dbPath)
-        var imported = 0
-        var skipped = 0
-        var failed = 0
-        var errors: [String] = []
-        var current = 0
+        var result = ImportResult(imported: 0, skipped: 0, failed: 0, errors: [])
 
         // Paste uses Core Data with tables like ZITEM, ZITEMCONTENT
         try pasteDb.read { db in
@@ -42,58 +38,41 @@ extension ImportService {
             }
 
             let rows = try Row.fetchAll(db, sql: sql)
-            let totalCount = rows.count
+            let batcher = makeBatcher(total: rows.count, progress: progress)
 
             for row in rows {
-                current += 1
-                do {
-                    // Try various column names for content
-                    let content = (row["plainText"] as String?) ??
-                                 (row["ZPLAINTEXT"] as String?) ??
-                                 (row["ZTEXT"] as String?) ??
-                                 (row["ZCONTENT"] as String?) ?? ""
+                // Try various column names for content
+                let content = (row["plainText"] as String?) ??
+                             (row["ZPLAINTEXT"] as String?) ??
+                             (row["ZTEXT"] as String?) ??
+                             (row["ZCONTENT"] as String?) ?? ""
 
-                    if content.isEmpty {
-                        skipped += 1
-                        progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-                        continue
-                    }
-
-                    // Core Data timestamp
-                    let coreDataEpoch = Date(timeIntervalSinceReferenceDate: 0)
-                    let timestampValue: Double = row["ZCREATETIME"] ?? row["ZTIMESTAMP"] ?? 0
-                    let timestamp = Date(timeInterval: timestampValue, since: coreDataEpoch)
-
-                    let sourceApp: String? = row["ZAPPNAME"] ?? row["ZSOURCEAPP"]
-
-                    if try isDuplicate(content: content, timestamp: timestamp) {
-                        skipped += 1
-                        progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-                        continue
-                    }
-
-                    let entry = ClipboardEntry(
-                        content: content,
-                        contentType: .text,
-                        timestamp: timestamp,
-                        copyCount: 1,
-                        sourceApp: sourceApp
-                    )
-
-                    try database.insert(entry)
-                    imported += 1
-                    progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-                } catch {
-                    failed += 1
-                    if errors.count < 5 {
-                        errors.append(error.localizedDescription)
-                    }
+                if content.isEmpty {
+                    batcher.skip()
+                    continue
                 }
+
+                // Core Data timestamp
+                let coreDataEpoch = Date(timeIntervalSinceReferenceDate: 0)
+                let timestampValue: Double = row["ZCREATETIME"] ?? row["ZTIMESTAMP"] ?? 0
+                let timestamp = Date(timeInterval: timestampValue, since: coreDataEpoch)
+
+                let sourceApp: String? = row["ZAPPNAME"] ?? row["ZSOURCEAPP"]
+
+                batcher.add(ClipboardEntry(
+                    content: content,
+                    contentType: .text,
+                    timestamp: timestamp,
+                    copyCount: 1,
+                    sourceApp: sourceApp
+                ))
             }
+
+            result = batcher.finish()
         }
 
-        PastaLogger.database.info("Paste import complete: \(imported) imported, \(skipped) skipped, \(failed) failed")
-        return ImportResult(imported: imported, skipped: skipped, failed: failed, errors: errors)
+        PastaLogger.database.info("Paste import complete: \(result.imported) imported, \(result.skipped) skipped, \(result.failed) failed")
+        return result
     }
 }
 #endif

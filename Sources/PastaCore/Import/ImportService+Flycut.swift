@@ -13,59 +13,35 @@ extension ImportService {
             throw ImportError.unrecognizedSchema(app: "Flycut")
         }
 
-        var imported = 0
-        var skipped = 0
-        var failed = 0
-        var errors: [String] = []
-        var current = 0
-
         guard let store = plist["store"] as? [String: Any],
               let jcList = store["jcList"] as? [[String: Any]] else {
             throw ImportError.unrecognizedSchema(app: "Flycut")
         }
 
-        let totalCount = jcList.count
+        let batcher = makeBatcher(total: jcList.count, progress: progress)
 
         for item in jcList {
-            current += 1
-            do {
-                guard let content = item["Contents"] as? String, !content.isEmpty else {
-                    skipped += 1
-                    progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-                    continue
-                }
-
-                let timestampValue = item["Timestamp"] as? TimeInterval ?? Date().timeIntervalSince1970
-                let timestamp = Date(timeIntervalSince1970: timestampValue)
-                let sourceApp = item["AppLocalizedName"] as? String
-
-                if try isDuplicate(content: content, timestamp: timestamp) {
-                    skipped += 1
-                    progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-                    continue
-                }
-
-                let entry = ClipboardEntry(
-                    content: content,
-                    contentType: .text,
-                    timestamp: timestamp,
-                    copyCount: 1,
-                    sourceApp: sourceApp
-                )
-
-                try database.insert(entry)
-                imported += 1
-                progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-            } catch {
-                failed += 1
-                if errors.count < 5 {
-                    errors.append(error.localizedDescription)
-                }
+            guard let content = item["Contents"] as? String, !content.isEmpty else {
+                batcher.skip()
+                continue
             }
+
+            let timestampValue = item["Timestamp"] as? TimeInterval ?? Date().timeIntervalSince1970
+            let timestamp = Date(timeIntervalSince1970: timestampValue)
+            let sourceApp = item["AppLocalizedName"] as? String
+
+            batcher.add(ClipboardEntry(
+                content: content,
+                contentType: .text,
+                timestamp: timestamp,
+                copyCount: 1,
+                sourceApp: sourceApp
+            ))
         }
 
-        PastaLogger.database.info("Flycut import complete: \(imported) imported, \(skipped) skipped, \(failed) failed")
-        return ImportResult(imported: imported, skipped: skipped, failed: failed, errors: errors)
+        let result = batcher.finish()
+        PastaLogger.database.info("Flycut import complete: \(result.imported) imported, \(result.skipped) skipped, \(result.failed) failed")
+        return result
     }
 }
 #endif

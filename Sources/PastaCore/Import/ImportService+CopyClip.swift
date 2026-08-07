@@ -14,12 +14,6 @@ extension ImportService {
             throw ImportError.unrecognizedSchema(app: "CopyClip")
         }
 
-        var imported = 0
-        var skipped = 0
-        var failed = 0
-        var errors: [String] = []
-        var current = 0
-
         // CopyClip stores items in various formats - try to extract text items
         func extractItems(from obj: Any) -> [(content: String, date: Date?)] {
             var items: [(String, Date?)] = []
@@ -45,40 +39,21 @@ extension ImportService {
         }
 
         let extractedItems = extractItems(from: plist)
-        let totalCount = extractedItems.count
+        let batcher = makeBatcher(total: extractedItems.count, progress: progress)
 
         for (content, date) in extractedItems {
-            current += 1
-            do {
-                let timestamp = date ?? Date()
-
-                if try isDuplicate(content: content, timestamp: timestamp) {
-                    skipped += 1
-                    progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-                    continue
-                }
-
-                let entry = ClipboardEntry(
-                    content: content,
-                    contentType: .text,
-                    timestamp: timestamp,
-                    copyCount: 1,
-                    sourceApp: nil
-                )
-
-                try database.insert(entry)
-                imported += 1
-                progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-            } catch {
-                failed += 1
-                if errors.count < 5 {
-                    errors.append(error.localizedDescription)
-                }
-            }
+            batcher.add(ClipboardEntry(
+                content: content,
+                contentType: .text,
+                timestamp: date ?? Date(),
+                copyCount: 1,
+                sourceApp: nil
+            ))
         }
 
-        PastaLogger.database.info("CopyClip import complete: \(imported) imported, \(skipped) skipped, \(failed) failed")
-        return ImportResult(imported: imported, skipped: skipped, failed: failed, errors: errors)
+        let result = batcher.finish()
+        PastaLogger.database.info("CopyClip import complete: \(result.imported) imported, \(result.skipped) skipped, \(result.failed) failed")
+        return result
     }
 }
 #endif

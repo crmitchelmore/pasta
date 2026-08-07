@@ -12,59 +12,34 @@ extension ImportService {
         // But Clipy also stores recent clips in UserDefaults
         let defaults = UserDefaults(suiteName: "com.clipy-app.Clipy")
 
-        var imported = 0
-        var skipped = 0
-        var failed = 0
-        var errors: [String] = []
-        var current = 0
-
         // Try to read from UserDefaults history
-        if let historyData = defaults?.array(forKey: "kCPYPrefHistoryKey") as? [[String: Any]] {
-            let totalCount = historyData.count
+        let historyData = defaults?.array(forKey: "kCPYPrefHistoryKey") as? [[String: Any]]
+        let batcher = makeBatcher(total: historyData?.count ?? 0, progress: progress)
 
+        if let historyData {
             for item in historyData {
-                current += 1
-                do {
-                    guard let content = item["string"] as? String ?? item["data"] as? String,
-                          !content.isEmpty else {
-                        skipped += 1
-                        progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-                        continue
-                    }
-
-                    let timestamp = (item["date"] as? Date) ?? Date()
-
-                    if try isDuplicate(content: content, timestamp: timestamp) {
-                        skipped += 1
-                        progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-                        continue
-                    }
-
-                    let entry = ClipboardEntry(
-                        content: content,
-                        contentType: .text,
-                        timestamp: timestamp,
-                        copyCount: 1,
-                        sourceApp: nil
-                    )
-
-                    try database.insert(entry)
-                    imported += 1
-                    progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-                } catch {
-                    failed += 1
-                    if errors.count < 5 {
-                        errors.append(error.localizedDescription)
-                    }
+                guard let content = item["string"] as? String ?? item["data"] as? String,
+                      !content.isEmpty else {
+                    batcher.skip()
+                    continue
                 }
+
+                batcher.add(ClipboardEntry(
+                    content: content,
+                    contentType: .text,
+                    timestamp: (item["date"] as? Date) ?? Date(),
+                    copyCount: 1,
+                    sourceApp: nil
+                ))
             }
         } else {
             // Realm DB exists but we can't read it - inform user
-            errors.append("Clipy uses Realm database format which requires special handling. Only UserDefaults history was checked.")
+            batcher.note("Clipy uses Realm database format which requires special handling. Only UserDefaults history was checked.")
         }
 
-        PastaLogger.database.info("Clipy import complete: \(imported) imported, \(skipped) skipped, \(failed) failed")
-        return ImportResult(imported: imported, skipped: skipped, failed: failed, errors: errors)
+        let result = batcher.finish()
+        PastaLogger.database.info("Clipy import complete: \(result.imported) imported, \(result.skipped) skipped, \(result.failed) failed")
+        return result
     }
 }
 #endif
