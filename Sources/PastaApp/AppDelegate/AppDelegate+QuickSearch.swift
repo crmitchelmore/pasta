@@ -30,11 +30,11 @@ extension AppDelegate {
         var handlers = CommandHandlers()
 
         handlers.deleteRecent = { minutes in
-            try BackgroundService.shared.deleteRecent(minutes: minutes)
+            try await BackgroundService.shared.deleteRecent(minutes: minutes)
         }
 
         handlers.deleteAll = {
-            try BackgroundService.shared.deleteAll()
+            try await BackgroundService.shared.deleteAll()
         }
 
         handlers.openSettings = { [weak self] in

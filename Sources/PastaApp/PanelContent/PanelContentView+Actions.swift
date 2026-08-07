@@ -60,16 +60,14 @@ extension PanelContentView {
     }
 
     func deleteEntries(_ ids: [UUID]) {
+        guard !ids.isEmpty else { return }
         PastaLogger.ui.debug("Deleting \(ids.count) entries")
-        do {
-            let imageStorage = try ImageStorageManager()
-            let deleteService = DeleteService(database: database, imageStorage: imageStorage)
-            for id in ids {
-                _ = try deleteService.delete(id: id)
+        Task { @MainActor in
+            do {
+                _ = try await backgroundService.delete(ids: ids)
+            } catch {
+                PastaLogger.logError(error, logger: PastaLogger.ui, context: "Failed to delete entries")
             }
-            refreshEntries()
-        } catch {
-            PastaLogger.logError(error, logger: PastaLogger.ui, context: "Failed to delete entries")
         }
     }
 
@@ -193,12 +191,13 @@ extension PanelContentView {
         let response = alert.runModal()
         guard response == .alertFirstButtonReturn else { return }
 
-        do {
-            let count = try BackgroundService.shared.deleteAll()
-            PastaLogger.ui.info("Cleared all clipboard history (\(count) entries)")
-            refreshEntries()
-        } catch {
-            PastaLogger.logError(error, logger: PastaLogger.ui, context: "Failed to clear all history")
+        Task { @MainActor in
+            do {
+                let count = try await BackgroundService.shared.deleteAll()
+                PastaLogger.ui.info("Cleared all clipboard history (\(count) entries)")
+            } catch {
+                PastaLogger.logError(error, logger: PastaLogger.ui, context: "Failed to clear all history")
+            }
         }
     }
 }

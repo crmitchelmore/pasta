@@ -10,11 +10,7 @@ extension ImportService {
         }
 
         let maccyDb = try DatabaseQueue(path: dbPath)
-        var imported = 0
-        var skipped = 0
-        var failed = 0
-        var errors: [String] = []
-        var current = 0
+        var result = ImportResult(imported: 0, skipped: 0, failed: 0, errors: [])
 
         try maccyDb.read { db in
             let tables = try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type='table'")
@@ -37,54 +33,37 @@ extension ImportService {
             """
 
             let rows = try Row.fetchAll(db, sql: sql)
-            let totalCount = rows.count
+            let batcher = makeBatcher(total: rows.count, progress: progress)
 
             for row in rows {
-                current += 1
-                do {
-                    guard let valueData: Data = row["contentValue"],
-                          let content = String(data: valueData, encoding: .utf8),
-                          !content.isEmpty else {
-                        skipped += 1
-                        progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-                        continue
-                    }
-
-                    let coreDataEpoch = Date(timeIntervalSinceReferenceDate: 0)
-                    let timestampValue: Double = row["ZLASTCOPIEDAT"] ?? row["ZFIRSTCOPIEDAT"] ?? 0
-                    let timestamp = Date(timeInterval: timestampValue, since: coreDataEpoch)
-
-                    let sourceApp: String? = row["ZAPPLICATION"]
-                    let copyCount: Int = row["ZNUMBEROFCOPIES"] ?? 1
-
-                    if try isDuplicate(content: content, timestamp: timestamp) {
-                        skipped += 1
-                        progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-                        continue
-                    }
-
-                    let entry = ClipboardEntry(
-                        content: content,
-                        contentType: .text,
-                        timestamp: timestamp,
-                        copyCount: copyCount,
-                        sourceApp: sourceApp
-                    )
-
-                    try database.insert(entry)
-                    imported += 1
-                    progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-                } catch {
-                    failed += 1
-                    if errors.count < 5 {
-                        errors.append(error.localizedDescription)
-                    }
+                guard let valueData: Data = row["contentValue"],
+                      let content = String(data: valueData, encoding: .utf8),
+                      !content.isEmpty else {
+                    batcher.skip()
+                    continue
                 }
+
+                let coreDataEpoch = Date(timeIntervalSinceReferenceDate: 0)
+                let timestampValue: Double = row["ZLASTCOPIEDAT"] ?? row["ZFIRSTCOPIEDAT"] ?? 0
+                let timestamp = Date(timeInterval: timestampValue, since: coreDataEpoch)
+
+                let sourceApp: String? = row["ZAPPLICATION"]
+                let copyCount: Int = row["ZNUMBEROFCOPIES"] ?? 1
+
+                batcher.add(ClipboardEntry(
+                    content: content,
+                    contentType: .text,
+                    timestamp: timestamp,
+                    copyCount: copyCount,
+                    sourceApp: sourceApp
+                ))
             }
+
+            result = batcher.finish()
         }
 
-        PastaLogger.database.info("Maccy import complete: \(imported) imported, \(skipped) skipped, \(failed) failed")
-        return ImportResult(imported: imported, skipped: skipped, failed: failed, errors: errors)
+        PastaLogger.database.info("Maccy import complete: \(result.imported) imported, \(result.skipped) skipped, \(result.failed) failed")
+        return result
     }
 }
 #endif

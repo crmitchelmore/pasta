@@ -10,17 +10,13 @@ extension ImportService {
         }
 
         let alfredDb = try DatabaseQueue(path: dbPath)
-        var imported = 0
-        var skipped = 0
-        var failed = 0
-        var errors: [String] = []
-        var current = 0
 
         // Get total count first for batching
         let totalCount = try alfredDb.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM clipboard") ?? 0
         }
 
+        let batcher = makeBatcher(total: totalCount, progress: progress)
         let batchSize = 500
         var offset = 0
 
@@ -34,8 +30,6 @@ extension ImportService {
                         """, arguments: [batchSize, offset])
 
                     for row in rows {
-                        current += 1
-
                         do {
                             let content: String = row["item"] ?? ""
                             let timestamp = Date(timeIntervalSince1970: row["ts"] ?? 0)
@@ -44,15 +38,7 @@ extension ImportService {
 
                             // Skip empty content
                             if content.isEmpty && dataType == 0 {
-                                skipped += 1
-                                progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
-                                continue
-                            }
-
-                            // Check for duplicate using efficient hash lookup
-                            if try isDuplicate(content: content, timestamp: timestamp) {
-                                skipped += 1
-                                progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
+                                batcher.skip()
                                 continue
                             }
 
@@ -73,8 +59,7 @@ extension ImportService {
                                     imagePath = try imageStorage.saveImage(imageData)
                                 } else {
                                     // Image file not found, skip
-                                    skipped += 1
-                                    progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
+                                    batcher.skip()
                                     continue
                                 }
                             } else if dataType == 1 {
@@ -82,7 +67,7 @@ extension ImportService {
                                 contentType = .filePath
                             }
 
-                            let entry = ClipboardEntry(
+                            batcher.add(ClipboardEntry(
                                 content: content,
                                 contentType: contentType,
                                 rawData: rawData,
@@ -90,16 +75,9 @@ extension ImportService {
                                 timestamp: timestamp,
                                 copyCount: 1,
                                 sourceApp: sourceApp
-                            )
-
-                            try database.insert(entry)
-                            imported += 1
-                            progress(ImportProgress(current: current, total: totalCount, imported: imported, skipped: skipped))
+                            ))
                         } catch {
-                            failed += 1
-                            if errors.count < 5 {
-                                errors.append(error.localizedDescription)
-                            }
+                            batcher.fail(error)
                         }
                     }
                 }
@@ -107,8 +85,9 @@ extension ImportService {
             offset += batchSize
         }
 
-        PastaLogger.database.info("Alfred import complete: \(imported) imported, \(skipped) skipped, \(failed) failed")
-        return ImportResult(imported: imported, skipped: skipped, failed: failed, errors: errors)
+        let result = batcher.finish()
+        PastaLogger.database.info("Alfred import complete: \(result.imported) imported, \(result.skipped) skipped, \(result.failed) failed")
+        return result
     }
 }
 #endif

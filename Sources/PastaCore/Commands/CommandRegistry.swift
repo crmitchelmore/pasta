@@ -334,7 +334,7 @@ public final class CommandRegistry: ObservableObject {
         }
         
         do {
-            let count = try deleteRecent(minutes)
+            let count = try await deleteRecent(minutes)
             let timeDesc = formatTimeDescription(minutes: minutes)
             return .success("Cleared \(count) \(count == 1 ? "entry" : "entries") from last \(timeDesc)")
         } catch {
@@ -348,7 +348,7 @@ public final class CommandRegistry: ObservableObject {
         }
         
         do {
-            let count = try deleteAll()
+            let count = try await deleteAll()
             return .success("Cleared all \(count) entries")
         } catch {
             return .error("Failed to clear: \(error.localizedDescription)")
@@ -370,8 +370,8 @@ public final class CommandRegistry: ObservableObject {
 
 /// Handlers for commands that need app-layer implementations
 public struct CommandHandlers: Sendable {
-    public var deleteRecent: (@Sendable @MainActor (Int) throws -> Int)?
-    public var deleteAll: (@Sendable @MainActor () throws -> Int)?
+    public var deleteRecent: (@Sendable @MainActor (Int) async throws -> Int)?
+    public var deleteAll: (@Sendable @MainActor () async throws -> Int)?
     public var openSettings: (@Sendable @MainActor () -> Void)?
     public var checkForUpdates: (@Sendable @MainActor () -> Void)?
     public var openReleaseNotes: (@Sendable @MainActor () -> Void)?

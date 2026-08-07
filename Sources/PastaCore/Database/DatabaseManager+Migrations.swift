@@ -156,6 +156,33 @@ extension DatabaseManager {
             )
         }
 
+        migrator.registerMigration("ftsUpdateTriggerOnContentOnly") { db in
+            // The update trigger fired on *any* column change — pin toggles,
+            // markSynced batches, dedup copyCount/timestamp bumps and
+            // reclassification all paid for a full FTS delete + re-tokenise of
+            // the entry's content, inside the write lock. Only `content` is
+            // indexed, so scope the trigger to that column.
+            try db.execute(sql: "DROP TRIGGER IF EXISTS clipboard_entries_au;")
+            try db.execute(sql: """
+            CREATE TRIGGER clipboard_entries_au AFTER UPDATE OF content ON clipboard_entries BEGIN
+                INSERT INTO clipboard_entries_fts(clipboard_entries_fts, rowid, content)
+                VALUES('delete', old.rowid, old.content);
+                INSERT INTO clipboard_entries_fts(rowid, content)
+                VALUES (new.rowid, new.content);
+            END;
+            """)
+        }
+
+        migrator.registerMigration("addUnsyncedIndex") { db in
+            // Partial index so `fetchUnsynced` stays cheap on a fully-synced
+            // library: it only contains the rows still waiting to be pushed.
+            try db.execute(sql: """
+            CREATE INDEX IF NOT EXISTS idx_clipboard_entries_unsynced
+            ON \(ClipboardEntry.databaseTableName)(timestamp)
+            WHERE isSynced = 0;
+            """)
+        }
+
         return migrator
     }
 }

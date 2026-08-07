@@ -17,9 +17,10 @@ extension AppDelegate {
                 defer: false
             )
             window.title = "Pasta Settings"
+            let database = BackgroundService.shared.database
             window.contentView = NSHostingView(rootView: SettingsView(
                 syncManager: BackgroundService.shared.syncManager,
-                allEntries: { BackgroundService.shared.entries },
+                unsyncedEntries: { (try? database.fetchUnsynced()) ?? [] },
                 markSynced: { ids in
                     try? BackgroundService.shared.database.markSynced(ids: ids)
                 },
