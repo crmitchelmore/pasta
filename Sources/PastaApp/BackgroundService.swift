@@ -236,6 +236,10 @@ final class BackgroundService: ObservableObject {
 
     private func refreshAfterInsert(insertedCount: Int) async {
         guard insertedCount > 0 else { return }
+
+        // Cancelling a refresh that is still paging leaves `entries` holding
+        // only the pages loaded so far, so remember whether one was in flight.
+        let wasPaging = refreshTask != nil
         refreshTask?.cancel()
         refreshTask = nil
         isLoadingEntries = false
@@ -258,28 +262,27 @@ final class BackgroundService: ObservableObject {
         }
 
         let merged = await Task.detached(priority: .userInitiated) {
-            var seen = Set<UUID>()
-            var merged: [ClipboardEntry] = []
-            merged.reserveCapacity(min(displayLimit, latestHead.count + currentEntries.count))
-
-            for entry in latestHead {
-                guard seen.insert(entry.id).inserted else { continue }
-                merged.append(entry)
-            }
-
-            for entry in currentEntries {
-                guard seen.insert(entry.id).inserted else { continue }
-                merged.append(entry)
-                if merged.count >= displayLimit {
-                    break
-                }
-            }
-
-            return merged
+            HistoryWindow.merge(head: latestHead, into: currentEntries, limit: displayLimit)
         }.value
 
         entries = merged
+        loadedEntryCount = merged.count
         PastaLogger.ui.debug("Incrementally refreshed entries: \(entries.count) items")
+
+        // The head merge only refreshes the top of the list. If the cancelled
+        // refresh had not finished paging the library in, resume the full load
+        // — otherwise the visible history stays truncated at a few hundred rows
+        // until something else triggers a refresh.
+        guard wasPaging,
+              !HistoryWindow.isFullyLoaded(
+                  loadedCount: merged.count,
+                  totalEntryCount: totalEntryCount,
+                  displayLimit: displayLimit
+              )
+        else { return }
+
+        PastaLogger.ui.debug("Resuming interrupted paged load after insert")
+        refresh()
     }
     
     private func startPruneTimer() {
@@ -299,25 +302,32 @@ final class BackgroundService: ObservableObject {
         
         Task {
             // Run all database/file operations off the main thread
-            await Task.detached(priority: .utility) {
-                if retentionDays > 0 {
-                    do {
-                        let paths = try db.pruneOlderThan(days: retentionDays)
-                        for path in paths {
-                            try? storage.deleteImage(path: path)
-                        }
-                        if !paths.isEmpty {
-                            PastaLogger.database.debug("Pruned \(paths.count) images due to retention policy")
-                        }
-                    } catch {
-                        PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to prune old entries")
+            let prunedByRetention = await Task.detached(priority: .utility) { () -> Bool in
+                guard retentionDays > 0 else { return false }
+                do {
+                    let result = try db.pruneOlderThan(days: retentionDays)
+                    for path in result.imagePaths {
+                        try? storage.deleteImage(path: path)
                     }
+                    if !result.imagePaths.isEmpty {
+                        PastaLogger.database.debug("Pruned \(result.imagePaths.count) images due to retention policy")
+                    }
+                    return result.didPrune
+                } catch {
+                    PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to prune old entries")
+                    return false
                 }
             }.value
-            
+
             // enforceMaxEntriesLimit is already async and runs off main thread
-            await self.enforceMaxEntriesLimit()
-            self.refresh()
+            let prunedByMaxEntries = await self.enforceMaxEntriesLimit()
+
+            // Only reload when rows actually went away. This runs hourly and at
+            // startup; unconditionally refreshing meant every launch paid for
+            // two full history loads (this one plus the one issued in `init`).
+            if prunedByRetention || prunedByMaxEntries {
+                self.refresh()
+            }
         }
     }
     
@@ -544,20 +554,23 @@ final class BackgroundService: ObservableObject {
         }
     }
     
-    private func enforceMaxEntriesLimit() async {
+    /// - Returns: whether any entries were actually pruned.
+    @discardableResult
+    private func enforceMaxEntriesLimit() async -> Bool {
         let maxEntries = UserDefaults.standard.integer(forKey: Defaults.maxEntries)
-        guard maxEntries > 0 else { return }
+        guard maxEntries > 0 else { return false }
 
         let db = self.database
         let storage = self.imageStorage
-        await Task.detached(priority: .utility) {
-            guard let imagePaths = try? db.pruneToMaxEntries(maxEntries) else { return }
-            if !imagePaths.isEmpty {
-                PastaLogger.database.debug("Pruned \(imagePaths.count) images due to max entries limit")
+        return await Task.detached(priority: .utility) { () -> Bool in
+            guard let result = try? db.pruneToMaxEntries(maxEntries) else { return false }
+            if !result.imagePaths.isEmpty {
+                PastaLogger.database.debug("Pruned \(result.imagePaths.count) images due to max entries limit")
             }
-            for path in imagePaths {
+            for path in result.imagePaths {
                 try? storage.deleteImage(path: path)
             }
+            return result.didPrune
         }.value
     }
     
@@ -647,22 +660,42 @@ final class BackgroundService: ObservableObject {
     // MARK: - Delete Operations
     
     /// Deletes entries from the last X minutes and refreshes the entries list.
+    ///
+    /// The delete (a write transaction plus image-file removal) runs off the
+    /// main actor; only the reload is hopped back on.
     @discardableResult
-    func deleteRecent(minutes: Int) throws -> Int {
+    func deleteRecent(minutes: Int) async throws -> Int {
         let deleteService = DeleteService(database: database, imageStorage: imageStorage)
-        let count = try deleteService.deleteRecent(minutes: minutes)
+        let count = try await Task.detached(priority: .userInitiated) {
+            try deleteService.deleteRecent(minutes: minutes)
+        }.value
         refresh()
         return count
     }
-    
+
     /// Deletes all entries and refreshes the entries list.
     ///
     /// - Parameter includePinned: when `false` (the default), pinned entries are
     ///   preserved. Pass `true` from explicit "wipe everything" UI.
     @discardableResult
-    func deleteAll(includePinned: Bool = false) throws -> Int {
+    func deleteAll(includePinned: Bool = false) async throws -> Int {
         let deleteService = DeleteService(database: database, imageStorage: imageStorage)
-        let count = try deleteService.deleteAll(includePinned: includePinned)
+        let count = try await Task.detached(priority: .userInitiated) {
+            try deleteService.deleteAll(includePinned: includePinned)
+        }.value
+        refresh()
+        return count
+    }
+
+    /// Deletes many entries in one transaction, off the main actor, then
+    /// refreshes.
+    @discardableResult
+    func delete(ids: [UUID]) async throws -> Int {
+        guard !ids.isEmpty else { return 0 }
+        let deleteService = DeleteService(database: database, imageStorage: imageStorage)
+        let count = try await Task.detached(priority: .userInitiated) {
+            try deleteService.delete(ids: ids)
+        }.value
         refresh()
         return count
     }

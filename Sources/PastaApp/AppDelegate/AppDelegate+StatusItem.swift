@@ -55,20 +55,21 @@ extension AppDelegate {
     }
 
     @objc func clearLast10Minutes() {
-        do {
-            let count = try BackgroundService.shared.deleteRecent(minutes: 10)
-            PastaLogger.app.info("Cleared \(count) entries from last 10 minutes")
-        } catch {
-            PastaLogger.logError(error, logger: PastaLogger.app, context: "Failed to clear recent entries")
-        }
+        clearRecent(minutes: 10, description: "last 10 minutes")
     }
 
     @objc func clearLastHour() {
-        do {
-            let count = try BackgroundService.shared.deleteRecent(minutes: 60)
-            PastaLogger.app.info("Cleared \(count) entries from last hour")
-        } catch {
-            PastaLogger.logError(error, logger: PastaLogger.app, context: "Failed to clear recent entries")
+        clearRecent(minutes: 60, description: "last hour")
+    }
+
+    private func clearRecent(minutes: Int, description: String) {
+        Task { @MainActor in
+            do {
+                let count = try await BackgroundService.shared.deleteRecent(minutes: minutes)
+                PastaLogger.app.info("Cleared \(count) entries from \(description)")
+            } catch {
+                PastaLogger.logError(error, logger: PastaLogger.app, context: "Failed to clear recent entries")
+            }
         }
     }
 }
