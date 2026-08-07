@@ -100,7 +100,14 @@ public struct EncodingDetector {
         return decoded
     }
 
+    /// Inputs above this size skip the base64 hypothesis entirely: testing it
+    /// costs four whole-string rewrites plus a whole-string regex, which is not
+    /// worth paying on a multi-megabyte paste.
+    private static let maxBase64CandidateBytes = 100_000
+
     private func decodeBase64IfLikely(_ text: String) -> String? {
+        guard text.utf8.count <= Self.maxBase64CandidateBytes else { return nil }
+
         // Conservative base64 heuristic to avoid decoding arbitrary short strings.
         // - Must be ASCII only
         // - Must be a multiple of 4 when whitespace is removed

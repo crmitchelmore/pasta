@@ -115,6 +115,14 @@ public struct ContentTypeDetector {
         self.ibanDetector = ibanDetector
     }
 
+    /// Upper bound on the text handed to the detectors.
+    ///
+    /// Classification runs ~15 detectors, most of them whole-string regex
+    /// passes, so an unclamped multi-MB paste costs seconds of CPU on the
+    /// capture path. A generous prefix is more than enough to decide what a
+    /// clipboard entry *is*; the entry itself still stores the full content.
+    static let maxAnalysisLength = 30_000
+
     public func detect(in text: String, configuration: DetectorConfiguration = .default) -> Output {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -128,10 +136,16 @@ public struct ContentTypeDetector {
             return Output(primaryType: .text, confidence: 0.5)
         }
 
+        // Clamp once, here, rather than relying on each detector to clamp itself
+        // (only a handful did).
+        let clamped = trimmed.count > Self.maxAnalysisLength
+            ? String(trimmed.prefix(Self.maxAnalysisLength))
+            : trimmed
+
         // Prefer analyzing decoded content when it looks URL/base64-encoded, but keep encoding metadata.
-        let encodingDetections = encodingDetector.detect(in: trimmed)
+        let encodingDetections = encodingDetector.detect(in: clamped)
         let decodedText = encodingDetections.first?.decoded
-        let analysisText = decodedText ?? trimmed
+        let analysisText = decodedText ?? clamped
 
         let jwt = detectJWT(in: analysisText, configuration: configuration)
         let rawApiKeys = detectAPIKeys(in: analysisText, configuration: configuration)
@@ -187,7 +201,7 @@ public struct ContentTypeDetector {
 
         let splitEntries = makeSplitEntries(envOutput: env)
         let metadataJSON = buildMetadataJSON(
-            originalText: trimmed,
+            originalText: clamped,
             analysisText: analysisText,
             encoding: encodingDetections.first,
             jwt: jwt,

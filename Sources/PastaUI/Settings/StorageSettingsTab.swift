@@ -14,6 +14,8 @@ struct StorageSettingsTab: View {
     @State private var storageSummary: String = "Calculating..."
     @State private var clearAllSummary: String? = nil
     @State private var isConfirmingClearAll: Bool = false
+    @State private var isCalculatingStorage: Bool = false
+    @State private var isClearingAll: Bool = false
 
     var body: some View {
         Form {
@@ -67,14 +69,19 @@ struct StorageSettingsTab: View {
                         Text(storageSummary)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        
-                        Button {
-                            refreshStorageSummary()
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.caption)
+
+                        if isCalculatingStorage {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Button {
+                                refreshStorageSummary()
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.borderless)
                         }
-                        .buttonStyle(.borderless)
                     }
                 }
             } header: {
@@ -84,11 +91,19 @@ struct StorageSettingsTab: View {
             Section {
                 HStack {
                     Spacer()
-                    Button("Clear All History…", role: .destructive) {
-                        isConfirmingClearAll = true
+                    if isClearingAll {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Clearing…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button("Clear All History…", role: .destructive) {
+                            isConfirmingClearAll = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
                     Spacer()
                 }
 
@@ -120,28 +135,51 @@ struct StorageSettingsTab: View {
         }
     }
 
+    /// Walks the whole images directory stat-ing every file, so it must not run
+    /// on the main thread.
     private func refreshStorageSummary() {
-        do {
-            let dbURL = DatabaseManager.defaultDatabaseURL()
-            let dbSize = fileSizeBytes(at: dbURL)
-            let imageStorage = try ImageStorageManager()
-            let imageBytes = try imageStorage.totalStorageBytes()
-            storageSummary = "DB: \(format(bytes: dbSize)) • Images: \(format(bytes: imageBytes))"
-        } catch {
-            storageSummary = "Unable to calculate"
+        isCalculatingStorage = true
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let summary: String
+            do {
+                let dbSize = fileSizeBytes(at: DatabaseManager.defaultDatabaseURL())
+                let imageStorage = try ImageStorageManager()
+                let imageBytes = try imageStorage.totalStorageBytes()
+                summary = "DB: \(format(bytes: dbSize)) • Images: \(format(bytes: imageBytes))"
+            } catch {
+                summary = "Unable to calculate"
+            }
+
+            DispatchQueue.main.async {
+                storageSummary = summary
+                isCalculatingStorage = false
+            }
         }
     }
 
+    /// Deletes every entry and every stored image — potentially tens of
+    /// thousands of rows and files, so it runs off the main thread too.
     private func clearAllHistory() {
-        do {
-            let database = try DatabaseManager()
-            let imageStorage = try ImageStorageManager()
-            let deleteService = DeleteService(database: database, imageStorage: imageStorage)
-            let count = try deleteService.deleteAll(includePinned: true)
-            clearAllSummary = "Deleted \(count) entries"
-            refreshStorageSummary()
-        } catch {
-            clearAllSummary = "Failed to clear history"
+        isClearingAll = true
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let summary: String
+            do {
+                let database = try DatabaseManager()
+                let imageStorage = try ImageStorageManager()
+                let deleteService = DeleteService(database: database, imageStorage: imageStorage)
+                let count = try deleteService.deleteAll(includePinned: true)
+                summary = "Deleted \(count) entries"
+            } catch {
+                summary = "Failed to clear history"
+            }
+
+            DispatchQueue.main.async {
+                clearAllSummary = summary
+                isClearingAll = false
+                refreshStorageSummary()
+            }
         }
     }
 

@@ -359,7 +359,7 @@ extension ContentTypeDetector {
         in text: String,
         options: NSRegularExpression.Options = []
     ) -> [String] {
-        let clamped = text.count > 30_000 ? String(text.prefix(30_000)) : text
+        let clamped = text.count > Self.maxAnalysisLength ? String(text.prefix(Self.maxAnalysisLength)) : text
         let range = NSRange(clamped.startIndex..<clamped.endIndex, in: clamped)
 
         var seen = Set<String>()
