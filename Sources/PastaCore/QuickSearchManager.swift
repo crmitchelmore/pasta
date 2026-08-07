@@ -175,18 +175,15 @@ public final class QuickSearchManager: ObservableObject {
             return
         }
         
-        // For short queries (1-2 chars), search immediately to feel responsive
-        // For longer queries (likely still typing), debounce
-        let debounceMs: UInt64 = trimmed.count <= 2 ? 0 : 25_000_000  // 0ms or 25ms
-        
-        if debounceMs == 0 {
+        // Short queries (1-2 chars) are the broadest prefix scans, so they get the
+        // longest debounce — running them on every keystroke queues expensive work
+        // that the next keystroke immediately invalidates.
+        let debounceNanoseconds: UInt64 = trimmed.count <= 2 ? 50_000_000 : 25_000_000  // 50ms or 25ms
+
+        searchDebounceTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: debounceNanoseconds)
+            guard !Task.isCancelled else { return }
             performSearch()
-        } else {
-            searchDebounceTask = Task { @MainActor in
-                try? await Task.sleep(nanoseconds: debounceMs)
-                guard !Task.isCancelled else { return }
-                performSearch()
-            }
         }
     }
     
@@ -216,7 +213,10 @@ public final class QuickSearchManager: ObservableObject {
 
         searchTask?.cancel()
         searchTask = Task {
-            let searchResult = await Task.detached(priority: .userInitiated) { () -> [ClipboardEntry] in
+            let searchResult = await withCancellableDetachedTask(priority: .userInitiated) { () -> [ClipboardEntry]? in
+                // A superseded query must not keep the DB queue busy.
+                guard !Task.isCancelled else { return nil }
+
                 if let dbSnapshot {
                     do {
                         let startTime = CFAbsoluteTimeGetCurrent()
@@ -229,16 +229,15 @@ public final class QuickSearchManager: ObservableObject {
                     }
                 }
 
+                guard !Task.isCancelled else { return nil }
                 return Self.fallbackMatches(query: querySnapshot, entries: entriesSnapshot, filter: filterSnapshot, pinnedOnly: pinnedSnapshot)
-            }.result
+            }
 
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, let searchResult else { return }
             guard query.trimmingCharacters(in: .whitespacesAndNewlines) == querySnapshot else { return }
             guard selectedFilter == filterSnapshot else { return }
             guard showPinnedOnly == pinnedSnapshot else { return }
-            if case .success(let result) = searchResult {
-                results = result
-            }
+            results = searchResult
         }
     }
 
