@@ -36,7 +36,6 @@ final class BackgroundService: ObservableObject {
     private var refreshTask: Task<Void, Never>?
 
     private enum RefreshTuning {
-        static let fallbackDisplayLimit = 10_000
         static let initialDisplayLimit = 200
         static let backgroundPageSize = 1_000
         static let minHeadFetchLimit = 100
@@ -231,7 +230,7 @@ final class BackgroundService: ObservableObject {
 
     private var displayLimit: Int {
         let configuredLimit = UserDefaults.standard.integer(forKey: Defaults.maxEntries)
-        return configuredLimit > 0 ? configuredLimit : RefreshTuning.fallbackDisplayLimit
+        return configuredLimit > 0 ? configuredLimit : .max
     }
 
     private func refreshAfterInsert(insertedCount: Int) async {
