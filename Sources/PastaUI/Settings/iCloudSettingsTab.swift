@@ -9,7 +9,11 @@ import UniformTypeIdentifiers
 
 struct iCloudSettingsTab: View {
     @ObservedObject var syncManager: SyncManager
-    let allEntries: () -> [ClipboardEntry]
+    /// Fetches the entries still awaiting an iCloud push, straight from the
+    /// database — not from the app's in-memory display window, which both
+    /// re-uploads everything already synced and misses entries beyond the
+    /// window.
+    let unsyncedEntries: @Sendable () -> [ClipboardEntry]
     let markSynced: (([UUID]) -> Void)?
     let syncedCount: () -> Int
     @State private var iCloudAvailable: Bool? = nil
@@ -83,9 +87,12 @@ struct iCloudSettingsTab: View {
                         Spacer()
                         Button("Sync") {
                             let markCallback = markSynced
+                            let fetchUnsynced = unsyncedEntries
                             Task {
                                 try? await syncManager.setupZone()
-                                let entries = allEntries()
+                                let entries = await Task.detached(priority: .userInitiated) {
+                                    fetchUnsynced()
+                                }.value
                                 if !entries.isEmpty {
                                     _ = try? await syncManager.pushEntries(entries, onBatchSynced: markCallback)
                                 }
