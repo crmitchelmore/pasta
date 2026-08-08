@@ -11,7 +11,7 @@ extension DatabaseManager {
         let contentHash = entry.contentHash
 
         do {
-            try dbQueue.write { db in
+            try dbWriter.write { db in
                 if deduplicate {
                     if let existingID: String = try String.fetchOne(
                         db,
@@ -96,7 +96,7 @@ extension DatabaseManager {
             for start in stride(from: 0, to: entries.count, by: Self.batchChunkSize) {
                 let chunk = entries[start..<min(start + Self.batchChunkSize, entries.count)]
 
-                try dbQueue.write { db in
+                try dbWriter.write { db in
                     for entry in chunk {
                         let contentHash = entry.contentHash
 
@@ -159,7 +159,7 @@ extension DatabaseManager {
     }
 
     public func fetchRecent(contentType: ContentType?, limit: Int, offset: Int) throws -> [ClipboardEntry] {
-        try dbQueue.read { db in
+        try dbWriter.read { db in
             var request = ClipboardEntry
                 .order(Column("timestamp").desc)
 
@@ -174,7 +174,7 @@ extension DatabaseManager {
     }
 
     public func countEntries() throws -> Int {
-        try dbQueue.read { db in
+        try dbWriter.read { db in
             try Int.fetchOne(
                 db,
                 sql: "SELECT COUNT(*) FROM \(ClipboardEntry.databaseTableName)"
@@ -183,7 +183,7 @@ extension DatabaseManager {
     }
 
     public func fetchAll() throws -> [ClipboardEntry] {
-        try dbQueue.read { db in
+        try dbWriter.read { db in
             try ClipboardEntry
                 .order(Column("timestamp").desc)
                 .fetchAll(db)
@@ -192,7 +192,7 @@ extension DatabaseManager {
 
     /// Fetches only primary entries (excluding extracted child entries).
     public func fetchPrimaryEntries() throws -> [ClipboardEntry] {
-        try dbQueue.read { db in
+        try dbWriter.read { db in
             try ClipboardEntry
                 .filter(Column("parentEntryId") == nil)
                 .order(Column("timestamp").desc)
@@ -201,7 +201,7 @@ extension DatabaseManager {
     }
 
     public func fetch(id: UUID) throws -> ClipboardEntry? {
-        try dbQueue.read { db in
+        try dbWriter.read { db in
             try ClipboardEntry
                 .filter(Column("id") == id.uuidString)
                 .fetchOne(db)
@@ -215,7 +215,7 @@ extension DatabaseManager {
 
     /// Fetches all extracted entries for a given parent entry.
     public func fetchExtractedEntries(parentId: UUID) throws -> [ClipboardEntry] {
-        try dbQueue.read { db in
+        try dbWriter.read { db in
             try ClipboardEntry
                 .filter(Column("parentEntryId") == parentId.uuidString)
                 .order(Column("contentType"))
@@ -225,7 +225,7 @@ extension DatabaseManager {
 
     @discardableResult
     public func delete(id: UUID) throws -> Bool {
-        try dbQueue.write { db in
+        try dbWriter.write { db in
             try db.execute(
                 sql: "DELETE FROM \(ClipboardEntry.databaseTableName) WHERE id = ?",
                 arguments: [id.uuidString]
@@ -246,7 +246,7 @@ extension DatabaseManager {
     public func delete(ids: [UUID]) throws -> (count: Int, imagePaths: [String]) {
         guard !ids.isEmpty else { return (0, []) }
 
-        return try dbQueue.write { db in
+        return try dbWriter.write { db in
             var deleted = 0
             var imagePaths: [String] = []
 
@@ -277,7 +277,7 @@ extension DatabaseManager {
 
     /// Efficiently checks if an entry with the given content hash exists.
     public func existsWithHash(_ hash: String) throws -> Bool {
-        try dbQueue.read { db in
+        try dbWriter.read { db in
             let count = try Int.fetchOne(
                 db,
                 sql: "SELECT 1 FROM \(ClipboardEntry.databaseTableName) WHERE contentHash = ? LIMIT 1",

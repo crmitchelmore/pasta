@@ -22,7 +22,7 @@ extension DatabaseManager {
     public func deleteRecent(minutes: Int, now: Date = Date()) throws -> (count: Int, imagePaths: [String]) {
         let cutoff = now.addingTimeInterval(-Double(minutes) * 60)
 
-        return try dbQueue.write { db in
+        return try dbWriter.write { db in
             let imagePaths = try String.fetchAll(
                 db,
                 sql: "SELECT imagePath FROM \(ClipboardEntry.databaseTableName) WHERE timestamp > ? AND imagePath IS NOT NULL",
@@ -43,7 +43,7 @@ extension DatabaseManager {
     /// - Parameter includePinned: when `false` (the default), pinned entries are
     ///   preserved. Pass `true` from explicit "wipe everything" code paths.
     public func deleteAll(includePinned: Bool = false) throws -> (count: Int, imagePaths: [String]) {
-        try dbQueue.write { db in
+        try dbWriter.write { db in
             let pinClause = includePinned ? "" : " AND isPinned = 0"
             let imagePaths = try String.fetchAll(
                 db,
@@ -69,7 +69,7 @@ extension DatabaseManager {
     public func pruneToMaxEntries(_ maxEntries: Int) throws -> PruneResult {
         guard maxEntries > 0 else { return PruneResult(deletedCount: 0, imagePaths: []) }
 
-        let unpinnedCount = try dbQueue.read { db in
+        let unpinnedCount = try dbWriter.read { db in
             try Int.fetchOne(
                 db,
                 sql: "SELECT COUNT(*) FROM \(ClipboardEntry.databaseTableName) WHERE isPinned = 0"
@@ -77,7 +77,7 @@ extension DatabaseManager {
         }
         guard unpinnedCount > maxEntries else { return PruneResult(deletedCount: 0, imagePaths: []) }
 
-        return try dbQueue.write { db in
+        return try dbWriter.write { db in
             let victims = try Row.fetchAll(
                 db,
                 sql: """
@@ -116,7 +116,7 @@ extension DatabaseManager {
 
         let cutoff = now.addingTimeInterval(-Double(days) * 24 * 60 * 60)
 
-        return try dbQueue.write { db in
+        return try dbWriter.write { db in
             let imagePaths = try String.fetchAll(
                 db,
                 sql: "SELECT imagePath FROM \(ClipboardEntry.databaseTableName) WHERE timestamp < ? AND isPinned = 0 AND imagePath IS NOT NULL",

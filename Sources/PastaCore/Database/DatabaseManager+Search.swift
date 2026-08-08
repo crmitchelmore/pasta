@@ -12,7 +12,7 @@ extension DatabaseManager {
 
     public func search(query: String, limit: Int = 50) throws -> [ClipboardEntry] {
         let pattern = "%\(query)%"
-        return try dbQueue.read { db in
+        return try dbWriter.read { db in
             try ClipboardEntry
                 .filter(Column("content").like(pattern))
                 .order(Column("timestamp").desc)
@@ -39,7 +39,7 @@ extension DatabaseManager {
         // Pre-normalised form used for the SQL exact-equality boost.
         let normalisedExact = trimmed.lowercased()
 
-        return try dbQueue.read { db in
+        return try dbWriter.read { db in
             // Two-stage query: rank rowids inside the FTS5 virtual table first
             // (touching only the FTS index + the small `content`/`contentType`
             // columns needed for the rank + filters), then hydrate the top
