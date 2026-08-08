@@ -39,6 +39,10 @@ extension ContentType {
         case .url: return "link"
         case .code: return "chevron.left.forwardslash.chevron.right"
         case .shellCommand: return "apple.terminal"
+        case .color: return "paintpalette"
+        case .macAddress: return "wifi.router"
+        case .creditCard: return "creditcard"
+        case .iban: return "building.columns"
         case .unknown: return "questionmark"
         }
     }
@@ -59,6 +63,10 @@ extension ContentType {
         case .url: return .blue
         case .code: return .mint
         case .shellCommand: return .cyan
+        case .color: return .pink
+        case .macAddress: return .mint
+        case .creditCard: return .red
+        case .iban: return .indigo
         case .unknown: return .gray
         }
     }
