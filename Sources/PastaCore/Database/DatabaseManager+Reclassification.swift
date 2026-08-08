@@ -31,7 +31,7 @@ extension DatabaseManager {
         updates: [ReclassificationUpdate],
         extractedEntries: [ClipboardEntry]
     ) throws -> ReclassificationResult {
-        try dbQueue.write { db in
+        try dbWriter.write { db in
             var updatedEntries = 0
             for update in updates {
                 try db.execute(

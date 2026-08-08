@@ -3,7 +3,7 @@ import GRDB
 import os.log
 
 public final class DatabaseManager: @unchecked Sendable {
-    let dbQueue: DatabaseQueue
+    let dbWriter: any DatabaseWriter
 
     /// Coefficient applied to `ln(1 + ageDays)` when combining BM25 with a
     /// recency penalty in FTS5 search ordering. Tuned so that an 11000-day-old
@@ -42,14 +42,15 @@ public final class DatabaseManager: @unchecked Sendable {
 
         var config = Configuration()
         config.foreignKeysEnabled = true
+        config.busyMode = .timeout(5)
         config.prepareDatabase { db in
             try DatabaseManager.tunePragmas(db)
         }
 
-        var queue: DatabaseQueue
+        var writer: any DatabaseWriter
         do {
-            queue = try DatabaseQueue(path: databaseURL.path, configuration: config)
-            try DatabaseManager.migrator.migrate(queue)
+            writer = try DatabasePool(path: databaseURL.path, configuration: config)
+            try DatabaseManager.migrator.migrate(writer)
             PastaLogger.database.info("Database initialized at \(databaseURL.path)")
         } catch {
             PastaLogger.logError(error, logger: PastaLogger.database, context: "Database initialization or migration failed")
@@ -58,8 +59,8 @@ public final class DatabaseManager: @unchecked Sendable {
                 PastaLogger.database.warning("Database appears corrupted, attempting recovery")
                 do {
                     try DatabaseManager.attemptRecovery(databaseURL: databaseURL)
-                    queue = try DatabaseQueue(path: databaseURL.path, configuration: config)
-                    try DatabaseManager.migrator.migrate(queue)
+                    writer = try DatabasePool(path: databaseURL.path, configuration: config)
+                    try DatabaseManager.migrator.migrate(writer)
                     PastaLogger.database.info("Database recovered and re-initialized at \(databaseURL.path)")
                 } catch {
                     PastaLogger.logError(error, logger: PastaLogger.database, context: "Database recovery failed")
@@ -70,7 +71,7 @@ public final class DatabaseManager: @unchecked Sendable {
             }
         }
 
-        self.dbQueue = queue
+        self.dbWriter = writer
     }
 
     public static func inMemory() throws -> DatabaseManager {
@@ -86,11 +87,11 @@ public final class DatabaseManager: @unchecked Sendable {
         let dbQueue = try DatabaseQueue(configuration: config)
         try migrator.migrate(dbQueue)
 
-        return DatabaseManager(dbQueue: dbQueue)
+        return DatabaseManager(dbWriter: dbQueue)
     }
 
-    private init(dbQueue: DatabaseQueue) {
-        self.dbQueue = dbQueue
+    private init(dbWriter: any DatabaseWriter) {
+        self.dbWriter = dbWriter
     }
 
     private static func isCorruptionError(_ error: Error) -> Bool {
@@ -111,9 +112,9 @@ public final class DatabaseManager: @unchecked Sendable {
         }
     }
 
-    /// Provides access to the underlying database queue for components that
+    /// Provides access to the underlying database writer for components that
     /// need to perform their own GRDB reads/writes (e.g. `SnippetStore`).
-    public var dbQueueForSnippets: DatabaseQueue { dbQueue }
+    public var databaseWriterForSnippets: any DatabaseWriter { dbWriter }
 
     public static func defaultDatabaseURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!

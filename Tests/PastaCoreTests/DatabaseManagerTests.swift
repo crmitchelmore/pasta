@@ -1,8 +1,50 @@
 import Foundation
+import GRDB
 import XCTest
 @testable import PastaCore
 
 final class DatabaseManagerTests: XCTestCase {
+    func testOnDiskDatabaseUsesPoolAndAllowsReadDuringWrite() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PastaDatabasePoolTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let manager = try DatabaseManager(databaseURL: directory.appendingPathComponent("pasta.sqlite"))
+        XCTAssertTrue(manager.dbWriter is DatabasePool)
+
+        let writeStarted = DispatchSemaphore(value: 0)
+        let releaseWrite = DispatchSemaphore(value: 0)
+        let writeFinished = expectation(description: "write finished")
+        DispatchQueue.global(qos: .utility).async {
+            defer { writeFinished.fulfill() }
+            try? manager.dbWriter.write { _ in
+                writeStarted.signal()
+                _ = releaseWrite.wait(timeout: .now() + 5)
+            }
+        }
+
+        XCTAssertEqual(writeStarted.wait(timeout: .now() + 2), .success)
+
+        let readFinished = expectation(description: "read was not serialized behind write")
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = try? manager.countEntries()
+            readFinished.fulfill()
+        }
+
+        let readResult = XCTWaiter.wait(for: [readFinished], timeout: 1)
+        releaseWrite.signal()
+        wait(for: [writeFinished], timeout: 2)
+        XCTAssertEqual(readResult, .completed)
+    }
+
+    func testInMemoryDatabaseKeepsSerializedQueue() throws {
+        let manager = try DatabaseManager.inMemory()
+        XCTAssertTrue(manager.dbWriter is DatabaseQueue)
+    }
+
     func testCRUD() throws {
         let db = try DatabaseManager.inMemory()
 
@@ -358,7 +400,7 @@ final class DatabaseManagerTests: XCTestCase {
         XCTAssertEqual(try db.fetch(id: entry.id)?.copyCount, 2)
 
         // An actual content update still reindexes.
-        try db.dbQueueForSnippets.write { dbConn in
+        try db.databaseWriterForSnippets.write { dbConn in
             try dbConn.execute(sql: """
                 UPDATE clipboard_entries
                 SET content = 'quarterly pangolin report'

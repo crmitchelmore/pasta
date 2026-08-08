@@ -5,7 +5,7 @@ extension DatabaseManager {
     /// Marks entries as synced to iCloud.
     public func markSynced(ids: [UUID]) throws {
         guard !ids.isEmpty else { return }
-        try dbQueue.write { db in
+        try dbWriter.write { db in
             let placeholders = ids.map { _ in "?" }.joined(separator: ", ")
             try db.execute(
                 sql: "UPDATE \(ClipboardEntry.databaseTableName) SET isSynced = 1 WHERE id IN (\(placeholders))",
@@ -20,7 +20,7 @@ extension DatabaseManager {
     /// `isSynced = 0` rows — which shrinks to (almost) nothing once a library
     /// is fully synced, so "Sync Now" costs a keyscan rather than a full push.
     public func fetchUnsynced(limit: Int? = nil) throws -> [ClipboardEntry] {
-        try dbQueue.read { db in
+        try dbWriter.read { db in
             var request = ClipboardEntry
                 .filter(Column("isSynced") == false)
                 .order(Column("timestamp").desc)
@@ -35,7 +35,7 @@ extension DatabaseManager {
 
     /// Returns the count of entries still awaiting an iCloud push.
     public func unsyncedCount() throws -> Int {
-        try dbQueue.read { db in
+        try dbWriter.read { db in
             try Int.fetchOne(
                 db,
                 sql: "SELECT COUNT(*) FROM \(ClipboardEntry.databaseTableName) WHERE isSynced = 0"
@@ -45,7 +45,7 @@ extension DatabaseManager {
 
     /// Returns the count of synced entries.
     public func syncedCount() throws -> Int {
-        try dbQueue.read { db in
+        try dbWriter.read { db in
             try Int.fetchOne(
                 db,
                 sql: "SELECT COUNT(*) FROM \(ClipboardEntry.databaseTableName) WHERE isSynced = 1"
