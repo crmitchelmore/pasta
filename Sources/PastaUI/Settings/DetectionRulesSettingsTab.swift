@@ -13,6 +13,11 @@ struct DetectionRulesSettingsTab: View {
         static let extractContent = "pasta.extractContent"
     }
 
+    private enum Evaluation {
+        /// Regex benchmarking is expensive; wait for typing to settle first.
+        static let debounceNanoseconds: UInt64 = 300_000_000
+    }
+
     @State private var configuration: DetectorConfiguration = DetectorConfigurationStore.load()
     @State private var saveMessage: String?
     @State private var showError: Bool = false
@@ -32,6 +37,11 @@ struct DetectionRulesSettingsTab: View {
     @State private var newCustomName: String = ""
     @State private var newCustomPattern: String = ""
     @State private var newCustomCaseInsensitive: Bool = true
+
+    @State private var newPatternPerformance: RegexPerformanceResult? = nil
+    @State private var newPatternEvaluationTask: Task<Void, Never>? = nil
+    @State private var advancedPatternsPerformance: RegexPerformanceResult? = nil
+    @State private var advancedPatternsEvaluationTask: Task<Void, Never>? = nil
 
     var body: some View {
         Form {
@@ -86,7 +96,7 @@ struct DetectionRulesSettingsTab: View {
                                 Text("Advanced regex active")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
-                                performanceBadge(RegexPerformanceEvaluator.evaluate(patterns: rule.cleanedPatterns))
+                                performanceBadge(RegexPerformanceCache.shared.result(patterns: rule.cleanedPatterns))
                             }
                         }
                     }
@@ -126,7 +136,7 @@ struct DetectionRulesSettingsTab: View {
                                 .truncationMode(.middle)
                             Spacer()
                             performanceBadge(
-                                RegexPerformanceEvaluator.evaluate(
+                                RegexPerformanceCache.shared.result(
                                     pattern: custom.pattern,
                                     options: custom.isCaseInsensitive ? [.caseInsensitive] : []
                                 )
@@ -146,15 +156,16 @@ struct DetectionRulesSettingsTab: View {
                 Toggle("Case insensitive", isOn: $newCustomCaseInsensitive)
 
                 if !newCustomPattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    let result = RegexPerformanceEvaluator.evaluate(
-                        pattern: newCustomPattern,
-                        options: newCustomCaseInsensitive ? [.caseInsensitive] : []
-                    )
                     HStack(spacing: 8) {
                         Text("Pattern performance")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                        performanceBadge(result)
+                        if let newPatternPerformance {
+                            performanceBadge(newPatternPerformance)
+                        } else {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
                     }
                 }
 
@@ -239,6 +250,60 @@ struct DetectionRulesSettingsTab: View {
         }
         .onAppear {
             configuration = DetectorConfigurationStore.load()
+        }
+        .onChange(of: newCustomPattern) { _, _ in
+            scheduleNewPatternEvaluation()
+        }
+        .onChange(of: newCustomCaseInsensitive) { _, _ in
+            scheduleNewPatternEvaluation()
+        }
+    }
+
+    /// Debounced, off-main-thread regex benchmark for the "add detector" field.
+    private func scheduleNewPatternEvaluation() {
+        newPatternEvaluationTask?.cancel()
+        newPatternPerformance = nil
+
+        let pattern = newCustomPattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        let caseInsensitive = newCustomCaseInsensitive
+        guard !pattern.isEmpty else { return }
+
+        newPatternEvaluationTask = Task {
+            try? await Task.sleep(nanoseconds: Evaluation.debounceNanoseconds)
+            guard !Task.isCancelled else { return }
+
+            let result = await withCancellableDetachedTask(priority: .utility) { () -> RegexPerformanceResult? in
+                guard !Task.isCancelled else { return nil }
+                return RegexPerformanceCache.shared.result(
+                    pattern: pattern,
+                    options: caseInsensitive ? [.caseInsensitive] : []
+                )
+            }
+
+            guard !Task.isCancelled, let result else { return }
+            newPatternPerformance = result
+        }
+    }
+
+    /// Debounced, off-main-thread regex benchmark for the advanced patterns editor.
+    private func scheduleAdvancedPatternsEvaluation() {
+        advancedPatternsEvaluationTask?.cancel()
+        advancedPatternsPerformance = nil
+
+        let patterns = parsedPatterns(from: advancedPatternsDraft)
+        guard !patterns.isEmpty else { return }
+
+        advancedPatternsEvaluationTask = Task {
+            try? await Task.sleep(nanoseconds: Evaluation.debounceNanoseconds)
+            guard !Task.isCancelled else { return }
+
+            let result = await withCancellableDetachedTask(priority: .utility) { () -> RegexPerformanceResult? in
+                guard !Task.isCancelled else { return nil }
+                return RegexPerformanceCache.shared.result(patterns: patterns)
+            }
+
+            guard !Task.isCancelled, let result else { return }
+            advancedPatternsPerformance = result
         }
     }
 
@@ -343,31 +408,39 @@ struct DetectionRulesSettingsTab: View {
                     Label(detector.title, systemImage: "slider.horizontal.3")
                 }
 
-                let parsedPatternList = parsedPatterns(from: advancedPatternsDraft)
-                if !parsedPatternList.isEmpty {
-                    let result = RegexPerformanceEvaluator.evaluate(patterns: parsedPatternList)
+                if !parsedPatterns(from: advancedPatternsDraft).isEmpty {
                     Section {
                         HStack(spacing: 8) {
                             Text("Performance")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            performanceBadge(result)
+                            if let result = advancedPatternsPerformance {
+                                performanceBadge(result)
+                            } else {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
                         }
                         if !advancedEnabledDraft {
                             Text("Enable advanced regex overrides to apply these patterns.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
-                        Text(result.details)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        if let compileError = result.compileError {
-                            Text(compileError)
+                        if let result = advancedPatternsPerformance {
+                            Text(result.details)
                                 .font(.caption2)
-                                .foregroundStyle(.red)
+                                .foregroundStyle(.secondary)
+                            if let compileError = result.compileError {
+                                Text(compileError)
+                                    .font(.caption2)
+                                    .foregroundStyle(.red)
+                            }
                         }
                     }
                 }
+            }
+            .onChange(of: advancedPatternsDraft, initial: true) { _, _ in
+                scheduleAdvancedPatternsEvaluation()
             }
             .navigationTitle("Advanced Regex - \(detector.title)")
             .toolbar {
@@ -438,7 +511,8 @@ struct DetectionRulesSettingsTab: View {
         let pattern = newCustomPattern.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, !pattern.isEmpty else { return }
 
-        let result = RegexPerformanceEvaluator.evaluate(
+        // Memoized: the debounced field evaluation has usually already run this.
+        let result = RegexPerformanceCache.shared.result(
             pattern: pattern,
             options: newCustomCaseInsensitive ? [.caseInsensitive] : []
         )
@@ -461,6 +535,7 @@ struct DetectionRulesSettingsTab: View {
         newCustomName = ""
         newCustomPattern = ""
         newCustomCaseInsensitive = true
+        newPatternPerformance = nil
     }
 
     private func removeCustomDetector(_ id: UUID) {
@@ -586,11 +661,18 @@ struct DetectionRulesSettingsTab: View {
 }
 
 struct CustomDetectorEditorSheet: View {
+    private enum Evaluation {
+        static let debounceNanoseconds: UInt64 = 300_000_000
+    }
+
     @State private var name: String
     @State private var pattern: String
     @State private var isEnabled: Bool
     @State private var isCaseInsensitive: Bool
     @State private var confidence: Double
+
+    @State private var performance: RegexPerformanceResult? = nil
+    @State private var evaluationTask: Task<Void, Never>? = nil
 
     let detectorID: UUID
     let onSave: (CustomDetectorDefinition) -> Void
@@ -633,21 +715,31 @@ struct CustomDetectorEditorSheet: View {
                     }
                 }
 
-                let result = RegexPerformanceEvaluator.evaluate(
-                    pattern: pattern,
-                    options: isCaseInsensitive ? [.caseInsensitive] : []
-                )
                 Section {
-                    Text("Performance: \(result.rating.displayName)")
-                    Text(result.details)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    if let compileError = result.compileError {
-                        Text(compileError)
+                    if let result = performance {
+                        Text("Performance: \(result.rating.displayName)")
+                        Text(result.details)
                             .font(.caption2)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(.secondary)
+                        if let compileError = result.compileError {
+                            Text(compileError)
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
+                    } else {
+                        HStack(spacing: 8) {
+                            Text("Performance")
+                            ProgressView()
+                                .controlSize(.small)
+                        }
                     }
                 }
+            }
+            .onChange(of: pattern, initial: true) { _, _ in
+                scheduleEvaluation()
+            }
+            .onChange(of: isCaseInsensitive) { _, _ in
+                scheduleEvaluation()
             }
             .navigationTitle("Edit Custom Detector")
             .toolbar {
@@ -657,12 +749,13 @@ struct CustomDetectorEditorSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
                     let trimmedPattern = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+                    // Only compile the regex here; benchmarking is handled by the
+                    // debounced evaluation above.
                     let canSave = !trimmedName.isEmpty
-                        && !trimmedPattern.isEmpty
-                        && RegexPerformanceEvaluator.evaluate(
+                        && RegexPerformanceEvaluator.isValid(
                             pattern: trimmedPattern,
                             options: isCaseInsensitive ? [.caseInsensitive] : []
-                        ).rating != .invalid
+                        )
 
                     Button("Save") {
                         onSave(
@@ -681,5 +774,30 @@ struct CustomDetectorEditorSheet: View {
             }
         }
         .frame(minWidth: 560, minHeight: 420)
+    }
+
+    /// Debounced, off-main-thread regex benchmark for the editor sheet.
+    private func scheduleEvaluation() {
+        evaluationTask?.cancel()
+        performance = nil
+
+        let trimmedPattern = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        let caseInsensitive = isCaseInsensitive
+
+        evaluationTask = Task {
+            try? await Task.sleep(nanoseconds: Evaluation.debounceNanoseconds)
+            guard !Task.isCancelled else { return }
+
+            let result = await withCancellableDetachedTask(priority: .utility) { () -> RegexPerformanceResult? in
+                guard !Task.isCancelled else { return nil }
+                return RegexPerformanceCache.shared.result(
+                    pattern: trimmedPattern,
+                    options: caseInsensitive ? [.caseInsensitive] : []
+                )
+            }
+
+            guard !Task.isCancelled, let result else { return }
+            performance = result
+        }
     }
 }

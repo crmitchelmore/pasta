@@ -68,6 +68,17 @@ public enum RegexPerformanceEvaluator {
         return RegexPerformanceResult(rating: rating, details: details)
     }
 
+    /// Cheap validity check that only compiles the pattern — no benchmarking.
+    /// Use this for things like enabling a Save button, where the rating is not needed.
+    public static func isValid(
+        pattern: String,
+        options: NSRegularExpression.Options = []
+    ) -> Bool {
+        let trimmed = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return (try? NSRegularExpression(pattern: trimmed, options: options)) != nil
+    }
+
     public static func evaluate(patterns: [String]) -> RegexPerformanceResult {
         let cleaned = patterns
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

@@ -3,7 +3,7 @@ import os.log
 
 /// Fast search service using SQLite FTS5 for instant results.
 /// FTS5 runs in SQLite's optimized C engine - sub-10ms for 10k+ entries.
-public final class SearchService {
+public final class SearchService: @unchecked Sendable {
     public struct Match: Sendable {
         public let entry: ClipboardEntry
         /// Lower is better. FTS5 bm25 rank converted to 0-1 score.

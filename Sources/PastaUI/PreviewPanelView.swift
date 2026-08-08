@@ -23,11 +23,14 @@ public struct PreviewPanelView: View {
         Group {
             if let entry {
                 let metadataIsLarge = isMetadataLarge(entry.metadata)
+                // Parse the metadata JSON once per body pass; every section below
+                // reads from this dictionary instead of re-parsing it.
+                let metadata = entry.metadata.flatMap { parseJSONDictionary($0) }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         header(entry)
 
-                        if let decoded = decodedPreview(from: entry), decoded != entry.content {
+                        if let decoded = decodedPreview(from: metadata), decoded != entry.content {
                             let decodedPreview = truncatedText(decoded, limit: Limits.inlineContentCharacters)
                             SectionBox(title: "Decoded") {
                                 MonospaceText(decodedPreview.text)
@@ -59,13 +62,13 @@ public struct PreviewPanelView: View {
 
                             if (entry.contentType == .image || entry.contentType == .screenshot), let imagePath = entry.imagePath {
                                 ImagePreview(path: imagePath)
-                            } else if entry.contentType == .filePath, let filePreview = filePathPreview(from: entry) {
+                            } else if entry.contentType == .filePath, let filePreview = filePathPreview(from: metadata, entry: entry) {
                                 FilePreview(preview: filePreview)
-                            } else if entry.contentType == .color, let swatch = colorSwatchPreview(from: entry) {
+                            } else if entry.contentType == .color, let swatch = colorSwatchPreview(from: metadata, entry: entry) {
                                 ColorSwatchPreview(swatch: swatch)
                             } else if entry.contentType == .code {
                                 let codePreview = truncatedText(entry.content, limit: Limits.inlineCodeCharacters)
-                                CodePreview(code: codePreview.text, language: detectedCodeLanguage(from: entry))
+                                CodePreview(code: codePreview.text, language: detectedCodeLanguage(from: metadata))
                                 if codePreview.isTruncated {
                                     Text("Showing first \(Limits.inlineCodeCharacters.formatted()) characters for performance.")
                                         .font(.caption2)
@@ -84,7 +87,7 @@ public struct PreviewPanelView: View {
                             }
                         }
 
-                        if !metadataIsLarge, entry.contentType == .jwt, let jwt = jwtPreview(from: entry) {
+                        if !metadataIsLarge, entry.contentType == .jwt, let jwt = jwtPreview(from: metadata) {
                             SectionBox(title: "JWT") {
                                 VStack(alignment: .leading, spacing: 8) {
                                     if let header = jwt.headerJSON {
@@ -106,7 +109,7 @@ public struct PreviewPanelView: View {
                             }
                         }
 
-                        if !metadataIsLarge, let summary = metadataSummary(from: entry) {
+                        if !metadataIsLarge, let summary = metadataSummary(from: metadata, contentType: entry.contentType) {
                             SectionBox(title: "Details") {
                                 VStack(alignment: .leading, spacing: 8) {
                                     ForEach(summary.items, id: \.title) { item in
@@ -124,7 +127,7 @@ public struct PreviewPanelView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
-                        } else if let pretty = prettyPrintedJSON(entry.metadata) {
+                        } else if let pretty = prettyPrintedJSON(metadata) {
                             SectionBox(title: "Metadata") {
                                 MonospaceText(pretty)
                             }
@@ -186,16 +189,14 @@ public struct PreviewPanelView: View {
         }
     }
 
-    private func decodedPreview(from entry: ClipboardEntry) -> String? {
-        guard let meta = entry.metadata else { return nil }
-        guard let dict = parseJSONDictionary(meta) else { return nil }
+    private func decodedPreview(from dict: [String: Any]?) -> String? {
+        guard let dict else { return nil }
         guard let encoding = dict["encoding"] as? [String: Any] else { return nil }
         return encoding["decodedPreview"] as? String
     }
 
-    private func detectedCodeLanguage(from entry: ClipboardEntry) -> CodeLanguage? {
-        guard let meta = entry.metadata else { return nil }
-        guard let dict = parseJSONDictionary(meta) else { return nil }
+    private func detectedCodeLanguage(from dict: [String: Any]?) -> CodeLanguage? {
+        guard let dict else { return nil }
         guard let codes = dict["code"] as? [[String: Any]] else { return nil }
         guard let first = codes.first else { return nil }
         guard let lang = first["language"] as? String else { return nil }
@@ -211,11 +212,10 @@ public struct PreviewPanelView: View {
         var value: String
     }
 
-    private func metadataSummary(from entry: ClipboardEntry) -> MetadataSummary? {
-        guard let meta = entry.metadata else { return nil }
-        guard let dict = parseJSONDictionary(meta) else { return nil }
+    private func metadataSummary(from dict: [String: Any]?, contentType: ContentType) -> MetadataSummary? {
+        guard let dict else { return nil }
 
-        switch entry.contentType {
+        switch contentType {
         case .phoneNumber:
             guard let phone = firstObject(dict["phoneNumbers"]) else { return nil }
             let number = phone["number"] as? String ?? ""
@@ -311,9 +311,8 @@ public struct PreviewPanelView: View {
         var claimsPrettyJSON: String?
     }
 
-    private func jwtPreview(from entry: ClipboardEntry) -> JWTPreview? {
-        guard let meta = entry.metadata else { return nil }
-        guard let dict = parseJSONDictionary(meta) else { return nil }
+    private func jwtPreview(from dict: [String: Any]?) -> JWTPreview? {
+        guard let dict else { return nil }
         guard let jwts = dict["jwt"] as? [[String: Any]], let first = jwts.first else { return nil }
 
         let header = first["headerJSON"] as? String
@@ -330,9 +329,8 @@ public struct PreviewPanelView: View {
         return JWTPreview(headerJSON: header, payloadJSON: payload, claimsPrettyJSON: prettyClaims)
     }
 
-    fileprivate func filePathPreview(from entry: ClipboardEntry) -> FilePathPreviewData? {
-        guard let meta = entry.metadata else { return nil }
-        guard let dict = parseJSONDictionary(meta) else { return nil }
+    fileprivate func filePathPreview(from dict: [String: Any]?, entry: ClipboardEntry) -> FilePathPreviewData? {
+        guard let dict else { return nil }
         guard let paths = dict["filePaths"] as? [[String: Any]], let first = paths.first else { return nil }
 
         return FilePathPreviewData(
@@ -344,9 +342,8 @@ public struct PreviewPanelView: View {
         )
     }
 
-    private func colorSwatchPreview(from entry: ClipboardEntry) -> ColorSwatchPreview.Swatch? {
-        if let meta = entry.metadata,
-           let dict = parseJSONDictionary(meta),
+    private func colorSwatchPreview(from dict: [String: Any]?, entry: ClipboardEntry) -> ColorSwatchPreview.Swatch? {
+        if let dict,
            let colors = dict["colors"] as? [[String: Any]],
            let first = colors.first,
            let r = (first["red"] as? Int) ?? (first["red"] as? Double).map(Int.init),
@@ -375,13 +372,10 @@ public struct PreviewPanelView: View {
         return obj as? [String: Any]
     }
 
-    private func prettyPrintedJSON(_ json: String?) -> String? {
-        guard let json else { return nil }
-        guard json.utf8.count <= Limits.maxMetadataRenderBytes else { return nil }
-        guard let data = json.data(using: .utf8) else { return nil }
-        guard let obj = try? JSONSerialization.jsonObject(with: data, options: []) else { return nil }
-        guard JSONSerialization.isValidJSONObject(obj) else { return nil }
-        guard let pretty = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]) else { return nil }
+    private func prettyPrintedJSON(_ dict: [String: Any]?) -> String? {
+        guard let dict else { return nil }
+        guard JSONSerialization.isValidJSONObject(dict) else { return nil }
+        guard let pretty = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]) else { return nil }
         guard let prettyString = String(data: pretty, encoding: .utf8) else { return nil }
         return truncatedText(prettyString, limit: Limits.maxMetadataRenderBytes).text
     }

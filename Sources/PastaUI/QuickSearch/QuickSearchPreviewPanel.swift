@@ -4,7 +4,17 @@ import SwiftUI
 // MARK: - Quick Search Preview Panel
 
 struct QuickSearchPreviewPanel: View {
+    private enum Limits {
+        static let inlineContentCharacters = 12_000
+    }
+
     let entry: ClipboardEntry
+
+    /// Counting and slicing `entry.content` walks graphemes, so it is done once
+    /// per entry instead of on every body evaluation.
+    @State private var displayedContent: String = ""
+    @State private var characterCount: Int = 0
+    @State private var isContentTruncated: Bool = false
 
     var body: some View {
         let isImageEntry = (entry.contentType == .image || entry.contentType == .screenshot) && entry.imagePath != nil
@@ -40,7 +50,7 @@ struct QuickSearchPreviewPanel: View {
                 Spacer()
 
                 // Character count badge or "Image" badge
-                Text(isImageEntry ? "Image" : "\(entry.content.count.formatted()) chars")
+                Text(isImageEntry ? "Image" : "\(characterCount.formatted()) chars")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
@@ -59,11 +69,19 @@ struct QuickSearchPreviewPanel: View {
                     ImagePreview(path: imagePath)
                         .padding(16)
                 } else {
-                    Text(entry.content)
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(displayedContent)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if isContentTruncated {
+                            Text("Showing first \(Limits.inlineContentCharacters.formatted()) characters for performance.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(16)
                 }
             }
 
@@ -82,6 +100,24 @@ struct QuickSearchPreviewPanel: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
+        }
+        .onChange(of: entry.id, initial: true) { _, _ in
+            refreshDisplayedContent()
+        }
+    }
+
+    private func refreshDisplayedContent() {
+        let content = entry.content
+        let count = content.count
+        characterCount = count
+
+        if count > Limits.inlineContentCharacters {
+            let end = content.index(content.startIndex, offsetBy: Limits.inlineContentCharacters)
+            displayedContent = String(content[..<end])
+            isContentTruncated = true
+        } else {
+            displayedContent = content
+            isContentTruncated = false
         }
     }
 }
