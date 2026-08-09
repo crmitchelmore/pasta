@@ -9,15 +9,16 @@
   <meta property="og:description" content="Local-first clipboard history with smart detection, snippets, command mode, and optional iCloud sync. Free & open source.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://pasta-app.com">
-  <meta property="og:image" content="https://pasta-app.com/images/og-image.png">
+  <meta property="og:image" content="https://pasta-app.com/images/screenshot-main.png">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#F7F2E7">
   <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="images/favicon-16x16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="images/apple-touch-icon.png">
   
   <!-- Fonts: Satoshi for headings, General Sans for body -->
   <link rel="preconnect" href="https://api.fontshare.com">
-  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@700,900&f[]=general-sans@400,500,600&display=swap" rel="stylesheet">
+  <link href="https://api.fontshare.com/v2/css?f[]=zodiak@700,800,701&amp;f[]=general-sans@400,500,600&amp;display=swap" rel="stylesheet">
   
   <style>
     :root {
@@ -1128,9 +1129,312 @@
       .hero__badge-dot { animation: none !important; }
       .fade-in { opacity: 1; transform: none; }
     }
+
+    /* Pastificio: editorial Italian print system, art-directed with Fable. */
+    :root {
+      --paper: #f7f2e7;
+      --paper-raised: #fffdf6;
+      --paper-dim: #efe8d8;
+      --ink: #1f1b16;
+      --ink-soft: #5c554a;
+      --tomato: #c7402f;
+      --tomato-deep: #9e3223;
+      --basil: #2f6b3f;
+      --yolk: #e8a93b;
+      --line: rgba(31, 27, 22, 0.18);
+      --color-bg: var(--paper);
+      --color-bg-elevated: var(--paper-dim);
+      --color-bg-card: var(--paper-raised);
+      --color-text: var(--ink);
+      --color-text-muted: var(--ink-soft);
+      --color-accent: var(--tomato);
+      --color-accent-warm: var(--tomato);
+      --color-accent-deep: var(--tomato-deep);
+      --color-accent-glow: transparent;
+      --color-secondary: var(--basil);
+      --color-tertiary: var(--yolk);
+      --color-border: var(--line);
+      --font-display: 'Zodiak', Georgia, serif;
+      --font-body: 'General Sans', -apple-system, sans-serif;
+      --border-print: 1.5px solid var(--ink);
+      --shadow-print: 6px 6px 0 rgba(31, 27, 22, 0.1);
+      --shadow-print-hover: 9px 9px 0 rgba(31, 27, 22, 0.12);
+    }
+
+    body {
+      background: var(--paper);
+      color: var(--ink);
+    }
+
+    body::before,
+    .bg-orb {
+      display: none;
+    }
+
+    .skip-link {
+      position: fixed;
+      top: 0.75rem;
+      left: 0.75rem;
+      z-index: 1000;
+      padding: 0.75rem 1rem;
+      color: #fff;
+      background: var(--ink);
+      transform: translateY(-160%);
+    }
+
+    .skip-link:focus { transform: translateY(0); }
+
+    :focus-visible {
+      outline: 3px solid var(--tomato);
+      outline-offset: 3px;
+    }
+
+    .nav {
+      background: rgba(247, 242, 231, 0.94);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+
+    .nav__link { color: var(--ink-soft); }
+    .nav__link:hover { color: var(--tomato-deep); }
+
+    .nav__cta,
+    .btn--primary {
+      color: #fff;
+      background: var(--tomato);
+      border: var(--border-print);
+      border-radius: 7px;
+      box-shadow: 4px 4px 0 var(--ink);
+    }
+
+    .nav__cta:hover,
+    .btn--primary:hover {
+      background: var(--tomato-deep);
+      box-shadow: 6px 6px 0 var(--ink);
+      transform: translate(-2px, -2px);
+    }
+
+    .nav__cta:active,
+    .btn--primary:active {
+      box-shadow: 1px 1px 0 var(--ink);
+      transform: translate(3px, 3px);
+    }
+
+    .btn--secondary {
+      color: var(--ink);
+      background: var(--paper-raised);
+      border: var(--border-print);
+      box-shadow: 4px 4px 0 rgba(31, 27, 22, 0.16);
+    }
+
+    .hero {
+      min-height: auto;
+      padding-top: 11rem;
+      background:
+        linear-gradient(var(--line) 1px, transparent 1px),
+        linear-gradient(90deg, var(--line) 1px, transparent 1px);
+      background-size: 48px 48px;
+      background-position: center top;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      background: radial-gradient(circle at 50% 38%, var(--paper) 0 24%, rgba(247, 242, 231, 0.84) 58%, rgba(247, 242, 231, 0.5));
+      pointer-events: none;
+    }
+
+    .hero > * { position: relative; z-index: 1; }
+
+    .hero__badge {
+      color: var(--basil);
+      background: var(--paper-raised);
+      border: 1.5px solid var(--basil);
+      border-radius: 999px;
+      box-shadow: 3px 3px 0 rgba(47, 107, 63, 0.18);
+      font-weight: 600;
+    }
+
+    .hero__title {
+      color: var(--ink);
+      font-size: clamp(3.4rem, 8vw, 6.5rem);
+      letter-spacing: -0.045em;
+    }
+
+    .hero__title-gradient {
+      color: var(--tomato);
+      background: none;
+      -webkit-text-fill-color: currentColor;
+      font-style: italic;
+    }
+
+    .hero__subtitle { color: var(--ink-soft); }
+    .hero__meta { color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.75rem; }
+
+    .hero__screenshot-wrapper,
+    .quick-search__screenshot {
+      overflow: hidden;
+      background: var(--paper-raised);
+      border: var(--border-print);
+      border-radius: 16px;
+      box-shadow: 10px 10px 0 rgba(31, 27, 22, 0.14);
+    }
+
+    .hero__screenshot-wrapper::before {
+      content: '●  ●  ●     PASTA / QUICK SEARCH';
+      display: block;
+      padding: 0.8rem 1rem;
+      color: var(--ink-soft);
+      background: var(--paper-raised);
+      border-bottom: 1px solid var(--line);
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+      text-align: left;
+    }
+
+    .hero__screenshot-wrapper::after { display: none; }
+
+    .section-label {
+      color: var(--tomato-deep);
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      font-weight: 700;
+    }
+
+    .section-title { color: var(--ink); letter-spacing: -0.025em; }
+
+    .whats-new,
+    .content-types,
+    .import-section,
+    .privacy,
+    .support {
+      background: var(--paper-dim);
+      border-block: 1px solid var(--line);
+    }
+
+    .highlight,
+    .feature-card,
+    .content-type,
+    .shortcut,
+    .import-app,
+    .privacy__badge,
+    .demo-card,
+    .cross-device__content {
+      color: var(--ink);
+      background: var(--paper-raised);
+      border: var(--border-print);
+      box-shadow: var(--shadow-print);
+    }
+
+    .highlight::after { display: none; }
+
+    .highlight:hover,
+    .feature-card:hover,
+    .content-type:hover,
+    .shortcut:hover,
+    .import-app:hover,
+    .demo-card:hover {
+      border-color: var(--ink);
+      box-shadow: var(--shadow-print-hover);
+      transform: translate(-2px, -2px);
+    }
+
+    .highlight__chip {
+      color: #fff;
+      background: var(--basil);
+      border-color: var(--basil);
+    }
+
+    .highlight:nth-child(n+6) .highlight__chip { background: var(--yolk); color: var(--ink); }
+    .highlight:nth-child(n+7) .highlight__chip { background: var(--tomato); color: #fff; }
+
+    .feature-card__title,
+    .highlight__title,
+    .content-type__label,
+    .quick-search__text h3,
+    .demo-card h3 { color: var(--ink); }
+
+    .feature-card__description,
+    .highlight__body,
+    .content-type__example,
+    .quick-search__text p,
+    .demo-card__lead { color: var(--ink-soft); }
+
+    .content-type {
+      border-width: 0 0 1px;
+      border-radius: 0;
+      box-shadow: none;
+    }
+
+    .quick-search__screenshot {
+      aspect-ratio: 1356 / 650;
+      transform: rotate(-1deg);
+      transition: transform 0.25s ease, box-shadow 0.25s ease;
+    }
+
+    .quick-search__screenshot:hover {
+      transform: rotate(0);
+      box-shadow: 12px 12px 0 rgba(31, 27, 22, 0.14);
+    }
+
+    .quick-search__screenshot img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top;
+    }
+
+    .key {
+      color: var(--ink);
+      background: var(--paper-raised);
+      border: 1px solid var(--ink);
+      box-shadow: 0 2px 0 var(--ink);
+    }
+
+    .download {
+      background: var(--tomato);
+      border-block: var(--border-print);
+    }
+
+    .download__title,
+    .download__subtitle,
+    .download__requirements { color: #fff; }
+
+    .footer { background: var(--ink); border: 0; }
+    .footer__copyright, .footer__link { color: #d8d0c2; }
+
+    .fade-in {
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity 0.45s var(--ease-out-expo), transform 0.45s var(--ease-out-expo);
+    }
+
+    .fade-in.visible { opacity: 1; transform: none; }
+
+    @media (max-width: 768px) {
+      .nav { padding: 0.75rem 1rem; }
+      .nav__logo { font-size: 1.25rem; }
+      .nav__logo-icon { width: 34px; height: 34px; }
+      .nav__cta { padding: 0.55rem 0.85rem; font-size: 0.85rem; }
+      .hero { padding: 9rem 1.25rem 4rem; background-size: 32px 32px; }
+      .hero__badge { max-width: 100%; white-space: normal; text-align: center; line-height: 1.4; }
+      .hero__title { width: 100%; font-size: clamp(3rem, 17vw, 4.5rem); overflow-wrap: anywhere; }
+      .hero__subtitle { width: 100%; font-size: 1.05rem; }
+      .hero__actions { width: 100%; }
+      .hero__actions .btn { width: min(100%, 270px); justify-content: center; }
+      .hero__meta { width: 100%; gap: 0.75rem; }
+      .hero__screenshot { width: calc(100% + 2.5rem); margin-inline: -1.25rem; }
+      .hero__screenshot-wrapper { border-radius: 0; border-inline: 0; box-shadow: 0 8px 0 rgba(31, 27, 22, 0.14); }
+      .quick-search__screenshot { transform: none; }
+    }
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <!-- Background orbs -->
   <div class="bg-orb bg-orb--1"></div>
   <div class="bg-orb bg-orb--2"></div>
@@ -1154,14 +1458,11 @@
     </a>
   </nav>
 
+  <main id="main">
   <!-- Hero Section -->
   <section class="hero">
-    <div class="hero__badge">
-      <span class="hero__badge-dot"></span>
-      Free & Open Source · v1.0
-    </div>
     <a href="#whats-new" class="hero__badge hero__badge--new" style="margin-bottom: 2rem; text-decoration: none;">
-      🎉 Pasta 1.0 — Snippets, Command Mode, Pinned items &amp; more
+      Free &amp; open source · Pasta 1.0 — snippets, Command Mode, pinned items &amp; more
     </a>
 
     <h1 class="hero__title">
@@ -1215,7 +1516,7 @@
 
     <div class="hero__screenshot">
       <div class="hero__screenshot-wrapper">
-        <img src="images/screenshot-main.png" alt="Pasta app showing clipboard history with smart content detection" />
+        <img src="images/screenshot-main.png" width="1360" height="1000" alt="Pasta's Quick Search panel showing clipboard history with type filters and Command-1–9 quick-paste shortcuts" />
       </div>
     </div>
   </section>
@@ -1562,7 +1863,7 @@
         </div>
       </div>
       <div class="quick-search__screenshot">
-        <img src="images/screenshot-quicksearch.png" alt="Quick Search panel - Spotlight-style clipboard access" />
+        <img src="images/screenshot-quicksearch.png" width="1356" height="1000" loading="lazy" alt="Quick Search panel filtering clipboard history as you type" />
       </div>
     </div>
   </section>
@@ -1926,6 +2227,7 @@ Blockers: none
     </div>
   </section>
 
+  </main>
   <!-- Footer -->
   <footer class="footer">
     <div class="footer__inner">
@@ -1953,7 +2255,7 @@ Blockers: none
       // Stagger siblings within the same parent
       const siblings = Array.from(el.parentElement.children).filter(c => c === el || c.classList.contains(el.classList[0]));
       const index = siblings.indexOf(el);
-      el.style.transitionDelay = `${index * 0.05}s`;
+      el.style.transitionDelay = `${Math.min(index, 8) * 0.04}s`;
       observer.observe(el);
     });
   </script>

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Generate Sparkle appcast.xml from GitHub release
-# Usage: ./scripts/generate-appcast.sh <version> <build-number> <dmg-path> <private-key-base64>
+# Usage: ./scripts/generate-appcast.sh <version> <build-number> <dmg-path> <private-key-base64> [release-notes-html]
 
 set -e
 
@@ -8,6 +8,7 @@ VERSION="$1"
 BUILD_NUMBER="$2"
 DMG_PATH="$3"
 PRIVATE_KEY_BASE64="$4"
+RELEASE_NOTES_HTML_PATH="${5:-}"
 
 if [ -z "$VERSION" ] || [ -z "$BUILD_NUMBER" ] || [ -z "$DMG_PATH" ] || [ -z "$PRIVATE_KEY_BASE64" ]; then
     echo "Usage: $0 <version> <build-number> <dmg-path> <private-key-base64>"
@@ -82,6 +83,9 @@ cat << EOF
       <sparkle:version>${BUILD_NUMBER}</sparkle:version>
       <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
       <pubDate>${PUB_DATE}</pubDate>
+      $(if [ -n "$RELEASE_NOTES_HTML_PATH" ] && [ -s "$RELEASE_NOTES_HTML_PATH" ]; then
+          printf '<description><![CDATA[\n%s\n      ]]></description>' "$(cat "$RELEASE_NOTES_HTML_PATH")"
+        fi)
       <enclosure
         url="${DOWNLOAD_URL}"
         sparkle:edSignature="${SIGNATURE}"

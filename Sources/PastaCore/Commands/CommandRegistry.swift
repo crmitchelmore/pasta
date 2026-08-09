@@ -4,6 +4,11 @@ import Foundation
 @MainActor
 public final class CommandRegistry: ObservableObject {
     public static let shared = CommandRegistry()
+
+    private static let dynamicClearRegex = try? NSRegularExpression(
+        pattern: "^clear\\s+(\\d+)\\s*(mins?|minutes?|m|hours?|hr?|days?|d)$",
+        options: .caseInsensitive
+    )
     
     @Published public private(set) var commands: [Command] = []
     
@@ -27,16 +32,22 @@ public final class CommandRegistry: ObservableObject {
         if let dynamicCommand = parseDynamicClear(query: trimmed) {
             // Put the dynamic match first, then other matching commands
             var results = [dynamicCommand]
-            results.append(contentsOf: commands.filter { cmd in
-                cmd.trigger.lowercased().contains(trimmed) && cmd.id != dynamicCommand.id
+            results.append(contentsOf: commands.filter { command in
+                command.trigger.localizedCaseInsensitiveContains(trimmed) && command.id != dynamicCommand.id
             })
             return results
         }
         
         // Filter by prefix or contains match
-        let exactPrefix = commands.filter { $0.trigger.lowercased().hasPrefix(trimmed) }
-        let contains = commands.filter { 
-            $0.trigger.lowercased().contains(trimmed) && !$0.trigger.lowercased().hasPrefix(trimmed)
+        var exactPrefix: [Command] = []
+        var contains: [Command] = []
+        for command in commands {
+            let trigger = command.trigger.lowercased()
+            if trigger.hasPrefix(trimmed) {
+                exactPrefix.append(command)
+            } else if trigger.contains(trimmed) {
+                contains.append(command)
+            }
         }
         
         return exactPrefix + contains
@@ -282,9 +293,7 @@ public final class CommandRegistry: ObservableObject {
     /// Parse dynamic clear commands like "clear 5 mins", "clear 2 hours", "clear 3 days"
     private func parseDynamicClear(query: String) -> Command? {
         // Pattern: clear <number> <unit>
-        let pattern = "^clear\\s+(\\d+)\\s*(mins?|minutes?|m|hours?|hr?|days?|d)$"
-        
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+        guard let regex = Self.dynamicClearRegex,
               let match = regex.firstMatch(in: query, range: NSRange(query.startIndex..., in: query)),
               match.numberOfRanges >= 3,
               let numberRange = Range(match.range(at: 1), in: query),

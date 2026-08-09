@@ -148,7 +148,8 @@ extension PanelContentView {
             candidate = trimmed.split(whereSeparator: \.isNewline).first.map(String.init) ?? trimmed
         } else if entry.contentType == .text || entry.contentType == .prose {
             candidate = trimmed.split(whereSeparator: \.isNewline).first.map(String.init) ?? trimmed
-            guard candidate.lowercased().hasPrefix("http://") || candidate.lowercased().hasPrefix("https://") else {
+            let lowercaseCandidate = candidate.lowercased()
+            guard lowercaseCandidate.hasPrefix("http://") || lowercaseCandidate.hasPrefix("https://") else {
                 return false
             }
         } else {
