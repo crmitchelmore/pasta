@@ -23,6 +23,9 @@ jobs:
       
       - name: Run tests
         run: swift test --parallel
+
+      - name: Test release-notes generator
+        run: node --test Tests/ReleaseNotesTests/*.test.mjs
       
       - name: Build release
         run: swift build -c release
