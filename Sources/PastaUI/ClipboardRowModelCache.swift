@@ -6,16 +6,23 @@ import PastaCore
 /// `ClipboardListView` rebuilds its row array on every body evaluation (every
 /// keystroke, selection change, …), and `ClipboardRowData.init` does
 /// O(content-length) string work per row. Deriving each row once per entry
-/// *version* and reusing it makes body evaluations O(rows) pointer copies.
+/// *value* and reusing it makes body evaluations O(rows) pointer copies.
 ///
-/// The change token covers every `ClipboardEntry` field the row reads except
-/// `content`, which is immutable for a given id (dedup bumps surface as
-/// `copyCount`/`timestamp` changes; reclassification as `contentType`/
-/// `metadata` changes).
+/// Freshness is decided by comparing the whole cached `ClipboardEntry` with
+/// `==` (synthesized memberwise equality) — no hand-maintained field list to
+/// drift out of sync with what `ClipboardRowData` reads. On keystroke-driven
+/// re-renders the entry's strings share copy-on-write storage with the cached
+/// copy, so the comparison takes the pointer-equality fast path; the cached
+/// entry is refreshed on every hit to keep that fast path once new storage
+/// appears (e.g. after a refresh re-fetch).
 ///
 /// Not thread-safe: confine to the main actor (SwiftUI body evaluations).
 final class ClipboardRowModelCache {
-    private var rowsByID: [UUID: (token: Int, row: ClipboardRowData)] = [:]
+    private var rowsByID: [UUID: (entry: ClipboardEntry, row: ClipboardRowData)] = [:]
+
+    /// Test hooks.
+    var cachedRowCountForTesting: Int { rowsByID.count }
+    private(set) var rowBuildCountForTesting = 0
 
     /// Returns row models for `entries` in order, reusing cached rows whose
     /// entry is unchanged, and pruning cache slots for entries that are no
@@ -31,17 +38,18 @@ final class ClipboardRowModelCache {
     }
 
     func row(for entry: ClipboardEntry) -> ClipboardRowData {
-        let token = Self.changeToken(for: entry)
-        if let cached = rowsByID[entry.id], cached.token == token {
+        if let cached = rowsByID[entry.id], cached.entry == entry {
+            // Adopt the caller's instance so future comparisons against the
+            // same array hit the COW pointer fast path instead of re-walking
+            // string contents.
+            rowsByID[entry.id] = (entry, cached.row)
             return cached.row
         }
         let row = ClipboardRowData(from: entry)
-        rowsByID[entry.id] = (token, row)
+        rowBuildCountForTesting += 1
+        rowsByID[entry.id] = (entry, row)
         return row
     }
-
-    /// Test hook.
-    var cachedRowCountForTesting: Int { rowsByID.count }
 
     private func pruneIfNeeded(keeping entries: [ClipboardEntry]) {
         // Let the cache keep rows for entries that briefly left the display
@@ -50,20 +58,5 @@ final class ClipboardRowModelCache {
         guard rowsByID.count > max(entries.count * 2, 400) else { return }
         let liveIDs = Set(entries.map(\.id))
         rowsByID = rowsByID.filter { liveIDs.contains($0.key) }
-    }
-
-    static func changeToken(for entry: ClipboardEntry) -> Int {
-        var hasher = Hasher()
-        hasher.combine(entry.id)
-        hasher.combine(entry.contentType.rawValue)
-        hasher.combine(entry.sourceApp)
-        hasher.combine(entry.timestamp)
-        hasher.combine(entry.copyCount)
-        hasher.combine(entry.isSynced)
-        hasher.combine(entry.isPinned)
-        hasher.combine(entry.imagePath)
-        hasher.combine(entry.parentEntryId)
-        hasher.combine(entry.metadata)
-        return hasher.finalize()
     }
 }

@@ -33,8 +33,9 @@ public struct ClipboardRowData: Equatable {
     /// that render thumbnails (QuickSearch). The main-panel cell does not
     /// currently render thumbnails but the data lives here for parity.
     public let imagePath: String?
-    /// Number of characters in the underlying content. QuickSearch shows this
-    /// as part of its metadata line.
+    /// UTF-8 byte length of the underlying content (O(1) for native strings,
+    /// unlike grapheme counting). QuickSearch renders it as a byte-size in
+    /// its metadata line.
     public let contentLength: Int
     /// When non-nil, this row renders as a non-selectable section header
     /// with the given title. The other fields are unused.
@@ -175,14 +176,22 @@ public struct ClipboardRowData: Equatable {
         return parts.joined(separator: " • ")
     }
 
+    private static let byteCountFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return formatter
+    }()
+
     /// Metadata segments for the QuickSearch standard row.
     /// Returns the pieces in the order the row should render them, e.g.
-    /// ["URL", "Safari", "5m ago", "12 chars"].
+    /// ["URL", "Safari", "5m ago", "12 bytes"]. The size is a byte count
+    /// (`contentLength` is UTF-8 bytes), so the label must never say "chars"
+    /// — that overstates by up to 4x for non-ASCII content.
     public var quickSearchMetadataSegments: [String] {
         var parts: [String] = [contentType.displayTitle]
         if let sourceAppName { parts.append(sourceAppName) }
         parts.append(timestamp.relativeFormatted)
-        parts.append("\(contentLength.formatted()) chars")
+        parts.append(Self.byteCountFormatter.string(fromByteCount: Int64(contentLength)))
         return parts
     }
 

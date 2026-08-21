@@ -6,11 +6,11 @@ import PastaCore
 final class RecordMapperTests: XCTestCase {
     private let zoneID = CKRecordZone.ID(zoneName: "TestZone", ownerName: CKCurrentUserDefaultName)
 
-    func testPreparedRecordWithoutRawDataHasNoTemporaryAsset() {
+    func testPreparedRecordWithoutRawDataHasNoTemporaryAsset() throws {
         let mapper = RecordMapper()
         let entry = ClipboardEntry(content: "plain text", contentType: .text)
 
-        let prepared = mapper.preparedRecord(from: entry, zoneID: zoneID)
+        let prepared = try mapper.preparedRecord(from: entry, zoneID: zoneID)
 
         XCTAssertNil(prepared.temporaryAssetURL)
         XCTAssertNil(prepared.record["imageAsset"])
@@ -24,7 +24,7 @@ final class RecordMapperTests: XCTestCase {
         let bytes = Data((0..<4096).map { UInt8(truncatingIfNeeded: $0) })
         let entry = ClipboardEntry(content: "", contentType: .image, rawData: bytes)
 
-        let prepared = mapper.preparedRecord(from: entry, zoneID: zoneID)
+        let prepared = try mapper.preparedRecord(from: entry, zoneID: zoneID)
 
         let assetURL = try XCTUnwrap(prepared.temporaryAssetURL)
         XCTAssertTrue(FileManager.default.fileExists(atPath: assetURL.path))
@@ -44,8 +44,8 @@ final class RecordMapperTests: XCTestCase {
         let mapper = RecordMapper()
         let entry = ClipboardEntry(content: "", contentType: .image, rawData: Data([1, 2, 3]))
 
-        let first = mapper.preparedRecord(from: entry, zoneID: zoneID)
-        let second = mapper.preparedRecord(from: entry, zoneID: zoneID)
+        let first = try mapper.preparedRecord(from: entry, zoneID: zoneID)
+        let second = try mapper.preparedRecord(from: entry, zoneID: zoneID)
         defer {
             first.cleanupTemporaryAsset()
             second.cleanupTemporaryAsset()
@@ -70,7 +70,7 @@ final class RecordMapperTests: XCTestCase {
             metadata: "{\"k\":1}"
         )
 
-        let prepared = mapper.preparedRecord(from: original, zoneID: zoneID)
+        let prepared = try mapper.preparedRecord(from: original, zoneID: zoneID)
         defer { prepared.cleanupTemporaryAsset() }
         let decoded = try XCTUnwrap(mapper.entry(from: prepared.record))
 

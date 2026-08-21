@@ -46,7 +46,7 @@ public enum CodeLanguage: String, Codable, CaseIterable {
     case unknown
 }
 
-public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Sendable {
+public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Sendable, Equatable {
     public static let databaseTableName = "clipboard_entries"
 
     public let id: UUID

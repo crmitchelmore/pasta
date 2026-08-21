@@ -1,17 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// Cache of decoded, display-sized preview images so selecting back and forth
-/// between entries doesn't re-read and re-decode the file every time (same
-/// pattern as the quick-search thumbnail cache, keyed by path + pixel size —
-/// stored images are immutable, so no invalidation is needed).
-private let previewImageCache: NSCache<NSString, NSImage> = {
-    let cache = NSCache<NSString, NSImage>()
-    cache.countLimit = 24
-    cache.totalCostLimit = 128 * 1024 * 1024
-    return cache
-}()
-
 struct ImagePreview: View {
     let path: String
 
@@ -60,19 +49,17 @@ struct ImagePreview: View {
     private func loadImage(from imagePath: String) {
         loadedPath = imagePath
 
-        let cacheKey = NSString(string: "\(imagePath)|\(Int(Self.maxPixelSize))")
-        if let cached = previewImageCache.object(forKey: cacheKey) {
+        // Selecting back and forth between entries must not re-read and
+        // re-decode the file every time; the shared cache serves repeats
+        // instantly.
+        if let cached = ImageDownsampler.cached(path: imagePath, maxPixelSize: Self.maxPixelSize) {
             image = cached
             return
         }
 
         image = nil
         DispatchQueue.global(qos: .userInitiated).async {
-            let loaded = ImageDownsampler.load(path: imagePath, maxPixelSize: Self.maxPixelSize) ?? NSImage(contentsOfFile: imagePath)
-            if let loaded {
-                let cost = Int(loaded.size.width * loaded.size.height * 4)
-                previewImageCache.setObject(loaded, forKey: cacheKey, cost: cost)
-            }
+            let loaded = ImageDownsampler.cachedLoad(path: imagePath, maxPixelSize: Self.maxPixelSize)
             DispatchQueue.main.async {
                 // Only update if path hasn't changed
                 if loadedPath == imagePath {

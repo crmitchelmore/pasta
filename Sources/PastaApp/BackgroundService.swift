@@ -37,6 +37,13 @@ final class BackgroundService: ObservableObject {
     /// Last pause state applied to the monitors, so the (debounced) defaults
     /// observer only starts/stops them when the setting actually flipped.
     private var monitorsPausedBySetting = UserDefaults.standard.bool(forKey: Defaults.pauseMonitoring)
+    /// Whether the most recent `refresh()` finished paging the whole window
+    /// in. Explicit state rather than an inference from counts: after a
+    /// delete, the head-merged interim array can be LARGER than the fresh
+    /// `totalEntryCount` (stale rows are only removed by the final wholesale
+    /// replacement), so `entries.count >= total` must not be read as "fully
+    /// loaded" or a cancelled reload would never be resumed.
+    private var isHistoryPagingComplete = false
 
     private enum RefreshTuning {
         static let initialDisplayLimit = 200
@@ -169,6 +176,7 @@ final class BackgroundService: ObservableObject {
 
         refreshTask?.cancel()
         isLoadingEntries = true
+        isHistoryPagingComplete = false
         loadedEntryCount = entries.isEmpty ? 0 : min(entries.count, limit)
         totalEntryCount = nil
 
@@ -204,6 +212,7 @@ final class BackgroundService: ObservableObject {
                 PastaLogger.ui.debug("Loaded initial clipboard history page: \(firstPage.count)/\(expectedCount) items")
 
                 guard firstPage.count < expectedCount else {
+                    isHistoryPagingComplete = true
                     isLoadingEntries = false
                     refreshTask = nil
                     return
@@ -228,6 +237,7 @@ final class BackgroundService: ObservableObject {
 
                 entries = allEntries
                 loadedEntryCount = allEntries.count
+                isHistoryPagingComplete = true
                 isLoadingEntries = false
                 refreshTask = nil
                 PastaLogger.ui.debug("Refreshed entries incrementally: \(allEntries.count) items")
@@ -250,9 +260,9 @@ final class BackgroundService: ObservableObject {
     private func refreshAfterInsert(insertedCount: Int) async {
         guard insertedCount > 0 else { return }
 
-        // Cancelling a refresh that is still paging leaves `entries` holding
-        // only the pages loaded so far, so remember whether one was in flight.
-        let wasPaging = refreshTask != nil
+        // Cancelling a refresh that is still paging leaves `entries` without
+        // its final wholesale replacement; `isHistoryPagingComplete` stays
+        // false so the load is resumed below.
         refreshTask?.cancel()
         refreshTask = nil
         isLoadingEntries = false
@@ -282,17 +292,14 @@ final class BackgroundService: ObservableObject {
         loadedEntryCount = merged.count
         PastaLogger.ui.debug("Incrementally refreshed entries: \(entries.count) items")
 
-        // The head merge only refreshes the top of the list. If the cancelled
-        // refresh had not finished paging the library in, resume the full load
-        // — otherwise the visible history stays truncated at a few hundred rows
-        // until something else triggers a refresh.
-        guard wasPaging,
-              !HistoryWindow.isFullyLoaded(
-                  loadedCount: merged.count,
-                  totalEntryCount: totalEntryCount,
-                  displayLimit: displayLimit
-              )
-        else { return }
+        // The head merge only refreshes the top of the list. If the last full
+        // load never finished (cancelled mid-paging, or it errored), restart
+        // it — otherwise the visible history stays truncated, or keeps stale
+        // rows that only the wholesale replacement removes. The completion
+        // FLAG matters here: the merged array's count can exceed the fresh
+        // totalEntryCount after a delete, so counts cannot tell us whether
+        // the load finished.
+        guard !isHistoryPagingComplete else { return }
 
         PastaLogger.ui.debug("Resuming interrupted paged load after insert")
         refresh()

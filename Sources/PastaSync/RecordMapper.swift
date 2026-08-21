@@ -28,7 +28,12 @@ public struct RecordMapper {
 
     /// Creates a CKRecord (and its temporary asset file, when the entry has
     /// raw data) from a ClipboardEntry.
-    public func preparedRecord(from entry: ClipboardEntry, zoneID: CKRecordZone.ID) -> PreparedRecord {
+    ///
+    /// Throws when the temporary asset file cannot be written. Callers must
+    /// let that failure keep the entry unsynced: pushing the record without
+    /// its asset and then marking it synced would silently lose the image
+    /// bytes on every other device, with no retry.
+    public func preparedRecord(from entry: ClipboardEntry, zoneID: CKRecordZone.ID) throws -> PreparedRecord {
         let recordID = CKRecord.ID(recordName: entry.id.uuidString, zoneID: zoneID)
         let record = CKRecord(recordType: Self.recordType, recordID: recordID)
 
@@ -53,14 +58,9 @@ public struct RecordMapper {
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("\(entry.id.uuidString)-\(UUID().uuidString)")
                 .appendingPathExtension("dat")
-            do {
-                try rawData.write(to: tempURL)
-                record["imageAsset"] = CKAsset(fileURL: tempURL)
-                temporaryAssetURL = tempURL
-            } catch {
-                // Push the record without its asset rather than referencing a
-                // file that was never written.
-            }
+            try rawData.write(to: tempURL)
+            record["imageAsset"] = CKAsset(fileURL: tempURL)
+            temporaryAssetURL = tempURL
         }
 
         return PreparedRecord(record: record, temporaryAssetURL: temporaryAssetURL)

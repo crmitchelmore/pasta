@@ -45,20 +45,33 @@ issue; this file records the outcome, decisions, and remaining constraints.
 - **Closing #57** (this PR) — the remaining deferred items:
   - Non-initial refresh publishes the fresh first page immediately (and no
     longer strands single-page libraries with a stale list after deletes).
+    Paging completeness is tracked as explicit state — after a delete the
+    head-merged interim window can be larger than the fresh library total,
+    so counts cannot signal "reload still needed".
   - Reparse History walks the library in keyset-paged chunks with one write
     transaction per page and per-parent child rebuilds, plus a final
     orphaned-children sweep — bounded memory at any library size.
   - `FilePathDetector` caps filesystem existence checks at 20 unique
-    candidates per detection pass.
-  - Main-panel row models are memoized per entry version
-    (`ClipboardRowModelCache`); row content length now uses `utf8.count`.
-  - Main-panel image previews are cached (`NSCache`, path + pixel-size key),
-    mirroring the quick-search thumbnail cache.
+    candidates per detection pass, spending the budget on Unix-shaped
+    candidates first (Windows-drive tokens in build logs used to starve
+    them). Unchecked paths report `exists == nil` — never stored or
+    strict-filtered as "missing".
+  - Main-panel row models are memoized per entry value
+    (`ClipboardRowModelCache`, whole-`ClipboardEntry` equality — no field
+    list to drift); row content length now uses `utf8.count` and is shown as
+    a byte size.
+  - Decoded images are cached once for all surfaces
+    (`ImageDownsampler.cachedLoad`, path + pixel-size key, pixel-accurate
+    cost), replacing the quick-search-only thumbnail cache and the
+    uncached main-panel preview decode.
   - CloudKit pushes clean up their temporary `.dat` asset files once the save
     operation completes (previously leaked one per pushed record with raw
-    data).
+    data). A failed temp write now keeps the entry unsynced for retry — it
+    is never pushed asset-less and marked synced.
   - The `UserDefaults.didChangeNotification` handler is debounced (300 ms)
     and only restarts the monitors when the pause setting actually changed.
+    (The capture sinks re-read the live pause default per event, so the
+    debounce cannot leak captures made while paused.)
 
 ## Measured decision: no `entries` projection for now
 
@@ -82,6 +95,9 @@ higher per-entry cost than content size explains.
   migrations are trivial (schema DDL); if a future migration rewrites large
   tables, show an "Upgrading database…" window and run it off-main first.
   Guard rail: keep migrations O(schema), not O(rows), wherever possible.
-- **Quick-search `contentLength` metadata is a UTF-8 byte count.** Identical
-  to character count for ASCII; slightly larger for non-ASCII content. Chosen
-  because grapheme counting is O(n) per row on the hot path.
+- **Quick-search row metadata shows a byte size, not a character count.**
+  `contentLength` is UTF-8 bytes because grapheme counting is O(n) per row on
+  the hot path; the label is a formatted byte count so it never overstates
+  "characters" for non-ASCII content. (The quick-search preview panel still
+  shows a true character count — it counts once per selection, off the hot
+  path.)

@@ -17,14 +17,18 @@ public struct FilePathDetector {
     
     public struct Detection: Equatable {
         public var path: String
-        public var exists: Bool
+        /// `true`/`false` when the filesystem was actually consulted; `nil`
+        /// when the path was beyond the existence-check budget (or came from
+        /// a source that never stats), so "missing" and "not checked" stay
+        /// distinguishable downstream.
+        public var exists: Bool?
         public var filename: String
         public var fileExtension: String?
         public var fileType: FileType
         public var mimeType: String?
         public var confidence: Double
 
-        public init(path: String, exists: Bool, filename: String, fileExtension: String?, fileType: FileType = .other, mimeType: String? = nil, confidence: Double) {
+        public init(path: String, exists: Bool?, filename: String, fileExtension: String?, fileType: FileType = .other, mimeType: String? = nil, confidence: Double) {
             self.path = path
             self.exists = exists
             self.filename = filename
@@ -38,8 +42,9 @@ public struct FilePathDetector {
     /// Existence checks hit the filesystem (`stat`), which is per-call cheap
     /// but adds up fast when someone copies a build log with hundreds of
     /// path-like tokens — and can block outright on unmounted network volumes.
-    /// Only the first few unique candidates are checked; the rest are reported
-    /// with `exists == false` and the lower confidence.
+    /// Only the first few unique candidates are checked (Unix-shaped ones
+    /// first); the rest report `exists == nil` ("not checked") and the lower
+    /// confidence.
     public static let defaultExistenceCheckLimit = 20
 
     private let fileManager: FileManager
@@ -51,40 +56,51 @@ public struct FilePathDetector {
     }
 
     public func detect(in text: String) -> [Detection] {
-        var candidates: [Candidate] = []
-        candidates.reserveCapacity(4)
-
         // Windows paths: C:\foo\bar.txt or C:/foo/bar.txt
         let windowsPattern = #"(?i)(?<![A-Z0-9_])([A-Z]:\\[^\s\"'<>|]+|[A-Z]:/[^\s\"'<>|]+)"#
         // Unix-ish paths: /foo/bar, ./foo, ../foo, ~/foo
         // Avoid matching the `/...` portion inside Windows `C:/...` paths.
         let unixPattern = #"(?<![A-Za-z]:)(?<![A-Za-z0-9_\-])((?:~|\.{1,2})?/(?:[^\s\"']+))"#
 
-        candidates.append(contentsOf: match(pattern: windowsPattern, in: text, kind: .windows))
-        candidates.append(contentsOf: match(pattern: unixPattern, in: text, kind: .unix))
-
-        // De-dupe while preserving order, then stat only the first few unique
-        // paths.
+        // De-dupe while preserving the historical output order
+        // (Windows-pattern matches first, then Unix).
         var seen = Set<String>()
+        var unique: [(candidate: Candidate, kind: Kind)] = []
+        for candidate in match(pattern: windowsPattern, in: text, kind: .windows) {
+            if seen.insert(candidate.path).inserted { unique.append((candidate, .windows)) }
+        }
+        for candidate in match(pattern: unixPattern, in: text, kind: .unix) {
+            if seen.insert(candidate.path).inserted { unique.append((candidate, .unix)) }
+        }
+
+        // Spend the stat budget on Unix-shaped candidates first: on this
+        // platform Windows-drive paths essentially never exist, and letting
+        // them consume the budget starved the genuine local paths in
+        // Windows-flavoured build logs. Output order is unaffected.
+        var exists = [Bool?](repeating: nil, count: unique.count)
+        var remainingChecks = existenceCheckLimit
+        for pass: Kind in [.unix, .windows] {
+            guard remainingChecks > 0 else { break }
+            for index in unique.indices where unique[index].kind == pass {
+                guard remainingChecks > 0 else { break }
+                exists[index] = fileManager.fileExists(atPath: unique[index].candidate.path)
+                remainingChecks -= 1
+            }
+        }
+
         var out: [Detection] = []
-        out.reserveCapacity(candidates.count)
-        for candidate in candidates {
-            guard seen.insert(candidate.path).inserted else { continue }
-
-            let exists = out.count < existenceCheckLimit
-                ? fileManager.fileExists(atPath: candidate.path)
-                : false
-
+        out.reserveCapacity(unique.count)
+        for (index, item) in unique.enumerated() {
             out.append(
                 Detection(
-                    path: candidate.path,
-                    exists: exists,
-                    filename: candidate.filename,
-                    fileExtension: candidate.fileExtension,
-                    fileType: candidate.fileType,
-                    mimeType: candidate.mimeType,
+                    path: item.candidate.path,
+                    exists: exists[index],
+                    filename: item.candidate.filename,
+                    fileExtension: item.candidate.fileExtension,
+                    fileType: item.candidate.fileType,
+                    mimeType: item.candidate.mimeType,
                     // Higher confidence when the path is known to exist.
-                    confidence: exists ? 0.9 : 0.7
+                    confidence: exists[index] == true ? 0.9 : 0.7
                 )
             )
         }

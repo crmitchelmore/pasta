@@ -17,22 +17,21 @@ final class ClipboardRowModelCacheTests: XCTestCase {
         XCTAssertEqual(rows.map(\.contentType), [.text, .url])
     }
 
-    func testReusesCachedRowWhileEntryVersionUnchanged() {
+    func testReusesCachedRowsAcrossBodyEvaluations() {
         let cache = ClipboardRowModelCache()
-        var entry = ClipboardEntry(content: "original", contentType: .text)
-        _ = cache.rows(for: [entry])
+        let entries = (0..<50).map { ClipboardEntry(content: "entry \($0)", contentType: .text) }
 
-        // `content` is deliberately outside the change token — it is immutable
-        // for a given id in the app (dedup bumps show up as copyCount/timestamp
-        // changes). Mutating it without touching any token field must therefore
-        // return the cached row, proving lookups don't rebuild per call.
-        entry.content = "mutated behind the cache's back"
-        let rows = cache.rows(for: [entry])
+        _ = cache.rows(for: entries)
+        XCTAssertEqual(cache.rowBuildCountForTesting, 50)
 
-        XCTAssertEqual(rows[0].previewText, "original")
+        // Repeated body evaluations with the same (or equal) entries must not
+        // rebuild any row model.
+        _ = cache.rows(for: entries)
+        _ = cache.rows(for: entries)
+        XCTAssertEqual(cache.rowBuildCountForTesting, 50)
     }
 
-    func testRebuildsRowWhenTokenFieldChanges() {
+    func testRebuildsRowWhenAnyFieldChanges() {
         let cache = ClipboardRowModelCache()
         var entry = ClipboardEntry(content: "hello", contentType: .text)
         let initial = cache.rows(for: [entry])
@@ -45,6 +44,20 @@ final class ClipboardRowModelCacheTests: XCTestCase {
 
         XCTAssertTrue(updated[0].isPinned)
         XCTAssertEqual(updated[0].copyCount, 3)
+    }
+
+    func testRebuildsRowWhenContentChanges() {
+        // Whole-value equality means even a content mutation (no such path
+        // exists in the app today) can never render a stale preview.
+        let cache = ClipboardRowModelCache()
+        var entry = ClipboardEntry(content: "original", contentType: .text)
+        _ = cache.rows(for: [entry])
+
+        entry.content = "rewritten"
+        let rows = cache.rows(for: [entry])
+
+        XCTAssertEqual(rows[0].previewText, "rewritten")
+        XCTAssertEqual(cache.rowBuildCountForTesting, 2)
     }
 
     func testPruneEvictsEntriesNoLongerDisplayed() {
