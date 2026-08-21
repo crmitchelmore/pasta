@@ -73,6 +73,59 @@ test("generator falls back without an API key", async () => {
     assert.match(result.notes, /fallback=deterministic/);
 });
 
+test("token-truncated responses fall back instead of publishing partial notes", async () => {
+    // A truncated response still passes shape validation (starts with the
+    // required heading, long enough, no code fence) — only the status field
+    // reveals it was cut off mid-sentence.
+    const fetchImpl = async () => ({
+        ok: true,
+        json: async () => ({
+            status: "incomplete",
+            incomplete_details: { reason: "max_output_tokens" },
+            output: [{
+                type: "message",
+                content: [{
+                    type: "output_text",
+                    text: "## Overview\n\nThis release makes clipboard history easier to use and prevents empty results, plus it",
+                }],
+            }],
+        }),
+    });
+
+    let fallbackError;
+    const result = await generateReleaseNotes({
+        context,
+        apiKey: "test",
+        fetchImpl,
+        onFallback: (error) => { fallbackError = error; },
+    });
+
+    assert.equal(result.usedFallback, true);
+    assert.match(result.notes, /### New and improved/);
+    assert.doesNotMatch(result.notes, /plus it\n/);
+    assert.match(String(fallbackError), /not completed \(max_output_tokens\)/);
+});
+
+test("completed responses with an explicit status still publish", async () => {
+    const fetchImpl = async () => ({
+        ok: true,
+        json: async () => ({
+            status: "completed",
+            output: [{
+                type: "message",
+                content: [{
+                    type: "output_text",
+                    text: "## Overview\n\nThis release makes clipboard history easier to use and prevents empty results.",
+                }],
+            }],
+        }),
+    });
+
+    const result = await generateReleaseNotes({ context, apiKey: "test", fetchImpl });
+    assert.equal(result.usedFallback, false);
+    assert.match(result.notes, /easier to use/);
+});
+
 test("release tracks recognise Pasta version tags", () => {
     assert.equal(releaseTrack("v2.0.0"), "mac");
     assert.equal(releaseTrack("nightly"), "other");

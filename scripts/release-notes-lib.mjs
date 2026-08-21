@@ -229,7 +229,10 @@ export const requestModelNotes = async ({
             model,
             reasoning: { effort: reasoningEffort },
             input: buildPrompt(context),
-            max_output_tokens: 2_400,
+            // Reasoning tokens bill against this budget too; the previous
+            // 2,400 left so little room after medium-effort reasoning that
+            // large releases could truncate mid-sentence.
+            max_output_tokens: 16_000,
             store: false,
         }),
     });
@@ -237,6 +240,16 @@ export const requestModelNotes = async ({
     if (!response.ok) {
         const detail = payload?.error?.message ?? `HTTP ${response.status}`;
         throw new Error(`OpenAI Responses API failed: ${detail}`);
+    }
+    // A truncated response can still start with "## Overview" and pass
+    // validation, publishing mid-sentence notes to the release and the
+    // in-app Sparkle changelog. Refuse anything the API itself marks as not
+    // completed so the deterministic fallback runs instead.
+    if (payload?.status && payload.status !== "completed") {
+        const reason = payload?.incomplete_details?.reason
+            ?? payload?.error?.message
+            ?? payload.status;
+        throw new Error(`OpenAI response was not completed (${reason}); refusing possibly-truncated notes`);
     }
     return validateModelNotes(responseText(payload));
 };
