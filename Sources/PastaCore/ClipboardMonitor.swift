@@ -149,6 +149,25 @@ public final class ClipboardMonitor {
         subject.eraseToAnyPublisher()
     }
 
+    /// Fingerprint of the last emitted contents, kept instead of the contents
+    /// themselves so a copied image's bytes (20–100 MB for Retina screenshots)
+    /// are never retained between polls.
+    enum ContentFingerprint: Equatable {
+        case text(String)
+        case rtf(String)
+        case filePaths([String])
+        case imageHash(String)
+
+        init(_ contents: PasteboardContents) {
+            switch contents {
+            case .text(let string): self = .text(string)
+            case .rtf(let string): self = .rtf(string)
+            case .filePaths(let paths): self = .filePaths(paths)
+            case .image(let data): self = .imageHash(ClipboardEntry.sha256Hex(data))
+            }
+        }
+    }
+
     private let pasteboard: PasteboardProviding
     private let workspace: WorkspaceProviding?
     private let exclusionManager: ExclusionManager
@@ -160,7 +179,17 @@ public final class ClipboardMonitor {
     private var cancellable: AnyCancellable?
 
     private var lastSeenChangeCount: Int?
-    private var lastEmittedContents: PasteboardContents?
+
+    /// Serial queue on which pasteboard contents are read and deduplicated, so
+    /// large RTF parses and TIFF copies never block the polling (main) thread.
+    private let readQueue = DispatchQueue(label: "com.pasta.clipboard-read", qos: .userInitiated)
+    /// Confined to `readQueue`.
+    private var lastEmittedFingerprint: ContentFingerprint?
+
+    /// Test hook: the current dedup fingerprint, read on the read queue.
+    var currentFingerprintForTesting: ContentFingerprint? {
+        readQueue.sync { lastEmittedFingerprint }
+    }
 
     public init(
         pasteboard: PasteboardProviding,
@@ -225,23 +254,47 @@ public final class ClipboardMonitor {
             return
         }
 
+        // Sample copy-time context on the polling thread: the frontmost app
+        // must be whichever app the user copied from, not whatever is
+        // frontmost once the read finishes.
+        let sourceApp = workspace?.frontmostApplicationIdentifier()
+        let timestamp = now()
+
+        // The actual contents read (RTF parsing, multi-MB TIFF copies) happens
+        // off the polling thread so large copies never hitch the UI.
+        readQueue.async { [weak self] in
+            self?.readAndEmit(expectedChangeCount: changeCount, sourceApp: sourceApp, timestamp: timestamp)
+        }
+    }
+
+    /// Runs on `readQueue`.
+    private func readAndEmit(expectedChangeCount: Int, sourceApp: String?, timestamp: Date) {
         guard let contents = pasteboard.readContents() else {
             // If we can't read the clipboard, it might be an access issue
             PastaLogger.clipboard.warning("Failed to read clipboard contents - may be access denied")
             return
         }
-        
-        if contents == lastEmittedContents { return }
-        lastEmittedContents = contents
 
-        let sourceApp = workspace?.frontmostApplicationIdentifier()
+        // Check for Continuity clipboard
+        let metadata = pasteboard.readMetadata()
+
+        // The pasteboard may have changed while the read was in flight. Drop
+        // the stale read: the poll loop has already seen (or will see) the new
+        // changeCount and issue a fresh read for the current contents.
+        guard pasteboard.changeCount == expectedChangeCount else {
+            PastaLogger.clipboard.debug("Pasteboard changed during read; discarding stale contents")
+            return
+        }
+
+        let fingerprint = ContentFingerprint(contents)
+        if fingerprint == lastEmittedFingerprint { return }
+        lastEmittedFingerprint = fingerprint
+
         if exclusionManager.isExcluded(bundleIdentifier: sourceApp) {
             PastaLogger.clipboard.debug("Skipped entry from excluded app: \(sourceApp ?? "unknown")")
             return
         }
-        
-        // Check for Continuity clipboard
-        let metadata = pasteboard.readMetadata()
+
         var entryMetadata: String? = nil
         if metadata.isContinuitySync {
             // Encode metadata as JSON
@@ -260,13 +313,16 @@ public final class ClipboardMonitor {
             content: contentString(for: contents),
             contentType: contentType(for: contents, sourceApp: sourceApp),
             rawData: rawData(for: contents),
-            timestamp: now(),
+            timestamp: timestamp,
             sourceApp: metadata.isContinuitySync ? "Continuity" : sourceApp,
             metadata: entryMetadata
         )
 
-        PastaLogger.clipboard.debug("Captured clipboard entry of type \(entry.contentType.rawValue)")
-        subject.send(entry)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.cancellable != nil else { return }
+            PastaLogger.clipboard.debug("Captured clipboard entry of type \(entry.contentType.rawValue)")
+            self.subject.send(entry)
+        }
     }
 
     private func contentType(for contents: PasteboardContents, sourceApp: String?) -> ContentType {
