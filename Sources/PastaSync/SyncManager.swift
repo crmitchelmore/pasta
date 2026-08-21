@@ -109,11 +109,21 @@ public final class SyncManager: ObservableObject {
     // MARK: - Push (Mac → CloudKit)
     
     /// Pushes a single entry to CloudKit.
+    ///
+    /// Throws (leaving the entry unsynced, so `fetchUnsynced` retries it
+    /// later) when the record's temporary asset file cannot be written.
     public func pushEntry(_ entry: ClipboardEntry) async throws {
         guard resolveContainer(), let database else { return }
-        let record = recordMapper.record(from: entry, zoneID: Self.zoneID)
+        let prepared: RecordMapper.PreparedRecord
         do {
-            _ = try await database.save(record)
+            prepared = try recordMapper.preparedRecord(from: entry, zoneID: Self.zoneID)
+        } catch {
+            logger.error("Failed to stage asset for entry \(entry.id.uuidString): \(error.localizedDescription) — leaving unsynced for retry")
+            throw error
+        }
+        defer { prepared.cleanupTemporaryAsset() }
+        do {
+            _ = try await database.save(prepared.record)
             logger.debug("Pushed entry \(entry.id.uuidString)")
         } catch let error as CKError where error.code == .serverRecordChanged {
             logger.info("Entry \(entry.id.uuidString) already exists with newer version, skipping")
@@ -158,8 +168,34 @@ public final class SyncManager: ObservableObject {
                 break
             }
             
-            let records = batch.map { recordMapper.record(from: $0, zoneID: Self.zoneID) }
-            let operation = CKModifyRecordsOperation(recordsToSave: records)
+            // An entry whose temp asset can't be written is EXCLUDED from the
+            // batch (and from onBatchSynced below), so it stays unsynced and
+            // is retried later, rather than being pushed asset-less and then
+            // marked synced — that would silently lose the image bytes on
+            // every other device.
+            var includedEntries: [ClipboardEntry] = []
+            var prepared: [RecordMapper.PreparedRecord] = []
+            includedEntries.reserveCapacity(batch.count)
+            prepared.reserveCapacity(batch.count)
+            for entry in batch {
+                do {
+                    prepared.append(try recordMapper.preparedRecord(from: entry, zoneID: Self.zoneID))
+                    includedEntries.append(entry)
+                } catch {
+                    logger.error("Failed to stage asset for entry \(entry.id.uuidString): \(error.localizedDescription) — leaving unsynced for retry")
+                }
+            }
+            // The temp asset files must survive until CloudKit has finished
+            // uploading this batch; remove them when the iteration ends
+            // (normal completion, throw, or cancellation break).
+            defer {
+                for record in prepared { record.cleanupTemporaryAsset() }
+            }
+            if includedEntries.isEmpty {
+                totalPushed = min((index + 1) * batchSize, entries.count)
+                continue
+            }
+            let operation = CKModifyRecordsOperation(recordsToSave: prepared.map(\.record))
             operation.savePolicy = .changedKeys
             operation.qualityOfService = .utility
             
@@ -177,7 +213,7 @@ public final class SyncManager: ObservableObject {
             
             totalPushed = min((index + 1) * batchSize, entries.count)
             let pushed = totalPushed
-            let batchIDs = batch.map { $0.id }
+            let batchIDs = includedEntries.map { $0.id }
             onBatchSynced?(batchIDs)
             await MainActor.run {
                 syncedEntryCount = pushed

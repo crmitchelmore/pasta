@@ -200,13 +200,18 @@ final class DatabaseManagerTests: XCTestCase {
         XCTAssertEqual(Set(primaryEntries.map(\.id)), Set([parentA.id, parentB.id]))
     }
 
-    func testApplyReclassificationUpdatesParentsAndRebuildsExtractedEntries() throws {
+    func testApplyReclassificationChunkUpdatesParentsAndRebuildsTheirChildren() throws {
         let db = try DatabaseManager.inMemory()
         let parent = ClipboardEntry(content: "Contact me at test@example.com", contentType: .text, metadata: "{\"legacy\":true}")
         let staleExtracted = ClipboardEntry(content: "old@example.com", contentType: .email, parentEntryId: parent.id)
+        // A parent outside the chunk: its children must be left alone.
+        let otherParent = ClipboardEntry(content: "other", contentType: .text)
+        let otherChild = ClipboardEntry(content: "keep@example.com", contentType: .email, parentEntryId: otherParent.id)
 
         try db.insert(parent, deduplicate: false)
         try db.insert(staleExtracted, deduplicate: false)
+        try db.insert(otherParent, deduplicate: false)
+        try db.insert(otherChild, deduplicate: false)
 
         let updates = [
             DatabaseManager.ReclassificationUpdate(
@@ -221,7 +226,11 @@ final class DatabaseManagerTests: XCTestCase {
             ClipboardEntry(content: "https://example.com", contentType: .url, parentEntryId: parent.id)
         ]
 
-        let result = try db.applyReclassification(updates: updates, extractedEntries: rebuiltExtracted)
+        let result = try db.applyReclassificationChunk(
+            updates: updates,
+            parentIDs: [parent.id],
+            extractedEntries: rebuiltExtracted
+        )
         XCTAssertEqual(result.updatedEntries, 1)
         XCTAssertEqual(result.removedExtractedEntries, 1)
         XCTAssertEqual(result.insertedExtractedEntries, 2)
@@ -233,6 +242,74 @@ final class DatabaseManagerTests: XCTestCase {
         let extractedAfter = try db.fetchExtractedEntries(parentId: parent.id)
         XCTAssertEqual(Set(extractedAfter.map(\.contentType)), Set([.email, .url]))
         XCTAssertEqual(Set(extractedAfter.map(\.content)), Set(["test@example.com", "https://example.com"]))
+
+        // The unprocessed parent's child is untouched.
+        let otherChildren = try db.fetchExtractedEntries(parentId: otherParent.id)
+        XCTAssertEqual(otherChildren.map(\.content), ["keep@example.com"])
+    }
+
+    func testFetchPrimaryEntriesKeysetPaginationWalksEveryPrimaryOnceDespiteInserts() throws {
+        let db = try DatabaseManager.inMemory()
+
+        var expected: Set<UUID> = []
+        for index in 0..<25 {
+            let entry = ClipboardEntry(
+                content: "primary \(index)",
+                contentType: .text,
+                timestamp: Date(timeIntervalSince1970: Double(1_000 + index))
+            )
+            expected.insert(entry.id)
+            try db.insert(entry, deduplicate: false)
+            // Children must never appear in primary pages.
+            try db.insert(
+                ClipboardEntry(content: "child \(index)", contentType: .email, parentEntryId: entry.id),
+                deduplicate: false
+            )
+        }
+
+        var seen: [UUID] = []
+        var cursor: DatabaseManager.PrimaryEntryCursor? = nil
+        var pages = 0
+        while true {
+            let page = try db.fetchPrimaryEntries(after: cursor, limit: 10)
+            guard !page.isEmpty else { break }
+            pages += 1
+            seen.append(contentsOf: page.map(\.id))
+            cursor = DatabaseManager.PrimaryEntryCursor(after: page[page.count - 1])
+
+            // Rows inserted mid-walk (newer than the cursor) must not shift the
+            // remaining pages the way OFFSET pagination would.
+            try db.insert(
+                ClipboardEntry(
+                    content: "captured during walk \(pages)",
+                    contentType: .text,
+                    timestamp: Date(timeIntervalSince1970: 10_000 + Double(pages))
+                ),
+                deduplicate: false
+            )
+        }
+
+        XCTAssertEqual(pages, 3)
+        XCTAssertEqual(seen.count, 25, "every original primary is visited exactly once")
+        XCTAssertEqual(Set(seen), expected)
+    }
+
+    func testDeleteOrphanedExtractedEntriesSweepsChildrenOfMissingParents() throws {
+        let db = try DatabaseManager.inMemory()
+        let parent = ClipboardEntry(content: "parent", contentType: .text)
+        let child = ClipboardEntry(content: "kept-child", contentType: .email, parentEntryId: parent.id)
+        let orphan = ClipboardEntry(content: "orphan", contentType: .email, parentEntryId: UUID())
+
+        try db.insert(parent, deduplicate: false)
+        try db.insert(child, deduplicate: false)
+        try db.insert(orphan, deduplicate: false)
+
+        let removed = try db.deleteOrphanedExtractedEntries()
+
+        XCTAssertEqual(removed, 1)
+        XCTAssertNil(try db.fetch(id: orphan.id))
+        XCTAssertNotNil(try db.fetch(id: child.id))
+        XCTAssertNotNil(try db.fetch(id: parent.id))
     }
 
     // MARK: - Batch insert

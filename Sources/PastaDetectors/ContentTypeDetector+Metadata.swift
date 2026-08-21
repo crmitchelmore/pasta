@@ -116,14 +116,19 @@ extension ContentTypeDetector {
 
         // Extract file paths
         for path in paths.prefix(maxItems - items.count) {
-            let meta = jsonString([
+            var pathMeta: [String: Any] = [
                 "path": path.path,
-                "exists": path.exists,
                 "filename": path.filename,
                 "fileExtension": path.fileExtension ?? "",
                 "fileType": path.fileType.rawValue,
                 "confidence": path.confidence
-            ])
+            ]
+            // Persist only real filesystem answers; a path beyond the
+            // existence-check budget must not be stored as "missing".
+            if let exists = path.exists {
+                pathMeta["exists"] = exists
+            }
+            let meta = jsonString(pathMeta)
             items.append(SplitEntry(content: path.path, contentType: .filePath, metadataJSON: meta))
         }
 
@@ -275,11 +280,13 @@ extension ContentTypeDetector {
             meta["filePaths"] = paths.map { d in
                 var obj: [String: Any] = [
                     "path": d.path,
-                    "exists": d.exists,
                     "filename": d.filename,
                     "fileType": d.fileType.rawValue,
                     "confidence": d.confidence
                 ]
+                // Only persist real filesystem answers — a path beyond the
+                // existence-check budget must not be stored as "missing".
+                if let exists = d.exists { obj["exists"] = exists }
                 if let ext = d.fileExtension { obj["extension"] = ext }
                 if let mime = d.mimeType { obj["mimeType"] = mime }
                 return obj
