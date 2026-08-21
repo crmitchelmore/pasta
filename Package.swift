@@ -84,6 +84,14 @@ let package = Package(
         .testTarget(
             name: "PastaDetectorsTests",
             dependencies: ["PastaDetectors"]
+        ),
+        .testTarget(
+            name: "PastaSyncTests",
+            dependencies: ["PastaSync", "PastaCore"]
+        ),
+        .testTarget(
+            name: "PastaUITests",
+            dependencies: ["PastaUI", "PastaCore"]
         )
     ]
 )

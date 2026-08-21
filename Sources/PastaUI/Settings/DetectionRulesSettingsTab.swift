@@ -568,20 +568,36 @@ struct DetectionRulesSettingsTab: View {
                 let detectorConfiguration = DetectorConfigurationStore.load()
                 let extractContent = UserDefaults.standard.bool(forKey: Defaults.extractContent)
                 let skipAPIKeys = UserDefaults.standard.bool(forKey: Defaults.skipAPIKeys)
-                let entries = try database.fetchPrimaryEntries()
 
-                var updates: [DatabaseManager.ReclassificationUpdate] = []
-                updates.reserveCapacity(entries.count)
-
-                var extractedEntries: [ClipboardEntry] = []
-                extractedEntries.reserveCapacity(min(entries.count * 2, 20_000))
-
+                let total = try database.countPrimaryEntries()
                 DispatchQueue.main.async {
-                    reparseTotal = entries.count
+                    reparseTotal = total
                 }
 
-                for (index, entry) in entries.enumerated() {
-                    if entry.contentType != .image && entry.contentType != .screenshot {
+                // Walk the library in keyset-paged chunks with one write
+                // transaction per page, so a 100k-entry library never has to
+                // fit (with its rebuilt children) in memory at once.
+                let pageSize = 500
+                var cursor: DatabaseManager.PrimaryEntryCursor? = nil
+                var processed = 0
+                var totalUpdated = 0
+                var totalRemoved = 0
+                var totalInserted = 0
+
+                while true {
+                    let page = try database.fetchPrimaryEntries(after: cursor, limit: pageSize)
+                    guard !page.isEmpty else { break }
+                    cursor = DatabaseManager.PrimaryEntryCursor(after: page[page.count - 1])
+
+                    var updates: [DatabaseManager.ReclassificationUpdate] = []
+                    var parentIDs: [UUID] = []
+                    parentIDs.reserveCapacity(page.count)
+                    var extractedEntries: [ClipboardEntry] = []
+
+                    for entry in page {
+                        guard entry.contentType != .image && entry.contentType != .screenshot else { continue }
+                        parentIDs.append(entry.id)
+
                         let output = detector.detect(in: entry.content, configuration: detectorConfiguration)
                         if output.primaryType != entry.contentType || output.metadataJSON != entry.metadata {
                             updates.append(
@@ -609,21 +625,33 @@ struct DetectionRulesSettingsTab: View {
                         }
                     }
 
-                    if index.isMultiple(of: 50) || index + 1 == entries.count {
-                        let current = index + 1
-                        DispatchQueue.main.async {
-                            reparseCurrent = current
-                        }
+                    let result = try database.applyReclassificationChunk(
+                        updates: updates,
+                        parentIDs: parentIDs,
+                        extractedEntries: extractedEntries
+                    )
+                    totalUpdated += result.updatedEntries
+                    totalRemoved += result.removedExtractedEntries
+                    totalInserted += result.insertedExtractedEntries
+
+                    processed += page.count
+                    let current = min(processed, total)
+                    DispatchQueue.main.async {
+                        reparseCurrent = current
                     }
                 }
 
-                let result = try database.applyReclassification(
-                    updates: updates,
-                    extractedEntries: extractedEntries
-                )
+                // The old whole-library rebuild dropped every child row, which
+                // also swept children of since-deleted parents; do that sweep
+                // explicitly now that children are rebuilt per parent.
+                totalRemoved += try database.deleteOrphanedExtractedEntries()
 
+                let summaryProcessed = processed
+                let summaryUpdated = totalUpdated
+                let summaryRemoved = totalRemoved
+                let summaryInserted = totalInserted
                 DispatchQueue.main.async {
-                    reparseSummary = "Reparsed \(entries.count) entries, updated \(result.updatedEntries), removed \(result.removedExtractedEntries), rebuilt \(result.insertedExtractedEntries) extracted entries."
+                    reparseSummary = "Reparsed \(summaryProcessed) entries, updated \(summaryUpdated), removed \(summaryRemoved), rebuilt \(summaryInserted) extracted entries."
                     isReparsing = false
                     NotificationCenter.default.post(name: .entriesDidChange, object: nil)
                 }

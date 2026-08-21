@@ -34,6 +34,9 @@ final class BackgroundService: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var pruneTimer: Timer?
     private var refreshTask: Task<Void, Never>?
+    /// Last pause state applied to the monitors, so the (debounced) defaults
+    /// observer only starts/stops them when the setting actually flipped.
+    private var monitorsPausedBySetting = UserDefaults.standard.bool(forKey: Defaults.pauseMonitoring)
 
     private enum RefreshTuning {
         static let initialDisplayLimit = 200
@@ -183,8 +186,19 @@ final class BackgroundService: ObservableObject {
                 let total = try await totalTask.value
                 let expectedCount = min(total, limit)
                 totalEntryCount = expectedCount
-                if entries.isEmpty {
+                if entries.isEmpty || firstPage.count >= expectedCount {
+                    // Initial load, or the first page already holds the whole
+                    // (post-change) library — it IS the fresh state. Assigning
+                    // unconditionally here also covers deletes that shrink the
+                    // library to a single page, which previously early-returned
+                    // below without ever replacing the stale array.
                     entries = firstPage
+                } else {
+                    // Non-initial refresh (after a delete/prune/pin): publish the
+                    // fresh head immediately instead of withholding every update
+                    // until the full library has re-paged in. The stale tail is
+                    // replaced once paging completes below.
+                    entries = HistoryWindow.merge(head: firstPage, into: entries, limit: limit)
                 }
                 loadedEntryCount = firstPage.count
                 PastaLogger.ui.debug("Loaded initial clipboard history page: \(firstPage.count)/\(expectedCount) items")
@@ -331,19 +345,27 @@ final class BackgroundService: ObservableObject {
     }
     
     private func subscribe() {
-        // Observe pause monitoring setting
+        // Observe pause monitoring setting. This notification fires for EVERY
+        // defaults write, including Pasta's own (window frames, sync dates,
+        // …), and the handler re-decodes the detector-configuration JSON and
+        // touches the monitors — so debounce it and only restart monitors when
+        // the pause state actually changed.
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self else { return }
                 let isPaused = UserDefaults.standard.bool(forKey: Defaults.pauseMonitoring)
-                if isPaused {
-                    self.clipboardMonitor.stop()
-                    self.screenshotMonitor.stop()
-                    PastaLogger.app.info("Clipboard monitoring paused")
-                } else {
-                    self.clipboardMonitor.start()
-                    self.screenshotMonitor.start()
-                    PastaLogger.app.info("Clipboard monitoring resumed")
+                if isPaused != self.monitorsPausedBySetting {
+                    self.monitorsPausedBySetting = isPaused
+                    if isPaused {
+                        self.clipboardMonitor.stop()
+                        self.screenshotMonitor.stop()
+                        PastaLogger.app.info("Clipboard monitoring paused")
+                    } else {
+                        self.clipboardMonitor.start()
+                        self.screenshotMonitor.start()
+                        PastaLogger.app.info("Clipboard monitoring resumed")
+                    }
                 }
                 self.detectorConfiguration = DetectorConfigurationStore.load()
             }

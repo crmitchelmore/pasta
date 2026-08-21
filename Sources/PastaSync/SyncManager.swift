@@ -111,9 +111,10 @@ public final class SyncManager: ObservableObject {
     /// Pushes a single entry to CloudKit.
     public func pushEntry(_ entry: ClipboardEntry) async throws {
         guard resolveContainer(), let database else { return }
-        let record = recordMapper.record(from: entry, zoneID: Self.zoneID)
+        let prepared = recordMapper.preparedRecord(from: entry, zoneID: Self.zoneID)
+        defer { prepared.cleanupTemporaryAsset() }
         do {
-            _ = try await database.save(record)
+            _ = try await database.save(prepared.record)
             logger.debug("Pushed entry \(entry.id.uuidString)")
         } catch let error as CKError where error.code == .serverRecordChanged {
             logger.info("Entry \(entry.id.uuidString) already exists with newer version, skipping")
@@ -158,8 +159,14 @@ public final class SyncManager: ObservableObject {
                 break
             }
             
-            let records = batch.map { recordMapper.record(from: $0, zoneID: Self.zoneID) }
-            let operation = CKModifyRecordsOperation(recordsToSave: records)
+            let prepared = batch.map { recordMapper.preparedRecord(from: $0, zoneID: Self.zoneID) }
+            // The temp asset files must survive until CloudKit has finished
+            // uploading this batch; remove them when the iteration ends
+            // (normal completion, throw, or cancellation break).
+            defer {
+                for record in prepared { record.cleanupTemporaryAsset() }
+            }
+            let operation = CKModifyRecordsOperation(recordsToSave: prepared.map(\.record))
             operation.savePolicy = .changedKeys
             operation.qualityOfService = .utility
             

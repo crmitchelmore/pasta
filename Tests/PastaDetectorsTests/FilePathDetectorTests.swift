@@ -52,4 +52,56 @@ final class FilePathDetectorTests: XCTestCase {
         let results = detector.detect(in: text)
         XCTAssertEqual(results.map(\.path), ["/tmp/a"])
     }
+
+    func testExistenceChecksAreCappedForPathHeavyText() throws {
+        let temp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PastaTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+
+        let realFile = temp.appendingPathComponent("real.txt")
+        try "hi".data(using: .utf8)?.write(to: realFile)
+
+        // A build-log-style paste: the cap's worth of unique paths first, then
+        // the real file just beyond it.
+        let limit = FilePathDetector.defaultExistenceCheckLimit
+        var lines = (0..<limit).map { "/nonexistent/pasta-cap-test/file-\($0).log" }
+        lines.append(realFile.path)
+
+        let detector = FilePathDetector()
+        let results = detector.detect(in: lines.joined(separator: "\n"))
+
+        XCTAssertEqual(results.count, limit + 1, "every path is still detected")
+        XCTAssertFalse(
+            results[limit].exists,
+            "paths beyond the existence-check cap must not be stat'd"
+        )
+        XCTAssertEqual(results[limit].confidence, 0.7, accuracy: 0.001)
+
+        // The same real file within the cap does get checked.
+        let headResults = detector.detect(in: "Path: \(realFile.path)")
+        XCTAssertEqual(headResults.count, 1)
+        XCTAssertTrue(headResults[0].exists)
+    }
+
+    func testDuplicatePathsDoNotConsumeTheExistenceCheckBudget() throws {
+        let temp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PastaTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+
+        let realFile = temp.appendingPathComponent("real.txt")
+        try "hi".data(using: .utf8)?.write(to: realFile)
+
+        // 50 repeats of one bogus path collapse to a single unique candidate,
+        // so the real file is the SECOND unique path — well within the cap.
+        var lines = Array(repeating: "/nonexistent/pasta-dup-test/same.log", count: 50)
+        lines.append(realFile.path)
+
+        let results = FilePathDetector().detect(in: lines.joined(separator: "\n"))
+        XCTAssertEqual(results.count, 2)
+        XCTAssertTrue(results[1].exists)
+    }
 }

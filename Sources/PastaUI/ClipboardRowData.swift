@@ -76,7 +76,9 @@ public struct ClipboardRowData: Equatable {
         self.swatchColor = Self.parseSwatch(from: entry)
         self.isPinned = entry.isPinned
         self.imagePath = entry.imagePath
-        self.contentLength = entry.content.count
+        // utf8.count is O(1) for native strings; `count` walks every grapheme,
+        // which is milliseconds per row for multi-MB entries.
+        self.contentLength = entry.content.utf8.count
         self.sectionHeader = nil
     }
 

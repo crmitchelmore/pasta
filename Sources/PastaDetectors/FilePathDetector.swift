@@ -35,15 +35,24 @@ public struct FilePathDetector {
         }
     }
 
-    private let fileManager: FileManager
+    /// Existence checks hit the filesystem (`stat`), which is per-call cheap
+    /// but adds up fast when someone copies a build log with hundreds of
+    /// path-like tokens — and can block outright on unmounted network volumes.
+    /// Only the first few unique candidates are checked; the rest are reported
+    /// with `exists == false` and the lower confidence.
+    public static let defaultExistenceCheckLimit = 20
 
-    public init(fileManager: FileManager = .default) {
+    private let fileManager: FileManager
+    private let existenceCheckLimit: Int
+
+    public init(fileManager: FileManager = .default, existenceCheckLimit: Int = FilePathDetector.defaultExistenceCheckLimit) {
         self.fileManager = fileManager
+        self.existenceCheckLimit = existenceCheckLimit
     }
 
     public func detect(in text: String) -> [Detection] {
-        var detections: [Detection] = []
-        detections.reserveCapacity(4)
+        var candidates: [Candidate] = []
+        candidates.reserveCapacity(4)
 
         // Windows paths: C:\foo\bar.txt or C:/foo/bar.txt
         let windowsPattern = #"(?i)(?<![A-Z0-9_])([A-Z]:\\[^\s\"'<>|]+|[A-Z]:/[^\s\"'<>|]+)"#
@@ -51,23 +60,48 @@ public struct FilePathDetector {
         // Avoid matching the `/...` portion inside Windows `C:/...` paths.
         let unixPattern = #"(?<![A-Za-z]:)(?<![A-Za-z0-9_\-])((?:~|\.{1,2})?/(?:[^\s\"']+))"#
 
-        detections.append(contentsOf: match(pattern: windowsPattern, in: text, kind: .windows))
-        detections.append(contentsOf: match(pattern: unixPattern, in: text, kind: .unix))
+        candidates.append(contentsOf: match(pattern: windowsPattern, in: text, kind: .windows))
+        candidates.append(contentsOf: match(pattern: unixPattern, in: text, kind: .unix))
 
-        // De-dupe while preserving order.
+        // De-dupe while preserving order, then stat only the first few unique
+        // paths.
         var seen = Set<String>()
         var out: [Detection] = []
-        out.reserveCapacity(detections.count)
-        for d in detections {
-            let key = d.path
-            guard seen.insert(key).inserted else { continue }
-            out.append(d)
+        out.reserveCapacity(candidates.count)
+        for candidate in candidates {
+            guard seen.insert(candidate.path).inserted else { continue }
+
+            let exists = out.count < existenceCheckLimit
+                ? fileManager.fileExists(atPath: candidate.path)
+                : false
+
+            out.append(
+                Detection(
+                    path: candidate.path,
+                    exists: exists,
+                    filename: candidate.filename,
+                    fileExtension: candidate.fileExtension,
+                    fileType: candidate.fileType,
+                    mimeType: candidate.mimeType,
+                    // Higher confidence when the path is known to exist.
+                    confidence: exists ? 0.9 : 0.7
+                )
+            )
         }
 
         return out
     }
 
     private enum Kind { case unix, windows }
+
+    /// A path-shaped match before any filesystem access.
+    private struct Candidate {
+        let path: String
+        let filename: String
+        let fileExtension: String?
+        let fileType: FileType
+        let mimeType: String?
+    }
 
     private static let regexCache: NSCache<NSString, NSRegularExpression> = {
         let cache = NSCache<NSString, NSRegularExpression>()
@@ -83,13 +117,13 @@ public struct FilePathDetector {
         return compiled
     }
 
-    private func match(pattern: String, in text: String, kind: Kind) -> [Detection] {
+    private func match(pattern: String, in text: String, kind: Kind) -> [Candidate] {
         guard let regex = Self.cachedRegex(for: pattern) else { return [] }
 
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         let matches = regex.matches(in: text, options: [], range: range)
 
-        var results: [Detection] = []
+        var results: [Candidate] = []
         results.reserveCapacity(matches.count)
 
         for match in matches {
@@ -112,27 +146,16 @@ public struct FilePathDetector {
             let expanded = (normalizedPath as NSString).expandingTildeInPath
             let url = URL(fileURLWithPath: expanded)
 
-            var isDir: ObjCBool = false
-            let exists = fileManager.fileExists(atPath: expanded, isDirectory: &isDir)
-
             let filename = url.lastPathComponent
             let ext = url.pathExtension.isEmpty ? nil : url.pathExtension.lowercased()
-            
-            let fileType = Self.classifyFileType(extension: ext)
-            let mimeType = Self.mimeType(for: ext)
-
-            // Higher confidence when the path exists.
-            let confidence: Double = exists ? 0.9 : 0.7
 
             results.append(
-                Detection(
+                Candidate(
                     path: expanded,
-                    exists: exists,
                     filename: filename,
                     fileExtension: ext,
-                    fileType: fileType,
-                    mimeType: mimeType,
-                    confidence: confidence
+                    fileType: Self.classifyFileType(extension: ext),
+                    mimeType: Self.mimeType(for: ext)
                 )
             )
         }
