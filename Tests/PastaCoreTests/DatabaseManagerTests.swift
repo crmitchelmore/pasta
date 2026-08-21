@@ -70,6 +70,34 @@ final class DatabaseManagerTests: XCTestCase {
         XCTAssertEqual(try db.fetchAll().count, 0)
     }
 
+    func testInsertPreservesCloudSyncState() throws {
+        let db = try DatabaseManager.inMemory()
+        let entry = ClipboardEntry(
+            content: "downloaded from iCloud",
+            contentType: .text,
+            isSynced: true
+        )
+
+        try db.insert(entry, deduplicate: false)
+
+        XCTAssertEqual(try db.fetch(id: entry.id)?.isSynced, true)
+        XCTAssertEqual(try db.unsyncedCount(), 0)
+    }
+
+    func testBatchInsertPreservesCloudSyncState() throws {
+        let db = try DatabaseManager.inMemory()
+        let entry = ClipboardEntry(
+            content: "batch downloaded from iCloud",
+            contentType: .text,
+            isSynced: true
+        )
+
+        try db.insertBatch([entry], deduplicate: false)
+
+        XCTAssertEqual(try db.fetch(id: entry.id)?.isSynced, true)
+        XCTAssertEqual(try db.unsyncedCount(), 0)
+    }
+
     func testFetchRecentOrdersByTimestampDesc() throws {
         let db = try DatabaseManager.inMemory()
 

@@ -141,10 +141,45 @@ final class BackgroundService: ObservableObject {
                     return
                 }
                 try await syncManager.setupZone()
+                try await syncManager.registerSubscription()
+                await syncNow()
                 PastaLogger.app.info("CloudKit sync initialised")
             } catch {
                 PastaLogger.logError(error, logger: PastaLogger.app, context: "CloudKit sync setup failed")
             }
+        }
+    }
+
+    /// Pushes pending local entries, then applies remote changes to the Mac database.
+    /// Keeping this orchestration here ensures startup and the Settings button use
+    /// the same genuinely bidirectional sync path.
+    func syncNow() async {
+        let db = database
+
+        do {
+            try await syncManager.setupZone()
+            let unsynced = try await Task.detached(priority: .userInitiated) {
+                try db.fetchUnsynced()
+            }.value
+
+            if !unsynced.isEmpty {
+                _ = try await syncManager.pushEntries(unsynced) { ids in
+                    try? db.markSynced(ids: ids)
+                }
+            }
+
+            let changes = try await syncManager.fetchChanges()
+            try await Task.detached(priority: .userInitiated) {
+                _ = try db.insertBatch(changes.modified, deduplicate: true)
+                _ = try db.delete(ids: changes.deleted)
+            }.value
+
+            refresh()
+            PastaLogger.app.info(
+                "CloudKit sync applied \(changes.modified.count) modified and \(changes.deleted.count) deleted entries"
+            )
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.app, context: "CloudKit sync failed")
         }
     }
     

@@ -42,6 +42,9 @@ struct PastaApp: App {
                 syncedCount: {
                     (try? BackgroundService.shared.database.syncedCount()) ?? 0
                 },
+                syncNow: {
+                    await BackgroundService.shared.syncNow()
+                },
                 openWalkthrough: {
                     NotificationCenter.default.post(name: .openOnboarding, object: nil)
                 },

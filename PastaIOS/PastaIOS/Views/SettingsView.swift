@@ -53,9 +53,16 @@ struct SettingsView: View {
                     await appState.performSync(syncManager: syncManager)
                 }
             } label: {
-                Label("Sync Now", systemImage: "arrow.clockwise")
+                if appState.isSyncInProgress {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Syncing…")
+                    }
+                } else {
+                    Label("Sync Now", systemImage: "arrow.clockwise")
+                }
             }
-            .disabled(syncManager.syncState == .syncing)
+            .disabled(appState.isSyncInProgress)
         }
     }
 
@@ -104,8 +111,16 @@ struct SettingsView: View {
                     await appState.performSync(syncManager: syncManager)
                 }
             } label: {
-                Label("Reset Sync", systemImage: "arrow.counterclockwise")
+                if appState.isSyncInProgress {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Resetting…")
+                    }
+                } else {
+                    Label("Reset Sync", systemImage: "arrow.counterclockwise")
+                }
             }
+            .disabled(appState.isSyncInProgress)
         } footer: {
             Text("Clears the sync token and forces a full re-sync from iCloud.")
         }

@@ -27,6 +27,9 @@ extension AppDelegate {
                 syncedCount: {
                     (try? BackgroundService.shared.database.syncedCount()) ?? 0
                 },
+                syncNow: {
+                    await BackgroundService.shared.syncNow()
+                },
                 openWalkthrough: { [weak self] in
                     self?.panelController?.show()
                     NotificationCenter.default.post(name: .openOnboarding, object: nil)

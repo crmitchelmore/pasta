@@ -26,7 +26,7 @@ final class AppState: ObservableObject {
     private var database: DatabaseManager?
     private let logger = Logger(subsystem: "com.pasta.ios", category: "AppState")
     private var lastObservedPasteboardChangeCount: Int?
-    private var isSyncInProgress = false
+    @Published private(set) var isSyncInProgress = false
     private var isClipboardCaptureInProgress = false
     private var isActivationPipelineRunning = false
 

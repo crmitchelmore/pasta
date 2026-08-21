@@ -56,12 +56,14 @@ public struct SettingsView: View {
     private let unsyncedEntries: (@Sendable () -> [ClipboardEntry])?
     private let markSynced: (([UUID]) -> Void)?
     private let syncedCount: (() -> Int)?
+    private let syncNow: (() async -> Void)?
 
     public init(
         syncManager: SyncManager? = nil,
         unsyncedEntries: (@Sendable () -> [ClipboardEntry])? = nil,
         markSynced: (([UUID]) -> Void)? = nil,
         syncedCount: (() -> Int)? = nil,
+        syncNow: (() async -> Void)? = nil,
         openWalkthrough: (() -> Void)? = nil,
         checkForUpdates: (() -> Void)? = nil,
         automaticallyChecksForUpdates: Binding<Bool>? = nil
@@ -70,6 +72,7 @@ public struct SettingsView: View {
         self.unsyncedEntries = unsyncedEntries
         self.markSynced = markSynced
         self.syncedCount = syncedCount
+        self.syncNow = syncNow
         self.openWalkthrough = openWalkthrough
         self.checkForUpdates = checkForUpdates
         self.automaticallyChecksForUpdates = automaticallyChecksForUpdates
@@ -126,7 +129,8 @@ public struct SettingsView: View {
                     syncManager: syncManager,
                     unsyncedEntries: unsyncedEntries ?? { [] },
                     markSynced: markSynced,
-                    syncedCount: syncedCount ?? { 0 }
+                    syncedCount: syncedCount ?? { 0 },
+                    syncNow: syncNow
                 )
                     .tabItem {
                         Label("iCloud", systemImage: "icloud")

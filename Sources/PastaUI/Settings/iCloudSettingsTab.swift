@@ -16,6 +16,7 @@ struct iCloudSettingsTab: View {
     let unsyncedEntries: @Sendable () -> [ClipboardEntry]
     let markSynced: (([UUID]) -> Void)?
     let syncedCount: () -> Int
+    let syncNow: (() async -> Void)?
     @State private var iCloudAvailable: Bool? = nil
     @State private var isResetting = false
     @State private var displayedSyncedCount: Int = 0
@@ -89,6 +90,10 @@ struct iCloudSettingsTab: View {
                             let markCallback = markSynced
                             let fetchUnsynced = unsyncedEntries
                             Task {
+                                if let syncNow {
+                                    await syncNow()
+                                    return
+                                }
                                 try? await syncManager.setupZone()
                                 let entries = await Task.detached(priority: .userInitiated) {
                                     fetchUnsynced()
