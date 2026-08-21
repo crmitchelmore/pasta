@@ -105,6 +105,9 @@ public struct ClipboardListView: View {
     @State private var sections: [SectionData] = []
     @State private var entryLookup: [UUID: ClipboardEntry] = [:]
     @State private var lastDataHash: Int = 0
+    /// Memoizes per-entry row models across body evaluations (reference type:
+    /// mutating it during body must not invalidate the view).
+    @State private var rowModelCache = ClipboardRowModelCache()
     
     /// Whether we can show the "values only" toggle (filtering by extractable type)
     private var canShowValuesToggle: Bool {
@@ -527,31 +530,35 @@ public struct ClipboardListView: View {
     }
 
     /// Builds the row list for the NSTableView, prepending a "Pinned" section
-    /// header + pinned entries when any pinned items exist.
+    /// header + pinned entries when any pinned items exist. Row models are
+    /// memoized in `rowModelCache` so body evaluations don't redo per-row
+    /// string work for unchanged entries.
     private func buildHighPerfRows() -> [ClipboardRowData] {
-        var pinned: [ClipboardEntry] = []
-        var unpinned: [ClipboardEntry] = []
-        pinned.reserveCapacity(entries.count)
-        unpinned.reserveCapacity(entries.count)
-        for entry in entries {
-            if entry.isPinned {
-                pinned.append(entry)
+        let allRows = rowModelCache.rows(for: entries)
+
+        var pinned: [ClipboardRowData] = []
+        var unpinned: [ClipboardRowData] = []
+        pinned.reserveCapacity(allRows.count)
+        unpinned.reserveCapacity(allRows.count)
+        for row in allRows {
+            if row.isPinned {
+                pinned.append(row)
             } else {
-                unpinned.append(entry)
+                unpinned.append(row)
             }
         }
 
         guard !pinned.isEmpty else {
-            return entries.map { ClipboardRowData(from: $0) }
+            return allRows
         }
 
         var rows: [ClipboardRowData] = []
-        rows.reserveCapacity(entries.count + 2)
+        rows.reserveCapacity(allRows.count + 2)
         rows.append(.header("Pinned"))
-        rows.append(contentsOf: pinned.map { ClipboardRowData(from: $0) })
+        rows.append(contentsOf: pinned)
         if !unpinned.isEmpty {
             rows.append(.header("History"))
-            rows.append(contentsOf: unpinned.map { ClipboardRowData(from: $0) })
+            rows.append(contentsOf: unpinned)
         }
         return rows
     }

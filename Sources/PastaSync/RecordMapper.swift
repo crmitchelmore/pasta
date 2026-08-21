@@ -10,12 +10,33 @@ public struct RecordMapper {
     private static let inlineDataThreshold = 50_000 // 50KB
     
     public init() {}
-    
-    /// Creates a CKRecord from a ClipboardEntry.
-    public func record(from entry: ClipboardEntry, zoneID: CKRecordZone.ID) -> CKRecord {
+
+    /// A record ready to push, plus the temporary asset file backing it (if
+    /// any). CKAsset only references the file, so it must stay on disk until
+    /// the save operation has completed — call `cleanupTemporaryAsset()` then
+    /// (success or failure), otherwise every pushed record with rawData leaks
+    /// a `.dat` file in the temporary directory.
+    public struct PreparedRecord {
+        public let record: CKRecord
+        public let temporaryAssetURL: URL?
+
+        public func cleanupTemporaryAsset() {
+            guard let temporaryAssetURL else { return }
+            try? FileManager.default.removeItem(at: temporaryAssetURL)
+        }
+    }
+
+    /// Creates a CKRecord (and its temporary asset file, when the entry has
+    /// raw data) from a ClipboardEntry.
+    ///
+    /// Throws when the temporary asset file cannot be written. Callers must
+    /// let that failure keep the entry unsynced: pushing the record without
+    /// its asset and then marking it synced would silently lose the image
+    /// bytes on every other device, with no retry.
+    public func preparedRecord(from entry: ClipboardEntry, zoneID: CKRecordZone.ID) throws -> PreparedRecord {
         let recordID = CKRecord.ID(recordName: entry.id.uuidString, zoneID: zoneID)
         let record = CKRecord(recordType: Self.recordType, recordID: recordID)
-        
+
         record["content"] = entry.content as CKRecordValue
         record["contentType"] = entry.contentType.rawValue as CKRecordValue
         record["contentHash"] = entry.contentHash as CKRecordValue
@@ -24,21 +45,25 @@ public struct RecordMapper {
         record["sourceApp"] = entry.sourceApp as CKRecordValue?
         record["metadata"] = entry.metadata as CKRecordValue?
         record["parentEntryId"] = entry.parentEntryId?.uuidString as CKRecordValue?
-        
+
         // Store content size for download-on-demand decisions
         let contentSize = (entry.rawData?.count ?? entry.content.utf8.count)
         record["contentSize"] = contentSize as CKRecordValue
-        
+
         // Handle image data as CKAsset for large blobs
+        var temporaryAssetURL: URL? = nil
         if let rawData = entry.rawData, !rawData.isEmpty {
+            // Unique per prepared record so concurrent pushes of the same
+            // entry can't clean up a file another operation still references.
             let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent(entry.id.uuidString)
+                .appendingPathComponent("\(entry.id.uuidString)-\(UUID().uuidString)")
                 .appendingPathExtension("dat")
-            try? rawData.write(to: tempURL)
+            try rawData.write(to: tempURL)
             record["imageAsset"] = CKAsset(fileURL: tempURL)
+            temporaryAssetURL = tempURL
         }
-        
-        return record
+
+        return PreparedRecord(record: record, temporaryAssetURL: temporaryAssetURL)
     }
     
     /// Creates a ClipboardEntry from a CKRecord (without downloading assets).

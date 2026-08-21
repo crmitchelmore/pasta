@@ -223,7 +223,7 @@ extension ContentTypeDetector {
             return matchPatterns(rule.cleanedPatterns, in: text).map { path in
                 FilePathDetector.Detection(
                     path: path,
-                    exists: false,
+                    exists: nil, // custom patterns never consult the filesystem
                     filename: URL(fileURLWithPath: path).lastPathComponent,
                     fileExtension: URL(fileURLWithPath: path).pathExtension,
                     fileType: .other,
@@ -236,7 +236,11 @@ extension ContentTypeDetector {
         let detected = filePathDetector.detect(in: text)
         switch detectorStrictness(for: .filePath, configuration: configuration) {
         case .strict:
-            return detected.filter(\.exists)
+            // Keep verified-existing paths, and paths beyond the existence
+            // -check budget (exists == nil): strictness should reject paths
+            // the filesystem DENIED, not paths that merely went unchecked in
+            // a path-heavy paste.
+            return detected.filter { $0.exists != false }
         case .medium, .lax:
             return detected
         }

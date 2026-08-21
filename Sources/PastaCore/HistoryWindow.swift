@@ -38,19 +38,11 @@ public enum HistoryWindow {
         return merged
     }
 
-    /// Whether the in-memory window already holds every row it is ever going to
-    /// hold, and so needs no further paging.
-    ///
-    /// A `nil` `totalEntryCount` means no full refresh has completed (it is
-    /// reset at the start of every refresh), so the window must be treated as
-    /// incomplete — otherwise a copy landing mid-load would strand the list at
-    /// whatever partial page had been merged.
-    public static func isFullyLoaded(
-        loadedCount: Int,
-        totalEntryCount: Int?,
-        displayLimit: Int
-    ) -> Bool {
-        guard let totalEntryCount else { return false }
-        return loadedCount >= min(totalEntryCount, displayLimit)
-    }
+    // NOTE: there is deliberately no "is the window fully loaded" helper that
+    // infers completeness from counts. After a delete, the head-merged interim
+    // window can hold MORE rows than the fresh library total (merge only
+    // unions; stale rows leave when the paged reload finishes), so
+    // `loadedCount >= total` misreads exactly the state that most needs a
+    // resumed reload. BackgroundService tracks an explicit
+    // paging-completeness flag instead.
 }

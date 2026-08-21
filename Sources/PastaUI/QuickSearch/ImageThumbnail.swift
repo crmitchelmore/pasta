@@ -3,13 +3,6 @@ import SwiftUI
 
 // MARK: - Image Thumbnail
 
-private let thumbnailCache: NSCache<NSString, NSImage> = {
-    let cache = NSCache<NSString, NSImage>()
-    cache.countLimit = 300
-    cache.totalCostLimit = 64 * 1024 * 1024
-    return cache
-}()
-
 struct ImageThumbnail: View {
     let path: String
     let size: CGFloat
@@ -45,21 +38,16 @@ struct ImageThumbnail: View {
 
     private func loadImage(from imagePath: String) {
         loadedPath = imagePath
-        let cacheKey = NSString(string: imagePath)
+        let pixelSize = size * 2 // retina
 
-        if let cached = thumbnailCache.object(forKey: cacheKey) {
+        if let cached = ImageDownsampler.cached(path: imagePath, maxPixelSize: pixelSize) {
             image = cached
             return
         }
 
         image = nil
-        let pixelSize = size * 2 // retina
         Task.detached(priority: .userInitiated) {
-            let thumbnail = ImageDownsampler.load(path: imagePath, maxPixelSize: pixelSize)
-            if let thumbnail {
-                let cost = Int(thumbnail.size.width * thumbnail.size.height * 4)
-                thumbnailCache.setObject(thumbnail, forKey: cacheKey, cost: cost)
-            }
+            let thumbnail = ImageDownsampler.cachedLoad(path: imagePath, maxPixelSize: pixelSize)
             await MainActor.run {
                 if loadedPath == imagePath {
                     image = thumbnail
