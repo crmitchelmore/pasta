@@ -2,6 +2,26 @@ import Foundation
 import GRDB
 
 extension DatabaseManager {
+    public typealias UnsyncedEntryUploader = @Sendable (
+        _ entries: [ClipboardEntry],
+        _ onBatchSynced: @escaping @Sendable ([UUID]) -> Void
+    ) async throws -> Int
+
+    /// Uploads all locally pending entries and marks each confirmed batch synced.
+    ///
+    /// The uploader controls batching and calls `onBatchSynced` only after a
+    /// batch is durably stored remotely. If a later batch fails, earlier batches
+    /// remain marked while the rest stay pending for the next retry.
+    @discardableResult
+    public func backfillUnsynced(using uploader: UnsyncedEntryUploader) async throws -> Int {
+        let pending = try fetchUnsynced()
+        guard !pending.isEmpty else { return 0 }
+
+        return try await uploader(pending) { [self] ids in
+            try? markSynced(ids: ids)
+        }
+    }
+
     /// Marks entries as synced to iCloud.
     public func markSynced(ids: [UUID]) throws {
         guard !ids.isEmpty else { return }

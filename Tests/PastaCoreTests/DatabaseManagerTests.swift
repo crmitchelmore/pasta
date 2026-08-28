@@ -455,6 +455,57 @@ final class DatabaseManagerTests: XCTestCase {
         XCTAssertTrue(try db.fetchUnsynced().isEmpty)
     }
 
+    func testBackfillUnsyncedMarksConfirmedBatches() async throws {
+        let db = try DatabaseManager.inMemory()
+        let entries = (0..<3).map {
+            ClipboardEntry(content: "backfill \($0)", contentType: .text)
+        }
+        try db.insertBatch(entries, deduplicate: false)
+
+        let uploaded = try await db.backfillUnsynced { pending, onBatchSynced in
+            XCTAssertEqual(Set(pending.map(\.id)), Set(entries.map(\.id)))
+            onBatchSynced([pending[0].id])
+            onBatchSynced(Array(pending.dropFirst()).map(\.id))
+            return pending.count
+        }
+
+        XCTAssertEqual(uploaded, 3)
+        XCTAssertEqual(try db.unsyncedCount(), 0)
+    }
+
+    func testBackfillUnsyncedLeavesUnconfirmedEntriesForRetry() async throws {
+        struct UploadFailure: Error {}
+
+        let db = try DatabaseManager.inMemory()
+        let entries = (0..<3).map {
+            ClipboardEntry(content: "retry \($0)", contentType: .text)
+        }
+        try db.insertBatch(entries, deduplicate: false)
+
+        do {
+            _ = try await db.backfillUnsynced { pending, onBatchSynced in
+                onBatchSynced([pending[0].id])
+                throw UploadFailure()
+            }
+            XCTFail("Expected the later upload batch to fail")
+        } catch is UploadFailure {
+            // Expected. The confirmed batch is durable; the rest remain pending.
+        }
+
+        XCTAssertEqual(try db.syncedCount(), 1)
+        XCTAssertEqual(try db.unsyncedCount(), 2)
+    }
+
+    func testBackfillUnsyncedSkipsUploaderWhenNothingIsPending() async throws {
+        let db = try DatabaseManager.inMemory()
+
+        let uploaded = try await db.backfillUnsynced { _, _ in
+            return 99
+        }
+
+        XCTAssertEqual(uploaded, 0)
+    }
+
     // MARK: - FTS triggers
 
     func testFTSSurvivesMetadataOnlyUpdatesAndTracksContentChanges() throws {
