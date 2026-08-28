@@ -138,6 +138,13 @@ final class AppState: ObservableObject {
         isSyncInProgress = true
         defer { isSyncInProgress = false }
         do {
+            let backfilled = try await database.backfillUnsynced { entries, onBatchSynced in
+                try await syncManager.pushEntries(entries, onBatchSynced: onBatchSynced)
+            }
+            if backfilled > 0 {
+                logger.info("Backfilled \(backfilled) local clipboard entries to CloudKit")
+            }
+
             let changes = try await syncManager.fetchChanges()
 
             for entry in changes.modified {
