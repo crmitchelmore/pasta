@@ -421,55 +421,57 @@ public struct OnboardingView: View {
     // MARK: - Ready Step
     
     private var readyStep: some View {
-        VStack(spacing: 28) {
-            Spacer()
-            
-            // Success animation
-            ZStack {
-                Circle()
-                    .fill(Color.green.opacity(0.1))
-                    .frame(width: 100, height: 100)
-                
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 56))
-                    .foregroundStyle(.green)
-                    .symbolEffect(.bounce, value: step == .ready)
-            }
-            
-            VStack(spacing: 12) {
-                Text("You're Ready!")
-                    .font(.system(size: 24, weight: .semibold, design: .rounded))
-                
-                Text("Press **⌃⌘V** anytime to open Pasta")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-            }
-            
-            // Quick reference card
-            VStack(spacing: 12) {
-                quickRefRow(keys: "⌃⌘V", action: "Open Pasta")
-                quickRefRow(keys: "↩︎", action: "Paste selected")
-                quickRefRow(keys: "!", action: "Enter command mode")
-                quickRefRow(keys: "→", action: "Open preview panel")
-                quickRefRow(keys: "⌘1-⌘9", action: "Quick paste by slot")
-                quickRefRow(keys: "⌘⌫", action: "Delete clip")
-                quickRefRow(keys: "esc", action: "Close")
-            }
-            .padding(16)
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            }
-            .frame(maxWidth: 260)
+        ScrollView(.vertical) {
+            VStack(spacing: 18) {
+                // Keep the completion footer outside this scroll view. The
+                // shortcut reference can grow as commands are added without
+                // ever pushing the only visible dismissal control off-screen.
+                ZStack {
+                    Circle()
+                        .fill(Color.green.opacity(0.1))
+                        .frame(width: 64, height: 64)
 
-            Text("You can reopen this walkthrough from Settings → General anytime.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            
-            Spacer()
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.green)
+                        .symbolEffect(.bounce, value: step == .ready)
+                }
+                
+                VStack(spacing: 8) {
+                    Text("You're Ready!")
+                        .font(.system(size: 24, weight: .semibold, design: .rounded))
+
+                    Text("Press **⌃⌘V** anytime to open Pasta")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
+                
+                // Quick reference card
+                VStack(spacing: 10) {
+                    quickRefRow(keys: "⌃⌘V", action: "Open Pasta")
+                    quickRefRow(keys: "↩︎", action: "Paste selected")
+                    quickRefRow(keys: "!", action: "Enter command mode")
+                    quickRefRow(keys: "→", action: "Open preview panel")
+                    quickRefRow(keys: "⌘1-⌘9", action: "Quick paste by slot")
+                    quickRefRow(keys: "⌘⌫", action: "Delete clip")
+                    quickRefRow(keys: "esc", action: "Close")
+                }
+                .padding(14)
+                .background {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                }
+                .frame(maxWidth: 260)
+
+                Text("You can reopen this walkthrough from Settings → General anytime.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .padding(.horizontal, 40)
         }
-        .padding(.horizontal, 40)
     }
     
     private func quickRefRow(keys: String, action: String) -> some View {
