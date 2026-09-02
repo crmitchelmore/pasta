@@ -34,6 +34,7 @@ public final class QuickSearchManager: ObservableObject {
     private var entriesSubscription: AnyCancellable?
     private var searchDebounceTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
+    private var pinnedCountTask: Task<Void, Never>?
     
     // Database reference for FTS5 search
     private var database: DatabaseManager?
@@ -125,16 +126,24 @@ public final class QuickSearchManager: ObservableObject {
 
         // Pinned counts are typically tiny but pinned items are often older than
         // the 1000-entry sample. Prefer the database for an accurate total; fall
-        // back to a full scan when the database isn't available (tests).
-        if let database {
-            do {
-                pinnedCount = try database.pinnedCount()
-            } catch {
-                PastaLogger.search.error("pinnedCount() failed: \(error.localizedDescription)")
-                pinnedCount = allEntries.reduce(0) { $0 + ($1.isPinned ? 1 : 0) }
-            }
-        } else {
-            pinnedCount = allEntries.reduce(0) { $0 + ($1.isPinned ? 1 : 0) }
+        // back to a full scan when the database isn't available (tests). Both
+        // run off the main actor: this is called on every entries publish.
+        pinnedCountTask?.cancel()
+        let database = database
+        let snapshot = allEntries
+        pinnedCountTask = Task { [weak self] in
+            let count = await Task.detached(priority: .utility) { () -> Int in
+                if let database {
+                    do {
+                        return try database.pinnedCount()
+                    } catch {
+                        PastaLogger.search.error("pinnedCount() failed: \(error.localizedDescription)")
+                    }
+                }
+                return snapshot.reduce(0) { $0 + ($1.isPinned ? 1 : 0) }
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.pinnedCount = count
         }
 
         availableFilters = counts
