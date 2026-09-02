@@ -19,6 +19,7 @@ extension PanelContentView {
         var effectiveTypeCounts: [ContentType: Int]
         var sourceAppCounts: [String: Int]
         var domainCounts: [String: Int]
+        var pinnedCount: Int
     }
 
     func schedulePreload(for entries: [ClipboardEntry]) {
@@ -48,6 +49,7 @@ extension PanelContentView {
                 var counts: [ContentType: Int] = [:]
                 var sourceAppCounts: [String: Int] = [:]
                 var domainCounts: [String: Int] = [:]
+                var pinnedCount = 0
                 let urlDetector = URLDetector()
 
                 let extractableTypes = MetadataParser.extractableTypes
@@ -63,6 +65,7 @@ extension PanelContentView {
                     guard !Task.isCancelled else { return nil }
 
                     counts[entry.contentType, default: 0] += 1
+                    if entry.isPinned { pinnedCount += 1 }
                     let app = entry.sourceApp ?? "Unknown"
                     sourceAppCounts[app, default: 0] += 1
                     if entry.contentType == .url {
@@ -105,7 +108,8 @@ extension PanelContentView {
                     entriesByType: out,
                     effectiveTypeCounts: counts,
                     sourceAppCounts: SourceAppDisplay.groupedCounts(sourceAppCounts),
-                    domainCounts: domainCounts
+                    domainCounts: domainCounts,
+                    pinnedCount: pinnedCount
                 )
             }
 
@@ -116,6 +120,7 @@ extension PanelContentView {
                 preloadedEffectiveTypeCounts = result.effectiveTypeCounts
                 preloadedSourceAppCounts = result.sourceAppCounts
                 preloadedDomainCounts = result.domainCounts
+                preloadedPinnedCount = result.pinnedCount
 
                 // Update display from fresh cache if applicable (resolves race with asyncFilterEntries)
                 if let cached = preloadedEntriesForCurrentFilters() {

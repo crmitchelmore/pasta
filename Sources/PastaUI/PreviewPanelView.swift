@@ -402,16 +402,32 @@ public struct PreviewPanelView: View {
     }
 
     private func truncatedText(_ text: String, limit: Int) -> TruncatedText {
-        guard text.count > limit else {
+        // `text.count` walks the whole string (milliseconds for multi-MB
+        // entries); stepping at most `limit` characters is bounded.
+        guard let endIndex = text.index(text.startIndex, offsetBy: limit, limitedBy: text.endIndex),
+              endIndex < text.endIndex else {
             return TruncatedText(text: text, isTruncated: false)
         }
-        let endIndex = text.index(text.startIndex, offsetBy: limit)
         return TruncatedText(text: String(text[..<endIndex]), isTruncated: true)
     }
 
     private struct TruncatedText {
         let text: String
         let isTruncated: Bool
+    }
+}
+
+extension PreviewPanelView: Equatable {
+    /// Lets `.equatable()` skip the body on unrelated parent re-renders (every
+    /// keystroke): only the shown entry and the fields the panel displays matter.
+    public static func == (lhs: PreviewPanelView, rhs: PreviewPanelView) -> Bool {
+        lhs.entry?.id == rhs.entry?.id
+            && lhs.entry?.timestamp == rhs.entry?.timestamp
+            && lhs.entry?.copyCount == rhs.entry?.copyCount
+            && lhs.entry?.isPinned == rhs.entry?.isPinned
+            && lhs.entry?.metadata == rhs.entry?.metadata
+            && lhs.entry?.content.utf8.count == rhs.entry?.content.utf8.count
+            && (lhs.onCopy == nil) == (rhs.onCopy == nil)
     }
 }
 

@@ -1,3 +1,4 @@
+import CryptoKit
 import PastaCore
 import SwiftUI
 
@@ -129,8 +130,16 @@ public struct ClipboardRowData: Equatable {
         ClipboardRowData(headerTitle: title)
     }
 
+    /// Header ids are derived from the title so headers built on successive
+    /// body passes compare equal; a fresh `UUID()` per pass made every id
+    /// diff fail and forced a full `reloadData()` whenever pinned rows existed.
+    private static func headerID(for title: String) -> UUID {
+        let digest = SHA256.hash(data: Data("section-header:\(title)".utf8))
+        return digest.withUnsafeBytes { UUID(uuid: $0.load(as: uuid_t.self)) }
+    }
+
     private init(headerTitle: String) {
-        self.id = UUID()
+        self.id = Self.headerID(for: headerTitle)
         self.previewText = ""
         self.contentType = .text
         self.sourceAppIdentifier = nil

@@ -36,6 +36,12 @@ final class ClipboardRowDataTests: XCTestCase {
         XCTAssertFalse(normal.isHeader)
     }
 
+    func testHeaderIDsAreStableAcrossBuilds() {
+        // HighPerformanceListView diffs on ids; an unstable header id forces a full reload.
+        XCTAssertEqual(ClipboardRowData.header("Pinned").id, ClipboardRowData.header("Pinned").id)
+        XCTAssertNotEqual(ClipboardRowData.header("Pinned").id, ClipboardRowData.header("History").id)
+    }
+
     func testSingleLinePreviewCollapsesNewlines() {
         let entry = ClipboardEntry(content: "line one\nline two", contentType: .text)
         let row = ClipboardRowData(from: entry)

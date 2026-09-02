@@ -55,6 +55,7 @@ struct PanelContentView: View {
     @State var preloadedEffectiveTypeCounts: [ContentType: Int]? = nil
     @State var preloadedSourceAppCounts: [String: Int]? = nil
     @State var preloadedDomainCounts: [String: Int]? = nil
+    @State var preloadedPinnedCount: Int? = nil
     @State var preloadTask: Task<Void, Never>? = nil
     @State var filterTask: Task<Void, Never>? = nil
     @State var searchTask: Task<Void, Never>? = nil
@@ -88,9 +89,10 @@ struct PanelContentView: View {
                 }
                 .map(\.key)
         }
-        // Fallback: derive from entries directly when preload cache hasn't run yet.
+        // Fallback before the first preload lands: derive from the bounded
+        // first page rather than scanning the whole history in body.
         var seen: [ContentType: Int] = [:]
-        for entry in backgroundService.entries {
+        for entry in preloadedEntriesByType[nil] ?? [] {
             seen[entry.contentType, default: 0] += 1
         }
         return seen
@@ -156,6 +158,7 @@ struct PanelContentView: View {
                     effectiveTypeCounts: preloadedEffectiveTypeCounts,
                     sourceAppCounts: preloadedSourceAppCounts,
                     domainCounts: preloadedDomainCounts,
+                    pinnedCount: preloadedPinnedCount,
                     selectedContentType: $contentTypeFilter,
                     selectedURLDomain: $urlDomainFilter,
                     selection: $filterSelection
@@ -207,6 +210,8 @@ struct PanelContentView: View {
                     isListEmpty: backgroundService.entries.isEmpty && !backgroundService.isLoadingEntries,
                     onCopy: { copyEntry($0) }
                 )
+                    // Skip the (expensive) preview body unless the shown entry changed.
+                    .equatable()
                     .frame(width: widths.preview)
                     .frame(maxHeight: .infinity)
                     .accessibilitySortPriority(1)
@@ -265,6 +270,11 @@ struct PanelContentView: View {
                 filterSelection = type.map { .type($0) } ?? .all
             }
             .onReceive(backgroundService.$entries) { entries in
+                // The unfiltered bucket is a plain prefix, so refresh it now:
+                // a fresh copy shows immediately instead of after the debounced
+                // full rescan below.
+                preloadedEntriesByType[nil] = Array(entries.prefix(Preload.limit))
+
                 // Keep preload cache warm so type switching is instant
                 schedulePreload(for: entries)
 
