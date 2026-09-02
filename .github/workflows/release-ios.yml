@@ -335,7 +335,7 @@ jobs:
           echo "==> Entitlements are applied at export; verified against the IPA after -exportArchive"
 
           [ -d "$ARCHIVE_PATH/dSYMs/PastaIOS.app.dSYM" ] || echo "::warning::No dSYM found in archive; crash symbolication will be unavailable."
-          echo "==> Archive OK: $ACTUAL_ID $ACTUAL_VERSION ($ACTUAL_BUILD), container $CONTAINER"
+          echo "==> Archive OK: $ACTUAL_ID $ACTUAL_VERSION ($ACTUAL_BUILD)"
 
       # ==========================================================================
       # EXPORT & UPLOAD
