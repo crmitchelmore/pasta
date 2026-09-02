@@ -4,109 +4,55 @@ import XCTest
 final class ColorDetectorTests: XCTestCase {
     private let detector = ColorDetector()
 
-    // MARK: - Hex
+    // MARK: - Hex / rgb / hsl parsing
 
-    func testDetectHex6() {
-        let r = detector.detect(in: "#FF8800").first
-        XCTAssertEqual(r?.format, .hex)
-        XCTAssertEqual(r?.red, 0xFF)
-        XCTAssertEqual(r?.green, 0x88)
-        XCTAssertEqual(r?.blue, 0x00)
-        XCTAssertEqual(r?.alpha, 1.0)
+    private struct ParseCase {
+        let input: String
+        /// Asserted only when non-nil (some original cases checked channels only).
+        var format: ColorDetector.Format? = nil
+        let red: UInt8
+        let green: UInt8
+        let blue: UInt8
+        /// Asserted only when non-nil.
+        var alpha: Double? = nil
     }
 
-    func testDetectHex3Expansion() {
-        let r = detector.detect(in: "#f80").first
-        XCTAssertEqual(r?.red, 0xFF)
-        XCTAssertEqual(r?.green, 0x88)
-        XCTAssertEqual(r?.blue, 0x00)
-    }
+    private static let parseCases: [ParseCase] = [
+        // Hex
+        ParseCase(input: "#FF8800", format: .hex, red: 0xFF, green: 0x88, blue: 0x00, alpha: 1.0),
+        ParseCase(input: "#f80", red: 0xFF, green: 0x88, blue: 0x00),
+        ParseCase(input: "#11223380", red: 0x11, green: 0x22, blue: 0x33, alpha: 0x80 / 255.0),
+        ParseCase(input: "#1238", red: 0x11, green: 0x22, blue: 0x33, alpha: 0x88 / 255.0),
+        // rgb / rgba
+        ParseCase(input: "rgb(255, 128, 0)", format: .rgb, red: 255, green: 128, blue: 0),
+        ParseCase(input: "rgb(255 128 0)", format: .rgb, red: 255, green: 128, blue: 0),
+        ParseCase(input: "rgb(100%, 50%, 0%)", red: 255, green: 128, blue: 0),
+        ParseCase(input: "rgba(10, 20, 30, 0.5)", format: .rgba, red: 10, green: 20, blue: 30, alpha: 0.5),
+        ParseCase(input: "rgb(255 0 0 / 0.25)", format: .rgba, red: 255, green: 0, blue: 0, alpha: 0.25),
+        // hsl / hsla
+        ParseCase(input: "hsl(0, 100%, 50%)", format: .hsl, red: 255, green: 0, blue: 0),
+        ParseCase(input: "hsl(240, 100%, 50%)", red: 0, green: 0, blue: 255),
+        ParseCase(input: "hsl(120 100% 25% / 0.5)", format: .hsla, red: 0, green: 128, blue: 0, alpha: 0.5),
+    ]
 
-    func testDetectHex8WithAlpha() {
-        let r = detector.detect(in: "#11223380").first
-        XCTAssertEqual(r?.red, 0x11)
-        XCTAssertEqual(r?.green, 0x22)
-        XCTAssertEqual(r?.blue, 0x33)
-        XCTAssertEqual(r?.alpha ?? 0, 0x80 / 255.0, accuracy: 0.001)
-    }
-
-    func testDetectHex4WithAlpha() {
-        let r = detector.detect(in: "#1238").first
-        XCTAssertEqual(r?.red, 0x11)
-        XCTAssertEqual(r?.green, 0x22)
-        XCTAssertEqual(r?.blue, 0x33)
-        XCTAssertEqual(r?.alpha ?? 0, 0x88 / 255.0, accuracy: 0.001)
-    }
-
-    // MARK: - rgb / rgba
-
-    func testDetectRGBLegacy() {
-        let r = detector.detect(in: "rgb(255, 128, 0)").first
-        XCTAssertEqual(r?.format, .rgb)
-        XCTAssertEqual(r?.red, 255)
-        XCTAssertEqual(r?.green, 128)
-        XCTAssertEqual(r?.blue, 0)
-    }
-
-    func testDetectRGBModernSpace() {
-        let r = detector.detect(in: "rgb(255 128 0)").first
-        XCTAssertEqual(r?.format, .rgb)
-        XCTAssertEqual(r?.red, 255)
-        XCTAssertEqual(r?.green, 128)
-        XCTAssertEqual(r?.blue, 0)
-    }
-
-    func testDetectRGBPercent() {
-        let r = detector.detect(in: "rgb(100%, 50%, 0%)").first
-        XCTAssertEqual(r?.red, 255)
-        XCTAssertEqual(r?.green, 128)
-        XCTAssertEqual(r?.blue, 0)
-    }
-
-    func testDetectRGBAComma() {
-        let r = detector.detect(in: "rgba(10, 20, 30, 0.5)").first
-        XCTAssertEqual(r?.format, .rgba)
-        XCTAssertEqual(r?.red, 10)
-        XCTAssertEqual(r?.green, 20)
-        XCTAssertEqual(r?.blue, 30)
-        XCTAssertEqual(r?.alpha ?? 0, 0.5, accuracy: 0.001)
-    }
-
-    func testDetectRGBSlashAlpha() {
-        let r = detector.detect(in: "rgb(255 0 0 / 0.25)").first
-        XCTAssertEqual(r?.format, .rgba)
-        XCTAssertEqual(r?.alpha ?? 0, 0.25, accuracy: 0.001)
+    func testParsesHexRGBAndHSLForms() {
+        for testCase in Self.parseCases {
+            let r = detector.detect(in: testCase.input).first
+            if let format = testCase.format {
+                XCTAssertEqual(r?.format, format, testCase.input)
+            }
+            XCTAssertEqual(r?.red, testCase.red, testCase.input)
+            XCTAssertEqual(r?.green, testCase.green, testCase.input)
+            XCTAssertEqual(r?.blue, testCase.blue, testCase.input)
+            if let alpha = testCase.alpha {
+                XCTAssertEqual(r?.alpha ?? 0, alpha, accuracy: 0.001, testCase.input)
+            }
+        }
     }
 
     func testRejectRGBOutOfRange() {
         let r = detector.detect(in: "rgb(300, 0, 0)")
         XCTAssertTrue(r.isEmpty, "Out-of-range channel should not match")
-    }
-
-    // MARK: - hsl / hsla
-
-    func testDetectHSLPureRed() {
-        let r = detector.detect(in: "hsl(0, 100%, 50%)").first
-        XCTAssertEqual(r?.format, .hsl)
-        XCTAssertEqual(r?.red, 255)
-        XCTAssertEqual(r?.green, 0)
-        XCTAssertEqual(r?.blue, 0)
-    }
-
-    func testDetectHSLBlue() {
-        let r = detector.detect(in: "hsl(240, 100%, 50%)").first
-        XCTAssertEqual(r?.red, 0)
-        XCTAssertEqual(r?.green, 0)
-        XCTAssertEqual(r?.blue, 255)
-    }
-
-    func testDetectHSLAModern() {
-        let r = detector.detect(in: "hsl(120 100% 25% / 0.5)").first
-        XCTAssertEqual(r?.format, .hsla)
-        XCTAssertEqual(r?.red, 0)
-        XCTAssertEqual(r?.green, 128)
-        XCTAssertEqual(r?.blue, 0)
-        XCTAssertEqual(r?.alpha ?? 0, 0.5, accuracy: 0.001)
     }
 
     // MARK: - Named colors
