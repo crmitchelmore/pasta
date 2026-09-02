@@ -427,6 +427,7 @@ extension PreviewPanelView: Equatable {
             && lhs.entry?.isPinned == rhs.entry?.isPinned
             && lhs.entry?.metadata == rhs.entry?.metadata
             && lhs.entry?.content.utf8.count == rhs.entry?.content.utf8.count
+            && lhs.isListEmpty == rhs.isListEmpty
             && (lhs.onCopy == nil) == (rhs.onCopy == nil)
     }
 }
