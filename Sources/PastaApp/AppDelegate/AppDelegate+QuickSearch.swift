@@ -21,6 +21,15 @@ extension AppDelegate {
                 showOpenFullAppButton: isDockOnly,
                 onExecuteCommand: { command in
                     await self?.handleCommandResult(command) ?? .dismissed
+                },
+                onDelete: { entry in
+                    Task { @MainActor in
+                        do {
+                            _ = try await BackgroundService.shared.delete(ids: [entry.id])
+                        } catch {
+                            PastaLogger.logError(error, logger: PastaLogger.ui, context: "Failed to delete entry from Quick Search")
+                        }
+                    }
                 }
             )
         }

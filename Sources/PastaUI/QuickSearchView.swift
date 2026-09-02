@@ -11,6 +11,7 @@ public struct QuickSearchView: View {
     private let onOpenFullApp: (() -> Void)?
     private let showOpenFullAppButton: Bool
     private let onExecuteCommand: ((Command) async -> CommandResult)?
+    private let onDelete: ((ClipboardEntry) -> Void)?
 
     @FocusState private var isSearchFocused: Bool
     @State private var commandFeedback: String? = nil
@@ -24,13 +25,15 @@ public struct QuickSearchView: View {
         onPaste: @escaping (ClipboardEntry) -> Void,
         onOpenFullApp: (() -> Void)? = nil,
         showOpenFullAppButton: Bool = false,
-        onExecuteCommand: ((Command) async -> CommandResult)? = nil
+        onExecuteCommand: ((Command) async -> CommandResult)? = nil,
+        onDelete: ((ClipboardEntry) -> Void)? = nil
     ) {
         self.onDismiss = onDismiss
         self.onPaste = onPaste
         self.onOpenFullApp = onOpenFullApp
         self.showOpenFullAppButton = showOpenFullAppButton
         self.onExecuteCommand = onExecuteCommand
+        self.onDelete = onDelete
     }
 
     public var body: some View {
@@ -59,7 +62,8 @@ public struct QuickSearchView: View {
                         onDismiss()
                     }
                 }
-            }
+            },
+            onCommandDelete: { deleteSelectedEntry() }
         ) {
             ZStack {
                 VStack(spacing: 0) {
@@ -118,14 +122,14 @@ public struct QuickSearchView: View {
                     if let feedback = commandFeedback {
                         HStack {
                             Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
+                                .foregroundStyle(PastaTheme.success)
                             Text(feedback)
                                 .font(.caption)
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.green.opacity(0.1))
+                        .background(PastaTheme.success.opacity(0.1))
                     }
                 }
                 .frame(width: 680, height: dynamicHeight)
@@ -176,6 +180,13 @@ public struct QuickSearchView: View {
             onPaste(entry)
             onDismiss()
         }
+    }
+
+    /// ⌘⌫: delete the highlighted entry without leaving Quick Search. The
+    /// results list refreshes through the manager's entries publisher.
+    private func deleteSelectedEntry() {
+        guard !manager.isCommandMode, let onDelete, let entry = manager.selectedEntry else { return }
+        onDelete(entry)
     }
 
     private func executeCommand(_ command: Command) {
@@ -252,7 +263,7 @@ public struct QuickSearchView: View {
                     }
                     .keyboardShortcut(.return)
                     .buttonStyle(.borderedProminent)
-                    .tint(.red)
+                    .tint(PastaTheme.destructive)
                 }
             }
             .padding(24)
@@ -292,7 +303,7 @@ public struct QuickSearchView: View {
         HStack(spacing: 12) {
             Image(systemName: manager.isCommandMode ? "terminal" : "magnifyingglass")
                 .font(.title2)
-                .foregroundStyle(manager.isCommandMode ? .orange : .secondary)
+                .foregroundStyle(manager.isCommandMode ? PastaTheme.command : .secondary)
 
             TextField(manager.isCommandMode ? "Type a command..." : "Search clipboard history... (! for commands)", text: $manager.query)
                 .textFieldStyle(.plain)

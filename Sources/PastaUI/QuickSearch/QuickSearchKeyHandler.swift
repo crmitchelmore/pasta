@@ -11,6 +11,7 @@ struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
     let onReturn: () -> Void
     let onEscape: () -> Void
     let onCommandNumber: (Int) -> Void
+    let onCommandDelete: () -> Void
     let content: Content
 
     init(
@@ -21,6 +22,7 @@ struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
         onReturn: @escaping () -> Void,
         onEscape: @escaping () -> Void,
         onCommandNumber: @escaping (Int) -> Void,
+        onCommandDelete: @escaping () -> Void = {},
         @ViewBuilder content: () -> Content
     ) {
         self.onArrowUp = onArrowUp
@@ -30,6 +32,7 @@ struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
         self.onReturn = onReturn
         self.onEscape = onEscape
         self.onCommandNumber = onCommandNumber
+        self.onCommandDelete = onCommandDelete
         self.content = content()
     }
 
@@ -42,6 +45,7 @@ struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
             onReturn: onReturn,
             onEscape: onEscape,
             onCommandNumber: onCommandNumber,
+            onCommandDelete: onCommandDelete,
             content: content
         )
     }
@@ -54,6 +58,7 @@ struct QuickSearchKeyHandler<Content: View>: NSViewRepresentable {
         nsView.onReturn = onReturn
         nsView.onEscape = onEscape
         nsView.onCommandNumber = onCommandNumber
+        nsView.onCommandDelete = onCommandDelete
         nsView.updateContent(content)
     }
 }
@@ -66,6 +71,7 @@ final class KeyInterceptingView: NSView {
     var onReturn: () -> Void
     var onEscape: () -> Void
     var onCommandNumber: (Int) -> Void
+    var onCommandDelete: () -> Void
 
     private var hostingView: NSHostingController<AnyView>?
     private var localMonitor: Any?
@@ -78,6 +84,7 @@ final class KeyInterceptingView: NSView {
         onReturn: @escaping () -> Void,
         onEscape: @escaping () -> Void,
         onCommandNumber: @escaping (Int) -> Void,
+        onCommandDelete: @escaping () -> Void,
         content: Content
     ) {
         self.onArrowUp = onArrowUp
@@ -87,6 +94,7 @@ final class KeyInterceptingView: NSView {
         self.onReturn = onReturn
         self.onEscape = onEscape
         self.onCommandNumber = onCommandNumber
+        self.onCommandDelete = onCommandDelete
         super.init(frame: .zero)
 
         let hosting = NSHostingController(rootView: AnyView(content))
@@ -140,6 +148,11 @@ final class KeyInterceptingView: NSView {
                let digit = Int(chars),
                digit >= 1 && digit <= 9 {
                 onCommandNumber(digit)
+                return true
+            }
+            // ⌘⌫ deletes the selected entry (mirrors the main panel).
+            if event.keyCode == 51 {
+                onCommandDelete()
                 return true
             }
         }
