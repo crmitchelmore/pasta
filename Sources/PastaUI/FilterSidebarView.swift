@@ -7,6 +7,7 @@ public struct FilterSidebarView: View {
     private let effectiveTypeCountsOverride: [ContentType: Int]?
     private let sourceAppCountsOverride: [String: Int]?
     private let domainCountsOverride: [String: Int]?
+    private let pinnedCountOverride: Int?
 
     @Binding private var selectedContentType: ContentType?
     @Binding private var selectedURLDomain: String?
@@ -18,6 +19,7 @@ public struct FilterSidebarView: View {
     @State private var showAllApps: Bool = false
     @State private var fallbackTypeCounts: [ContentType: Int] = [:]
     @State private var fallbackSourceAppCounts: [String: Int] = [:]
+    @State private var fallbackPinnedCount: Int = 0
     @State private var fallbackCountsTask: Task<Void, Never>? = nil
 
     public init(
@@ -25,6 +27,7 @@ public struct FilterSidebarView: View {
         effectiveTypeCounts: [ContentType: Int]? = nil,
         sourceAppCounts: [String: Int]? = nil,
         domainCounts: [String: Int]? = nil,
+        pinnedCount: Int? = nil,
         selectedContentType: Binding<ContentType?>,
         selectedURLDomain: Binding<String?>,
         selection: Binding<FilterSelection?>
@@ -33,6 +36,7 @@ public struct FilterSidebarView: View {
         effectiveTypeCountsOverride = effectiveTypeCounts
         sourceAppCountsOverride = sourceAppCounts
         domainCountsOverride = domainCounts
+        pinnedCountOverride = pinnedCount
         _selectedContentType = selectedContentType
         _selectedURLDomain = selectedURLDomain
         _selection = selection
@@ -48,7 +52,8 @@ public struct FilterSidebarView: View {
                     selectionValue: .all
                 )
 
-                let pinnedCount = entries.lazy.filter(\.isPinned).count
+                // Counted off-main (preload or the fallback task); never scan `entries` in body.
+                let pinnedCount = pinnedCountOverride ?? fallbackPinnedCount
                 if pinnedCount > 0 {
                     sidebarRow(
                         title: "Pinned",
@@ -335,23 +340,26 @@ public struct FilterSidebarView: View {
         let snapshot = entries
 
         fallbackCountsTask = Task {
-            let result = await Task.detached(priority: .utility) { () -> ([ContentType: Int], [String: Int]) in
+            let result = await Task.detached(priority: .utility) { () -> ([ContentType: Int], [String: Int], Int) in
                 var typeCounts: [ContentType: Int] = [:]
                 var appCounts: [String: Int] = [:]
+                var pinned = 0
 
                 for entry in snapshot {
                     typeCounts[entry.contentType, default: 0] += 1
                     let app = entry.sourceApp ?? "Unknown"
                     appCounts[app, default: 0] += 1
+                    if entry.isPinned { pinned += 1 }
                 }
 
-                return (typeCounts, appCounts)
+                return (typeCounts, appCounts, pinned)
             }.value
 
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 fallbackTypeCounts = result.0
                 fallbackSourceAppCounts = result.1
+                fallbackPinnedCount = result.2
             }
         }
     }

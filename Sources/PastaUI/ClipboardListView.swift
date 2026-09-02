@@ -69,10 +69,6 @@ public struct ClipboardListView: View {
     @State private var bulkSelectedIDs: Set<UUID> = []
     @State private var deleteConfirmEntry: ClipboardEntry? = nil
     
-    // Cached computed data for performance
-    @State private var sections: [SectionData] = []
-    @State private var entryLookup: [UUID: ClipboardEntry] = [:]
-    @State private var lastDataHash: Int = 0
     /// Memoizes per-entry row models across body evaluations (reference type:
     /// mutating it during body must not invalidate the view).
     @State private var rowModelCache = ClipboardRowModelCache()
@@ -143,40 +139,23 @@ public struct ClipboardListView: View {
         self.onTogglePin = onTogglePin
     }
 
-    /// Compute a stable hash for change detection
-    private var dataChangeToken: Int {
-        var hasher = Hasher()
-        hasher.combine(entries.count)
-        hasher.combine(searchQuery)
-        // Include first/last entry IDs for content change detection
-        if let first = entries.first { hasher.combine(first.id) }
-        if let last = entries.last { hasher.combine(last.id) }
-        return hasher.finalize()
+    /// Resolves a row callback to the current entry. `entries` is at most one
+    /// page (200), so a linear scan beats a cached lookup that could go stale.
+    private func entry(for id: UUID) -> ClipboardEntry? {
+        entries.first { $0.id == id }
     }
-    
-    /// Rebuild cached section data - runs off main thread implicitly via onChange
-    private func rebuildSections() {
-        let newHash = dataChangeToken
-        guard newHash != lastDataHash else { return }
-        lastDataHash = newHash
-        
-        // Build lookup table for callbacks
-        var lookup: [UUID: ClipboardEntry] = [:]
-        lookup.reserveCapacity(entries.count)
-        for entry in entries {
-            lookup[entry.id] = entry
-        }
-        entryLookup = lookup
-        
+
+    /// Grouped rows for the SwiftUI selection-mode list. Only evaluated while
+    /// `isSelectionMode` is on; the normal path renders `buildHighPerfRows()`.
+    private var selectionModeSections: [SectionData] {
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        
+
         // If searching, return flat list
         if !trimmedQuery.isEmpty {
             let rows = entries.map { ClipboardRowData(from: $0) }
-            sections = [SectionData(id: "Results", name: "Results", rows: rows)]
-            return
+            return [SectionData(id: "Results", name: "Results", rows: rows)]
         }
-        
+
         // Group by time
         let now = Date()
         var groups: [TimeGroup: [ClipboardRowData]] = [:]
@@ -184,7 +163,7 @@ public struct ClipboardListView: View {
             let group = TimeGroup.group(for: entry.timestamp, now: now)
             groups[group, default: []].append(ClipboardRowData(from: entry))
         }
-        
+
         // Build sections in order
         var result: [SectionData] = []
         for group in TimeGroup.allCases {
@@ -195,7 +174,7 @@ public struct ClipboardListView: View {
                 rows: rows
             ))
         }
-        sections = result
+        return result
     }
 
     public var body: some View {
@@ -214,9 +193,7 @@ public struct ClipboardListView: View {
                 listContent
             }
         }
-        // Keep cached sections and selection state in sync as the displayed entries change.
-        .onChange(of: dataChangeToken) { _, _ in rebuildSections() }
-        .onAppear { rebuildSections() }
+        // Keep selection state in sync as the displayed entries change.
         .onChange(of: entries.map(\.id)) { _, ids in
             let visibleIDs = Set(ids)
             let filteredSelection = bulkSelectedIDs.intersection(visibleIDs)
@@ -464,10 +441,10 @@ public struct ClipboardListView: View {
                 selectedID: $selectedEntryID,
                 selectedIDs: $selectedEntryIDs,
                 onPaste: { id in
-                    if let entry = entryLookup[id] { onPaste(entry) }
+                    if let entry = entry(for: id) { onPaste(entry) }
                 },
                 onCopy: { id in
-                    if let entry = entryLookup[id] { onCopy(entry) }
+                    if let entry = entry(for: id) { onCopy(entry) }
                 },
                 onCopyMultiple: { ids in
                     let selectedEntries = entries.filter { ids.contains($0.id) }
@@ -478,19 +455,19 @@ public struct ClipboardListView: View {
                     }
                 },
                 onDelete: { id in
-                    if let entry = entryLookup[id] { deleteConfirmEntry = entry }
+                    if let entry = entry(for: id) { deleteConfirmEntry = entry }
                 },
                 onReveal: { id in
-                    if let entry = entryLookup[id] { onReveal(entry) }
+                    if let entry = entry(for: id) { onReveal(entry) }
                 },
                 onOpenURL: onOpenURL.map { handler in
                     { id in
-                        if let entry = entryLookup[id] { handler(entry) }
+                        if let entry = entry(for: id) { handler(entry) }
                     }
                 },
                 onTogglePin: onTogglePin.map { handler in
                     { id in
-                        if let entry = entryLookup[id] { handler(entry) }
+                        if let entry = entry(for: id) { handler(entry) }
                     }
                 }
             )
@@ -600,6 +577,7 @@ public struct ClipboardListView: View {
     
     @ViewBuilder
     private var selectionModeList: some View {
+        let sections = selectionModeSections
         ScrollViewReader { proxy in
             List(selection: $selectedEntryID) {
                 ForEach(sections) { section in

@@ -79,13 +79,25 @@ struct CodePreview: View {
         return AttributedString(out)
     }
 
+    /// The highlighter's patterns are a fixed handful; compile each once.
+    /// NSCache is thread-safe, so sharing it with the detached highlight task is fine.
+    private nonisolated(unsafe) static let regexCache = NSCache<NSString, NSRegularExpression>()
+
     private nonisolated static func applyPattern(
         _ pattern: String,
         options: NSRegularExpression.Options = [],
         color: NSColor,
         to attr: NSMutableAttributedString
     ) {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else { return }
+        let key = "\(options.rawValue)::\(pattern)" as NSString
+        let regex: NSRegularExpression
+        if let cached = regexCache.object(forKey: key) {
+            regex = cached
+        } else {
+            guard let compiled = try? NSRegularExpression(pattern: pattern, options: options) else { return }
+            regexCache.setObject(compiled, forKey: key)
+            regex = compiled
+        }
         let matches = regex.matches(in: attr.string, options: [], range: NSRange(location: 0, length: attr.length))
         for m in matches {
             attr.addAttributes([.foregroundColor: color], range: m.range)

@@ -67,7 +67,13 @@ public final class ScreenshotMonitor {
     #if os(macOS)
     private var eventStream: FSEventStreamRef?
     #endif
-    private var isRunning = false
+    /// Read on `processingQueue`, flipped by `stop()` from any thread.
+    private var isRunning: Bool {
+        get { stateLock.lock(); defer { stateLock.unlock() }; return _isRunning }
+        set { stateLock.lock(); defer { stateLock.unlock() }; _isRunning = newValue }
+    }
+    private var _isRunning = false
+    private let stateLock = NSLock()
     
     // Fallback polling
     private var pollTimer: DispatchSourceTimer?
@@ -99,11 +105,15 @@ public final class ScreenshotMonitor {
     }
     
     deinit {
-        stop()
+        // Nothing else can reach `self` here, so tear down inline; dispatching
+        // would capture a deallocating object.
+        stopLocked()
     }
 
+    /// Directory resolution, seeding and FSEvents setup all touch the file
+    /// system (and Spotlight), so never block the caller on them.
     public func start() {
-        processingQueue.sync {
+        processingQueue.async { [self] in
             startLocked()
         }
     }
@@ -133,8 +143,11 @@ public final class ScreenshotMonitor {
         }
     }
 
+    /// Flips the flag immediately so in-flight processing bails, then tears
+    /// down asynchronously behind any work already queued.
     public func stop() {
-        processingQueue.sync {
+        isRunning = false
+        processingQueue.async { [self] in
             stopLocked()
         }
     }
