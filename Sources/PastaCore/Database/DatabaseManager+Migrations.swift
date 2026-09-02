@@ -183,6 +183,41 @@ extension DatabaseManager {
             """)
         }
 
+        migrator.registerMigration("addContentTypeMask") { db in
+            // Bitmask of the extractable content types present in `metadata`
+            // (see `ContentTypeMask`). Persisting it means the panel's per-type
+            // counts and filters are an integer test per row instead of a
+            // JSON parse / substring scan of every metadata string on each
+            // clipboard change.
+            try db.alter(table: ClipboardEntry.databaseTableName) { t in
+                t.add(column: "contentTypeMask", .integer).notNull().defaults(to: 0)
+            }
+
+            // One-off backfill from the metadata that existing rows already
+            // carry, using the same parser new inserts use. Read everything
+            // first (streaming; only (rowid, mask) pairs are retained) and
+            // update afterwards so the cursor never walks a table it is
+            // mutating. The FTS update trigger is scoped to `content`, so this
+            // does not re-tokenise anything.
+            var masks: [(rowID: Int64, mask: Int)] = []
+            let rows = try Row.fetchCursor(
+                db,
+                sql: "SELECT rowid, metadata FROM \(ClipboardEntry.databaseTableName) WHERE metadata IS NOT NULL"
+            )
+            while let row = try rows.next() {
+                let mask = MetadataParser.typeMask(for: row["metadata"] as String?)
+                guard !mask.isEmpty else { continue }
+                masks.append((row["rowid"] as Int64, mask.rawValue))
+            }
+
+            let update = try db.makeStatement(
+                sql: "UPDATE \(ClipboardEntry.databaseTableName) SET contentTypeMask = ? WHERE rowid = ?"
+            )
+            for (rowID, mask) in masks {
+                try update.execute(arguments: [mask, rowID])
+            }
+        }
+
         return migrator
     }
 }

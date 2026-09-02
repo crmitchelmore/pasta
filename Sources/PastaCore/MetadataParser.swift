@@ -25,109 +25,44 @@ public struct MetadataParser {
         .filePath, .shellCommand
     ]
 
-    private struct TypeBits {
-        static let email: UInt64 = 1 << 0
-        static let url: UInt64 = 1 << 1
-        static let phoneNumber: UInt64 = 1 << 2
-        static let ipAddress: UInt64 = 1 << 3
-        static let uuid: UInt64 = 1 << 4
-        static let hash: UInt64 = 1 << 5
-        static let apiKey: UInt64 = 1 << 6
-        static let jwt: UInt64 = 1 << 7
-        static let envVar: UInt64 = 1 << 8
-        static let envVarBlock: UInt64 = 1 << 9
-        static let filePath: UInt64 = 1 << 10
-        static let shellCommand: UInt64 = 1 << 11
-    }
+    /// Derives the bitmask of extractable content types present in
+    /// `metadata` by parsing it once. This is the single source of truth for
+    /// `ClipboardEntry.contentTypeMask`: entries compute it on creation and
+    /// whenever their metadata changes, and the `addContentTypeMask` migration
+    /// backfills existing rows with it.
+    public static func typeMask(for metadata: String?) -> ContentTypeMask {
+        guard let metadata, let dict = parseJSON(metadata) else { return [] }
 
-    private static let containsTypeCache: NSCache<NSString, NSNumber> = {
-        let cache = NSCache<NSString, NSNumber>()
-        cache.countLimit = 20_000
-        return cache
-    }()
-
-    private static func bit(for type: ContentType) -> UInt64 {
-        switch type {
-        case .email: return TypeBits.email
-        case .url: return TypeBits.url
-        case .phoneNumber: return TypeBits.phoneNumber
-        case .ipAddress: return TypeBits.ipAddress
-        case .uuid: return TypeBits.uuid
-        case .hash: return TypeBits.hash
-        case .apiKey: return TypeBits.apiKey
-        case .jwt: return TypeBits.jwt
-        case .envVar: return TypeBits.envVar
-        case .envVarBlock: return TypeBits.envVarBlock
-        case .filePath: return TypeBits.filePath
-        case .shellCommand: return TypeBits.shellCommand
-        default: return 0
-        }
-    }
-
-    private static func marker(for type: ContentType) -> String? {
-        switch type {
-        case .email: return "\"emails\""
-        case .url: return "\"urls\""
-        case .phoneNumber: return "\"phoneNumbers\""
-        case .ipAddress: return "\"ipAddresses\""
-        case .uuid: return "\"uuids\""
-        case .hash: return "\"hashes\""
-        case .apiKey: return "\"apiKeys\""
-        case .jwt: return "\"jwt\""
-        case .envVar, .envVarBlock: return "\"env\""
-        case .filePath: return "\"filePaths\""
-        case .shellCommand: return "\"shellCommands\""
-        default: return nil
-        }
-    }
-
-    private static func metadataMayContain(_ type: ContentType, in metadata: String) -> Bool {
-        guard let marker = marker(for: type) else { return false }
-        return metadata.contains(marker)
-    }
-
-    private static func containedTypesBitmask(in metadata: String) -> UInt64 {
-        let key = metadata as NSString
-        if let cached = containsTypeCache.object(forKey: key) {
-            return UInt64(truncating: cached)
-        }
-
-        guard let dict = parseJSON(metadata) else {
-            containsTypeCache.setObject(0, forKey: key)
-            return 0
-        }
-
-        var mask: UInt64 = 0
-        if hasItems(dict, key: "emails") { mask |= TypeBits.email }
-        if hasItems(dict, key: "urls") { mask |= TypeBits.url }
-        if hasItems(dict, key: "phoneNumbers") { mask |= TypeBits.phoneNumber }
-        if hasItems(dict, key: "ipAddresses") { mask |= TypeBits.ipAddress }
-        if hasItems(dict, key: "uuids") { mask |= TypeBits.uuid }
-        if hasItems(dict, key: "hashes") { mask |= TypeBits.hash }
-        if hasItems(dict, key: "apiKeys") { mask |= TypeBits.apiKey }
-        if hasItems(dict, key: "jwt") { mask |= TypeBits.jwt }
-        if hasItems(dict, key: "filePaths") { mask |= TypeBits.filePath }
-        if hasItems(dict, key: "shellCommands") { mask |= TypeBits.shellCommand }
+        var mask: ContentTypeMask = []
+        if hasItems(dict, key: "emails") { mask.insert(.email) }
+        if hasItems(dict, key: "urls") { mask.insert(.url) }
+        if hasItems(dict, key: "phoneNumbers") { mask.insert(.phoneNumber) }
+        if hasItems(dict, key: "ipAddresses") { mask.insert(.ipAddress) }
+        if hasItems(dict, key: "uuids") { mask.insert(.uuid) }
+        if hasItems(dict, key: "hashes") { mask.insert(.hash) }
+        if hasItems(dict, key: "apiKeys") { mask.insert(.apiKey) }
+        if hasItems(dict, key: "jwt") { mask.insert(.jwt) }
+        if hasItems(dict, key: "filePaths") { mask.insert(.filePath) }
+        if hasItems(dict, key: "shellCommands") { mask.insert(.shellCommand) }
 
         if let env = dict["env"] as? [String: Any] {
-            mask |= TypeBits.envVar
+            mask.insert(.envVar)
             if (env["isBlock"] as? Bool) == true {
-                mask |= TypeBits.envVarBlock
+                mask.insert(.envVarBlock)
             }
         }
 
-        containsTypeCache.setObject(NSNumber(value: mask), forKey: key)
         return mask
     }
-    
-    /// Check if an entry's metadata contains items of a given type
+
+    /// Check if a metadata string contains items of a given type.
+    ///
+    /// Parses the metadata on every call. Callers holding a `ClipboardEntry`
+    /// should test `entry.contentTypeMask` instead, which was computed once at
+    /// insert time and persisted.
     public static func containsType(_ type: ContentType, in metadata: String?) -> Bool {
-        guard let metadata else { return false }
-        let bit = bit(for: type)
-        guard bit != 0 else { return false }
-        guard metadataMayContain(type, in: metadata) else { return false }
-        let mask = containedTypesBitmask(in: metadata)
-        return (mask & bit) != 0
+        guard let bit = ContentTypeMask(type), let metadata else { return false }
+        return typeMask(for: metadata).contains(bit)
     }
     
     /// Extract all values of a given type from metadata
@@ -365,7 +300,7 @@ extension ClipboardEntry {
     /// Check if this entry contains items of the given type (either as primary type or in metadata)
     public func containsType(_ type: ContentType) -> Bool {
         if contentType == type { return true }
-        return MetadataParser.containsType(type, in: metadata)
+        return contentTypeMask.contains(type)
     }
     
     /// Get all extracted values of a specific type from this entry's metadata

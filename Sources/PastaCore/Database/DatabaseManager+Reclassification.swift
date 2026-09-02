@@ -104,10 +104,15 @@ extension DatabaseManager {
                 try db.execute(
                     sql: """
                     UPDATE \(ClipboardEntry.databaseTableName)
-                    SET contentType = ?, metadata = ?, isSynced = 0
+                    SET contentType = ?, metadata = ?, contentTypeMask = ?, isSynced = 0
                     WHERE id = ?
                     """,
-                    arguments: [update.contentType.rawValue, update.metadata, update.entryID.uuidString]
+                    arguments: [
+                        update.contentType.rawValue,
+                        update.metadata,
+                        MetadataParser.typeMask(for: update.metadata),
+                        update.entryID.uuidString,
+                    ]
                 )
                 updatedEntries += db.changesCount
             }
@@ -129,8 +134,8 @@ extension DatabaseManager {
                 try db.execute(
                     sql: """
                     INSERT INTO \(ClipboardEntry.databaseTableName)
-                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isSynced)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isSynced, contentTypeMask)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     arguments: [
                         entry.id.uuidString,
@@ -144,7 +149,8 @@ extension DatabaseManager {
                         entry.metadata,
                         entry.contentHash,
                         entry.parentEntryId?.uuidString,
-                        0
+                        0,
+                        entry.contentTypeMask,
                     ]
                 )
                 insertedExtractedEntries += 1

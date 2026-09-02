@@ -92,6 +92,9 @@ public struct RecordMapper {
             rawData = try? Data(contentsOf: fileURL)
         }
         
+        // `contentTypeMask` is deliberately not a CloudKit field: the
+        // initializer derives it locally from `metadata`, so records from
+        // devices that never wrote the mask import correctly.
         return ClipboardEntry(
             id: id,
             content: content,

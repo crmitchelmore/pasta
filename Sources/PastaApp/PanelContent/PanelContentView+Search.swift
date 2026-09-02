@@ -84,9 +84,14 @@ extension PanelContentView {
                         buckets[entry.contentType, default: []].append(entry)
                     }
 
+                    // `contentTypeMask` was derived from the metadata once, at
+                    // insert time, so this is 12 bit tests per entry rather
+                    // than 12 substring scans (or a JSON parse) of the
+                    // metadata string on every clipboard change.
+                    let mask = entry.contentTypeMask
                     for type in extractableTypes {
                         let isPrimary = entry.contentType == type
-                        let containsType = isPrimary || MetadataParser.containsType(type, in: entry.metadata)
+                        let containsType = isPrimary || mask.contains(type)
                         guard containsType else { continue }
 
                         if !isPrimary {
