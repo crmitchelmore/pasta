@@ -54,7 +54,9 @@ swift run PastaApp
 | `⇧Enter` | Paste as plain text (strip formatting) |
 | `⌘1-9` | Quick-paste by position |
 | `⌘O` | Open selected entry as URL in browser |
-| `⌘⌫` | Delete selected item |
+| `⇧`/`⌘`-click, `⌘A` | Select multiple / all items |
+| `⌘C` | Copy selected item(s) |
+| `⌘⌫` | Delete selected item(s) |
 | `⌃⇧X` | Clear all history (with confirmation) |
 | `Esc` | Close window |
 

@@ -4,8 +4,7 @@ import SwiftUI
 
 public struct SearchBarView: View {
     @Binding private var query: String
-    @Binding private var contentType: ContentType?
-    @Binding private var sourceAppFilter: String
+    @Binding private var filterSelection: FilterSelection?
     @Binding private var showContentTypePicker: Bool
 
     private let resultCount: Int
@@ -14,225 +13,152 @@ public struct SearchBarView: View {
     private let searchFocused: FocusState<Bool>.Binding
 
     @State private var isFieldFocused: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(
         query: Binding<String>,
-        contentType: Binding<ContentType?>,
+        filterSelection: Binding<FilterSelection?>,
         resultCount: Int,
-        sourceAppFilter: Binding<String>,
         availableContentTypes: [ContentType] = [],
         showContentTypePicker: Binding<Bool> = .constant(false),
         onOpenSettings: @escaping () -> Void,
         searchFocused: FocusState<Bool>.Binding
     ) {
         _query = query
-        _contentType = contentType
+        _filterSelection = filterSelection
         self.resultCount = resultCount
-        _sourceAppFilter = sourceAppFilter
         self.availableContentTypes = availableContentTypes
         _showContentTypePicker = showContentTypePicker
         self.onOpenSettings = onOpenSettings
         self.searchFocused = searchFocused
     }
 
+    /// The chip and ⌘P picker only know about content types; map their
+    /// choice onto the shared selection. Re-picking URL while a specific
+    /// domain is active keeps that domain (the picker already shows URL as
+    /// selected in that state).
+    private func applyContentType(_ type: ContentType?) {
+        if type == .url, case .domain = filterSelection { return }
+        filterSelection = type.map(FilterSelection.type) ?? .all
+    }
+
+    private static let fieldHeight: CGFloat = 36
+
+    /// Focus/clear changes fade briefly; nothing moves or scales, and even
+    /// the fade is dropped when the user asks for reduced motion.
+    private var chromeAnimation: Animation? {
+        reduceMotion ? nil : .easeInOut(duration: 0.15)
+    }
+
     public var body: some View {
-        HStack(spacing: 12) {
-            // Main search bar - the hero element
-            HStack(spacing: 0) {
-                // Search icon with subtle pulse when focused
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(isFieldFocused ? Color.accentColor : .secondary)
-                    .scaleEffect(isFieldFocused ? 1.1 : 1.0)
-                    .frame(width: 44)
-                
-                // Search input
-                SearchField(
-                    text: $query,
-                    placeholder: "Search your clipboard history...",
-                    isFocused: searchFocused,
-                    onFocusChange: { focused in
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            isFieldFocused = focused
-                        }
-                    }
+        HStack(spacing: PastaTheme.Spacing.lg) {
+            searchFieldRow
+                .frame(height: Self.fieldHeight)
+                .frame(maxWidth: .infinity)
+                .background(fieldBackground)
+                .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
+                .animation(chromeAnimation, value: isFieldFocused)
+
+            Button(action: onOpenSettings) {
+                Image(systemName: "gear")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: Self.fieldHeight, height: Self.fieldHeight)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Settings (⌘,)")
+            .accessibilityLabel("Settings")
+        }
+        .padding(.horizontal, PastaTheme.Spacing.xs)
+    }
+
+    private var fieldBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: PastaTheme.Radius.large, style: .continuous)
+        return shape
+            .fill(.regularMaterial)
+            .overlay {
+                shape.strokeBorder(
+                    isFieldFocused ? Color.accentColor.opacity(0.7) : Color.primary.opacity(0.1),
+                    lineWidth: 1
                 )
-                
-                // Clear button (when has text)
-                if !query.isEmpty {
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            query = ""
-                        }
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundStyle(.tertiary)
+            }
+    }
+
+    private var searchFieldRow: some View {
+        HStack(spacing: 0) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(isFieldFocused ? Color.accentColor : .secondary)
+                .frame(width: Self.fieldHeight)
+
+            // Search input
+            SearchField(
+                text: $query,
+                placeholder: "Search your clipboard history...",
+                isFocused: searchFocused,
+                onFocusChange: { focused in
+                    withAnimation(chromeAnimation) {
+                        isFieldFocused = focused
                     }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, 12)
-                    .transition(.scale.combined(with: .opacity))
                 }
-
-                // Active content-type filter chip (also visible to confirm
-                // selections made via the ⌘P picker or sidebar).
-                if let activeType = contentType {
-                    ContentTypeFilterChip.activeDismissable(type: activeType, onClear: {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            contentType = nil
-                        }
-                    })
-                    .padding(.trailing, 8)
-                    .transition(.scale.combined(with: .opacity))
-                }
-
-                // Result count badge — passive information, so it reads as
-                // secondary rather than competing with the accent chip.
-                Text(Self.resultCountLabel(resultCount))
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, PastaTheme.Spacing.md)
-                    .padding(.vertical, PastaTheme.Spacing.xs)
-                    .background(
-                        Capsule()
-                            .fill(Color.secondary.opacity(0.12))
-                    )
-                    .padding(.trailing, PastaTheme.Spacing.lg)
-                    .contentTransition(.numericText(value: Double(resultCount)))
-                    .accessibilityLabel("\(Self.resultCountLabel(resultCount)) results")
-                    .popover(isPresented: $showContentTypePicker, arrowEdge: .bottom) {
-                        ContentTypePickerView(
-                            availableTypes: availableContentTypes,
-                            selectedType: contentType,
-                            onSelect: { newType in
-                                contentType = newType
-                                showContentTypePicker = false
-                            },
-                            onCancel: {
-                                showContentTypePicker = false
-                            }
-                        )
-                    }
-            }
-            .frame(height: 48)
-            .frame(maxWidth: .infinity)
-            .background {
-                // Layered background for depth
-                ZStack {
-                    // Base fill
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(nsColor: .controlBackgroundColor))
-                    
-                    // Accent glow overlay when focused
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.accentColor.opacity(isFieldFocused ? 0.08 : 0))
-                    
-                    // Border with gradient
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(
-                            isFieldFocused
-                                ? Color.accentColor.opacity(0.8)
-                                : Color.primary.opacity(0.1),
-                            lineWidth: isFieldFocused ? 2 : 1
-                        )
-                }
-            }
-            // Outer glow - accent colored, expands on focus
-            .background {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.accentColor)
-                    .blur(radius: isFieldFocused ? 16 : 8)
-                    .opacity(isFieldFocused ? 0.4 : 0.0)
-                    .scaleEffect(isFieldFocused ? 1.04 : 0.96)
-            }
-            // Soft drop shadow
-            .shadow(color: Color.accentColor.opacity(isFieldFocused ? 0.3 : 0), radius: 8, y: 2)
-            .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
-            .animation(.spring(response: 0.35, dampingFraction: 0.75), value: isFieldFocused)
-            
-            // Settings button - separate from search bar, larger hit target
-            SettingsButton(onTap: onOpenSettings)
-                .frame(width: 48, height: 48)
-        }
-        .padding(.horizontal, 4)
-    }
-}
-
-// Separate view for settings button using NSViewRepresentable for reliable click handling
-private struct SettingsButton: NSViewRepresentable {
-    let onTap: () -> Void
-    
-    func makeNSView(context: Context) -> HoverButton {
-        let button = HoverButton()
-        button.bezelStyle = .regularSquare
-        button.isBordered = false
-        button.wantsLayer = true
-        button.layer?.cornerRadius = 10
-        // Use a semi-transparent color that works in both light and dark mode
-        button.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
-        
-        // Create a larger image
-        let config = NSImage.SymbolConfiguration(pointSize: 16, weight: .medium)
-        button.image = NSImage(systemSymbolName: "gearshape.fill", accessibilityDescription: "Settings")?
-            .withSymbolConfiguration(config)
-        button.imagePosition = .imageOnly
-        button.imageScaling = .scaleNone
-        button.contentTintColor = .secondaryLabelColor
-        button.target = context.coordinator
-        button.action = #selector(Coordinator.buttonClicked)
-        button.toolTip = "Settings (⌘,)"
-        
-        return button
-    }
-    
-    func updateNSView(_ nsView: HoverButton, context: Context) {
-        nsView.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
-    }
-    
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onTap: onTap)
-    }
-    
-    class Coordinator: NSObject {
-        let onTap: () -> Void
-        
-        init(onTap: @escaping () -> Void) {
-            self.onTap = onTap
-        }
-        
-        @objc func buttonClicked() {
-            onTap()
-        }
-    }
-    
-    /// NSButton subclass that owns its own tracking area for hover effects,
-    /// avoiding crashes from dangling Coordinator references during NSAlert modal loops.
-    final class HoverButton: NSButton {
-        private var hoverTrackingArea: NSTrackingArea?
-        
-        override func updateTrackingAreas() {
-            super.updateTrackingAreas()
-            if let existing = hoverTrackingArea {
-                removeTrackingArea(existing)
-            }
-            let area = NSTrackingArea(
-                rect: bounds,
-                options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                owner: self,
-                userInfo: nil
             )
-            addTrackingArea(area)
-            hoverTrackingArea = area
-        }
-        
-        override func mouseEntered(with event: NSEvent) {
-            contentTintColor = .labelColor
-            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.1).cgColor
-        }
-        
-        override func mouseExited(with event: NSEvent) {
-            contentTintColor = .secondaryLabelColor
-            layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
+
+            // Clear button (when has text)
+            if !query.isEmpty {
+                Button {
+                    withAnimation(chromeAnimation) {
+                        query = ""
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, PastaTheme.Spacing.lg)
+                .transition(.opacity)
+            }
+
+            // Active content-type filter chip (also visible to confirm
+            // selections made via the ⌘P picker or sidebar).
+            if let activeType = filterSelection?.contentType {
+                ContentTypeFilterChip.activeDismissable(type: activeType, onClear: {
+                    withAnimation(chromeAnimation) {
+                        applyContentType(nil)
+                    }
+                })
+                .padding(.trailing, PastaTheme.Spacing.md)
+                .transition(.opacity)
+            }
+
+            // Result count badge — passive information, so it reads as
+            // secondary rather than competing with the accent chip.
+            Text(Self.resultCountLabel(resultCount))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, PastaTheme.Spacing.md)
+                .padding(.vertical, PastaTheme.Spacing.xs)
+                .background(
+                    Capsule()
+                        .fill(Color.secondary.opacity(0.12))
+                )
+                .padding(.trailing, PastaTheme.Spacing.lg)
+                .contentTransition(.numericText(value: Double(resultCount)))
+                .accessibilityLabel("\(Self.resultCountLabel(resultCount)) results")
+                .popover(isPresented: $showContentTypePicker, arrowEdge: .bottom) {
+                    ContentTypePickerView(
+                        availableTypes: availableContentTypes,
+                        selectedType: filterSelection?.contentType,
+                        onSelect: { newType in
+                            applyContentType(newType)
+                            showContentTypePicker = false
+                        },
+                        onCancel: {
+                            showContentTypePicker = false
+                        }
+                    )
+                }
         }
     }
 }

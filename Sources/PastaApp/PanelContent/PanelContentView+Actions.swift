@@ -104,11 +104,7 @@ extension PanelContentView {
 
     func clearFilters() {
         searchQuery = ""
-        contentTypeFilter = nil
-        urlDomainFilter = nil
         filterSelection = .all
-        sourceAppFilter = ""
-        pinnedOnlyFilter = false
         showExtractedValuesOnly = false
         isShowingContentTypePicker = false
         triggerSearchUpdate()
