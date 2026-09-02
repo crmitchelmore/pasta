@@ -15,6 +15,7 @@ extension PanelContentView {
         } else {
             _ = PasteService().paste(entry)
         }
+        AnalyticsManager.shared.capture(.pastePerformed(contentType: entry.contentType))
 
         closePanel()
     }
@@ -121,6 +122,7 @@ extension PanelContentView {
     func pasteEntry(_ entry: ClipboardEntry) {
         PastaLogger.ui.debug("Pasting entry: \(entry.contentType.rawValue)")
         _ = PasteService().paste(entry)
+        AnalyticsManager.shared.capture(.pastePerformed(contentType: entry.contentType))
         closePanel()
     }
 

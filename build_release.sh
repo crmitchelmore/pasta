@@ -15,6 +15,10 @@ APP_DIR="$BUILD_DIR/${APP_NAME}.app"
 
 PASTA_VERSION="${PASTA_VERSION:-0.0.0-dev}"
 PASTA_BUILD="${PASTA_BUILD:-0}"
+# Public (write-only) PostHog ingestion key. Empty by default, which makes the
+# app's opt-in analytics a silent no-op — local builds never phone home.
+POSTHOG_PROJECT_KEY="${POSTHOG_PROJECT_KEY:-}"
+POSTHOG_HOST="${POSTHOG_HOST:-https://eu.i.posthog.com}"
 
 echo "==> Building release binary (version=$PASTA_VERSION build=$PASTA_BUILD)"
 swift build -c release
@@ -58,6 +62,10 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <string>AppIcon</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
+    <key>PostHogProjectKey</key>
+    <string>${POSTHOG_PROJECT_KEY}</string>
+    <key>PostHogHost</key>
+    <string>${POSTHOG_HOST}</string>
 </dict>
 </plist>
 PLIST

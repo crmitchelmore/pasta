@@ -2,6 +2,21 @@
 
 All notable changes to Pasta will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Opt-in product analytics** — A new "Share anonymous usage analytics" toggle
+  under Settings → General → Diagnostics, **off by default** and applied
+  immediately (no restart). When on, Pasta posts a single JSON body to PostHog's
+  EU endpoint carrying only event names (`app_active_daily`, `analytics_opt_in`,
+  `analytics_opt_out`, `paste_performed`, `search_performed`, `settings_opened`),
+  bounded enum/boolean properties, app and macOS version, language subtag, CPU
+  architecture, and a random UUID minted on opt-in. No vendor SDK is linked.
+  Clipboard contents, search text, and app names are structurally impossible to
+  send. Opting out sends a final `analytics_opt_out` event, then deletes the
+  UUID and any queued events. Builds without a PostHog project key — including
+  every local build — are a permanent silent no-op.
+
 ## [1.0.0] - 2026-05-14
 
 First stable release. Pasta moves out of preview status with a hardened

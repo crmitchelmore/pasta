@@ -41,6 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyAppMode()
         observeDefaults()
 
+        // Opt-in product analytics. No-op unless the user enabled it AND a project
+        // key is configured; always a no-op under PASTA_CI.
+        AnalyticsManager.shared.start()
+
         // Observe settings open notification
         NotificationCenter.default.addObserver(
             self,

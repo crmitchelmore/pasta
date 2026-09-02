@@ -14,6 +14,7 @@ struct GeneralSettingsTab: View {
     let onReplayWalkthrough: (() -> Void)?
 
     @AppStorage("pasta.crashReportingEnabled") private var crashReportingEnabled: Bool = false
+    @AppStorage("pasta.analyticsEnabled") private var analyticsEnabled: Bool = false
 
     var body: some View {
         Form {
@@ -93,6 +94,20 @@ struct GeneralSettingsTab: View {
             Section {
                 Toggle("Send anonymous crash reports", isOn: $crashReportingEnabled)
                 Text("Off by default. When enabled, Pasta sends crash reports and minimal performance traces to Sentry to help diagnose issues. No clipboard contents are ever transmitted. Restart Pasta after changing this setting.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle("Share anonymous usage analytics", isOn: $analyticsEnabled)
+                Text("""
+                Off by default. Takes effect immediately — no restart needed. When enabled, \
+                Pasta sends a short list of event names (app opened for the day, paste, search, \
+                settings opened) along with the app version, macOS version, your language code, \
+                CPU architecture, and a random ID generated on your Mac.
+
+                Never sent: clipboard contents, search text, app or file names, your name, \
+                email, IP-derived location, or anything that identifies you. Turning this off \
+                deletes the random ID and any events still waiting to be sent.
+                """)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {
