@@ -7,6 +7,7 @@ import PastaUI
 extension AppDelegate {
     @objc func openSettings() {
         PastaLogger.app.info("Opening settings window...")
+        AnalyticsManager.shared.capture(.settingsOpened)
 
         // Create settings window if needed
         if settingsWindow == nil {

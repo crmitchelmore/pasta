@@ -113,6 +113,10 @@ jobs:
       - name: Generate Info.plist with version
         env:
           SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+          # Public (write-only) PostHog ingestion key. Safe to ship in a client.
+          # When the secret is unset this expands to an empty string and the app's
+          # analytics are a permanent, silent no-op.
+          POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
         run: |
           # Get the short commit SHA
           COMMIT_SHA=$(git rev-parse --short HEAD)
@@ -166,6 +170,11 @@ jobs:
               <true/>
               <key>SUScheduledCheckInterval</key>
               <integer>86400</integer>
+              <!-- Opt-in product analytics. Empty key = analytics disabled entirely. -->
+              <key>PostHogProjectKey</key>
+              <string>${POSTHOG_PROJECT_KEY}</string>
+              <key>PostHogHost</key>
+              <string>https://eu.i.posthog.com</string>
           </dict>
           </plist>
           PLIST

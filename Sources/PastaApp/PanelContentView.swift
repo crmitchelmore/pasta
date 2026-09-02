@@ -261,10 +261,22 @@ struct PanelContentView: View {
                 // Update displayed entries — uses preload cache if available, async filter otherwise
                 triggerSearchUpdate()
             }
-            .onChange(of: searchQuery) { _, newQuery in
+            .onChange(of: searchQuery) { oldQuery, newQuery in
                 // Debounce search to avoid lag
                 searchDebounceTask?.cancel()
                 let trimmed = newQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                // Analytics: one event when a search session *starts*, not per
+                // keystroke. The query text is never passed — only whether a
+                // filter was active alongside it.
+                if !trimmed.isEmpty,
+                   oldQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    AnalyticsManager.shared.capture(.searchPerformed(
+                        hasFilter: contentTypeFilter != nil
+                            || urlDomainFilter != nil
+                            || pinnedOnlyFilter
+                            || !sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ))
+                }
                 if trimmed.isEmpty {
                     // Empty query - restore filtered view (uses preload cache or async)
                     triggerSearchUpdate()

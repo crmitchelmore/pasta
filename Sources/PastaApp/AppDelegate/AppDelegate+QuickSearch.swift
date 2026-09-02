@@ -92,6 +92,7 @@ extension AppDelegate {
         // Copy content to clipboard
         let pasteService = PasteService()
         _ = pasteService.copy(entry)
+        AnalyticsManager.shared.capture(.pastePerformed(contentType: entry.contentType))
 
         // Deactivate our app and return focus to previous app, then paste
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {

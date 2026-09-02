@@ -53,7 +53,29 @@ Please provide:
 Pasta is designed with privacy and security in mind:
 
 - ✅ **Local-first storage** - Clipboard contents are stored on-device by default.
-- ✅ **No telemetry by default** - Crash reporting (Sentry) is **off** until you opt in via Settings → General → Diagnostics. No clipboard contents are ever included in crash reports.
+- ✅ **No telemetry by default** - Both telemetry features are **off** until you opt in via Settings → General → Diagnostics, and neither ever includes clipboard contents:
+  - **Crash reporting (Sentry)** - Crash reports and minimal performance traces. Requires an app restart to take effect.
+  - **Product analytics (PostHog, EU region)** - Applies immediately, no restart. Pasta posts a single
+    JSON body to `https://eu.i.posthog.com/capture`; no vendor SDK is linked, so there is no
+    autocapture, session replay, remote config, or error capture.
+    - **Sent:** the event name (`app_active_daily`, `analytics_opt_in`, `analytics_opt_out`,
+      `paste_performed`, `search_performed`, `settings_opened`), a bounded property per event
+      (`content_type` from Pasta's detected-type enum; `has_filter` true/false), the app version and
+      build, the macOS major.minor version, the distribution channel, the ISO 639 language subtag
+      (region dropped — `en-GB` and `en-US` both report `en`), the CPU architecture, and a random
+      UUID generated on your Mac at opt-in.
+    - **Never sent:** clipboard contents, search query text, source app names, file paths, URLs,
+      window titles, location data, your name, email, account or device identifiers. Every property
+      is an enum raw value or a boolean — there is no code path that can attach a free-form string.
+    - **IP address:** like any HTTPS request, the upload carries your IP to the server. Pasta puts
+      no location or network data in the payload and never stores your IP itself, but what the
+      receiving PostHog project does with it is a server-side setting, not something the app can
+      enforce. **Maintainer note:** GeoIP enrichment and IP storage must be disabled in the PostHog
+      project settings; the "no IP stored" guarantee holds only while they are off.
+    - **Withdrawal:** turning the toggle off sends one final `analytics_opt_out` event, then deletes
+      the random UUID and the on-disk queue of any events that had not yet been delivered.
+    - **Unconfigured builds:** if a build has no PostHog project key (all local and self-built
+      binaries), analytics are a permanent no-op that opens no files and makes no requests.
 - ✅ **Optional iCloud sync** - CloudKit sync is opt-in and uses your private iCloud database. Disable it in Settings → iCloud if you prefer purely local storage.
 - ✅ **Auto-updates via Sparkle** - Pasta checks for updates from the project's signed appcast. You can disable automatic checks in Settings → About.
 - ✅ **Sandboxed permissions** - Only requests necessary macOS permissions.
@@ -63,6 +85,9 @@ Pasta is designed with privacy and security in mind:
 Clipboard data is stored locally at:
 - Database: `~/Library/Application Support/Pasta/pasta.sqlite`
 - Images: `~/Library/Application Support/Pasta/Images/`
+- Analytics state (only when opted in): `~/Library/Application Support/Pasta/analytics_state.json`
+  (consent flag, random UUID, last daily-event date) and `analytics_queue.json` (undelivered
+  events, pruned to 7 days / 1000 entries). Both are deleted when you opt out.
 
 **Security Note:** This data is **not encrypted** by default. Ensure your macOS user account is protected with:
 - FileVault disk encryption (recommended)
