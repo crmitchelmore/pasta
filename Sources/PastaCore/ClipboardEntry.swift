@@ -58,7 +58,17 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
     public var copyCount: Int
     public var sourceApp: String?
     /// JSON-encoded metadata (arbitrary shape) stored as a string.
-    public var metadata: String?
+    ///
+    /// Assigning new metadata recomputes `contentTypeMask` so the two never
+    /// drift apart.
+    public var metadata: String? {
+        didSet { contentTypeMask = MetadataParser.typeMask(for: metadata) }
+    }
+    /// Which extractable content types (`MetadataParser.extractableTypes`)
+    /// appear in `metadata`. Derived from the metadata once, on creation, and
+    /// persisted alongside it so type filters and counts over the history
+    /// never re-parse the JSON.
+    public private(set) var contentTypeMask: ContentTypeMask
     /// ID of the parent entry if this was extracted from another entry.
     public var parentEntryId: UUID?
     /// Whether this entry has been synced to iCloud.
@@ -103,7 +113,8 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
         metadata: String? = nil,
         parentEntryId: UUID? = nil,
         isSynced: Bool = false,
-        isPinned: Bool = false
+        isPinned: Bool = false,
+        contentTypeMask: ContentTypeMask? = nil
     ) {
         self.id = id
         self.content = content
@@ -117,6 +128,33 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
         self.parentEntryId = parentEntryId
         self.isSynced = isSynced
         self.isPinned = isPinned
+        self.contentTypeMask = contentTypeMask ?? MetadataParser.typeMask(for: metadata)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, content, contentType, rawData, imagePath, timestamp, copyCount
+        case sourceApp, metadata, parentEntryId, isSynced, isPinned, contentTypeMask
+    }
+
+    /// Custom decoding so rows and JSON exports that predate `contentTypeMask`
+    /// still decode, deriving the mask from the metadata they do carry.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        content = try c.decode(String.self, forKey: .content)
+        contentType = try c.decode(ContentType.self, forKey: .contentType)
+        rawData = try c.decodeIfPresent(Data.self, forKey: .rawData)
+        imagePath = try c.decodeIfPresent(String.self, forKey: .imagePath)
+        timestamp = try c.decode(Date.self, forKey: .timestamp)
+        copyCount = try c.decode(Int.self, forKey: .copyCount)
+        sourceApp = try c.decodeIfPresent(String.self, forKey: .sourceApp)
+        let metadata = try c.decodeIfPresent(String.self, forKey: .metadata)
+        self.metadata = metadata
+        parentEntryId = try c.decodeIfPresent(UUID.self, forKey: .parentEntryId)
+        isSynced = try c.decodeIfPresent(Bool.self, forKey: .isSynced) ?? false
+        isPinned = try c.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        contentTypeMask = try c.decodeIfPresent(ContentTypeMask.self, forKey: .contentTypeMask)
+            ?? MetadataParser.typeMask(for: metadata)
     }
 
     public func encode(to container: inout PersistenceContainer) {
@@ -132,6 +170,7 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
         container["parentEntryId"] = parentEntryId?.uuidString
         container["isSynced"] = isSynced
         container["isPinned"] = isPinned
+        container["contentTypeMask"] = contentTypeMask
     }
 
     static func sha256Hex(_ string: String) -> String {

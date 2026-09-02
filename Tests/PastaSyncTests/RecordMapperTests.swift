@@ -82,4 +82,23 @@ final class RecordMapperTests: XCTestCase {
         XCTAssertEqual(decoded.metadata, original.metadata)
         XCTAssertTrue(decoded.isSynced)
     }
+
+    /// The mask is a local column, not a CloudKit field: it must be derived
+    /// from the imported metadata so records pushed by older builds (or other
+    /// devices) filter correctly after import.
+    func testImportedEntryDerivesContentTypeMaskLocally() throws {
+        let mapper = RecordMapper()
+        let original = ClipboardEntry(
+            content: "mail me at a@b.com",
+            contentType: .text,
+            metadata: #"{"emails":[{"email":"a@b.com"}]}"#
+        )
+
+        let prepared = try mapper.preparedRecord(from: original, zoneID: zoneID)
+        defer { prepared.cleanupTemporaryAsset() }
+        XCTAssertNil(prepared.record["contentTypeMask"], "mask must not be synced")
+
+        let decoded = try XCTUnwrap(mapper.entry(from: prepared.record))
+        XCTAssertEqual(decoded.contentTypeMask, [.email])
+    }
 }

@@ -3,6 +3,18 @@ import XCTest
 @testable import PastaCore
 
 final class HistoryWindowTests: XCTestCase {
+    /// Drives the same keyset walk `BackgroundService.refresh()` performs.
+    private func loadWholeHistory(_ db: DatabaseManager, pageSize: Int, limit: Int) throws -> [ClipboardEntry] {
+        var entries: [ClipboardEntry] = []
+        var cursor: DatabaseManager.HistoryCursor? = nil
+        repeat {
+            let page = try db.fetchHistoryPage(after: cursor, limit: min(pageSize, limit - entries.count))
+            entries.append(contentsOf: page.entries)
+            cursor = page.nextCursor
+        } while cursor != nil && entries.count < limit
+        return entries
+    }
+
     private func entry(_ content: String, at seconds: Double) -> ClipboardEntry {
         ClipboardEntry(
             content: content,
@@ -56,7 +68,7 @@ final class HistoryWindowTests: XCTestCase {
         let displayLimit = 10_000
 
         // A refresh has fetched the first page only.
-        var entries = try db.fetchRecent(limit: 200, offset: 0)
+        var entries = try db.fetchHistoryPage(after: nil, limit: 200).entries
         XCTAssertEqual(entries.count, 200)
 
         // A copy lands mid-load: the paging task is cancelled and a small head
@@ -75,7 +87,7 @@ final class HistoryWindowTests: XCTestCase {
         XCTAssertEqual(entries.count, 201)
 
         // Resumed refresh: the whole library, including the row inserted mid-load.
-        entries = try db.fetchRecent(limit: displayLimit, offset: 0)
+        entries = try loadWholeHistory(db, pageSize: 1_000, limit: displayLimit)
         XCTAssertEqual(entries.count, 3_001)
         XCTAssertEqual(min(try db.countEntries(), displayLimit), 3_001)
     }
@@ -99,7 +111,7 @@ final class HistoryWindowTests: XCTestCase {
         try db.insertBatch(seeded, deduplicate: false)
 
         // Fully loaded window, then a row below the head page is deleted.
-        let fullWindow = try db.fetchRecent(limit: 10_000, offset: 0)
+        let fullWindow = try loadWholeHistory(db, pageSize: 300, limit: 10_000)
         let deleted = fullWindow[500]
         _ = try db.delete(ids: [deleted.id])
 
@@ -107,7 +119,7 @@ final class HistoryWindowTests: XCTestCase {
         XCTAssertEqual(freshTotal, 999)
 
         // Non-initial refresh: fresh head merged over the stale window.
-        let head = try db.fetchRecent(limit: 200, offset: 0)
+        let head = try db.fetchRecent(limit: 200)
         let merged = HistoryWindow.merge(head: head, into: fullWindow, limit: 10_000)
 
         // The union still contains the deleted row, and is bigger than the
@@ -117,7 +129,7 @@ final class HistoryWindowTests: XCTestCase {
         XCTAssertTrue(merged.contains(where: { $0.id == deleted.id }))
 
         // Only the completed paged reload drops the stale row.
-        let reloaded = try db.fetchRecent(limit: 10_000, offset: 0)
+        let reloaded = try loadWholeHistory(db, pageSize: 300, limit: 10_000)
         XCTAssertEqual(reloaded.count, 999)
         XCTAssertFalse(reloaded.contains(where: { $0.id == deleted.id }))
     }

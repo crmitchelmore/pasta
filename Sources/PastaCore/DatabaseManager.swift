@@ -90,7 +90,9 @@ public final class DatabaseManager: @unchecked Sendable {
         return DatabaseManager(dbWriter: dbQueue)
     }
 
-    private init(dbWriter: any DatabaseWriter) {
+    /// Wraps an already-migrated writer. Internal so tests can drive migrations
+    /// step by step (e.g. seed a pre-migration schema, then migrate).
+    init(dbWriter: any DatabaseWriter) {
         self.dbWriter = dbWriter
     }
 

@@ -182,10 +182,15 @@ final class BackgroundService: ObservableObject {
                     try db.countEntries()
                 }
 
-                let firstPage = try await Task.detached(priority: .userInitiated) {
-                    try db.fetchRecent(limit: initialLimit, offset: 0)
+                // Keyset paging: each page seeks the timestamp index at the
+                // previous page's last (timestamp, rowid) instead of OFFSET,
+                // which re-walked every skipped row on every page.
+                let firstHistoryPage = try await Task.detached(priority: .userInitiated) {
+                    try db.fetchHistoryPage(after: nil, limit: initialLimit)
                 }.value
                 guard !Task.isCancelled else { return }
+                let firstPage = firstHistoryPage.entries
+                var cursor = firstHistoryPage.nextCursor
 
                 let total = try await totalTask.value
                 let expectedCount = min(total, limit)
@@ -215,17 +220,17 @@ final class BackgroundService: ObservableObject {
                 var allEntries = firstPage
                 allEntries.reserveCapacity(expectedCount)
 
-                while allEntries.count < expectedCount {
+                while allEntries.count < expectedCount, let pageCursor = cursor {
                     guard !Task.isCancelled else { return }
-                    let offset = allEntries.count
-                    let nextLimit = min(pageSize, expectedCount - offset)
+                    let nextLimit = min(pageSize, expectedCount - allEntries.count)
                     let nextPage = try await Task.detached(priority: .utility) {
-                        try db.fetchRecent(limit: nextLimit, offset: offset)
+                        try db.fetchHistoryPage(after: pageCursor, limit: nextLimit)
                     }.value
                     guard !Task.isCancelled else { return }
-                    guard !nextPage.isEmpty else { break }
+                    guard !nextPage.entries.isEmpty else { break }
 
-                    allEntries.append(contentsOf: nextPage)
+                    allEntries.append(contentsOf: nextPage.entries)
+                    cursor = nextPage.nextCursor
                 }
 
                 entries = allEntries
