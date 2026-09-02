@@ -61,9 +61,7 @@ extension PanelContentView {
             return .handled
 
         case .delete:
-            if keyPress.modifiers.contains(.command), let id = selectedEntryID,
-               let entry = displayedEntries.first(where: { $0.id == id }) {
-                deleteEntry(entry)
+            if keyPress.modifiers.contains(.command), deleteSelectedEntries() {
                 return .handled
             }
             return .ignored
@@ -87,6 +85,11 @@ extension PanelContentView {
         }
         if listFocused, keyPress.modifiers == .command, chars.lowercased() == "c" {
             copySelectedEntries()
+            return .handled
+        }
+        if !searchFocused, keyPress.modifiers == .command, chars.lowercased() == "a" {
+            // Select every visible row; the search field keeps ⌘A for its text.
+            selectAllEntries()
             return .handled
         }
         if keyPress.modifiers.contains(.command), chars.lowercased() == "o" {
@@ -135,14 +138,44 @@ extension PanelContentView {
         selectedEntryIDs = [id]
     }
 
+    func selectAllEntries() {
+        guard !displayedEntries.isEmpty else { return }
+        selectedEntryIDs = Set(displayedEntries.map(\.id))
+        if selectedEntryID == nil {
+            selectedEntryID = displayedEntries.first?.id
+        }
+    }
+
+    /// Every visible row that is part of the selection, falling back to the
+    /// focused row when the multi-selection set is empty.
+    var selectedEntriesInDisplayOrder: [ClipboardEntry] {
+        let selected = displayedEntries.filter { selectedEntryIDs.contains($0.id) }
+        if selected.isEmpty, let entry = displayedEntries.first(where: { $0.id == selectedEntryID }) {
+            return [entry]
+        }
+        return selected
+    }
+
     func copySelectedEntries() {
-        let selectedEntries = displayedEntries.filter { selectedEntryIDs.contains($0.id) }
+        let selectedEntries = selectedEntriesInDisplayOrder
 
         if selectedEntries.count > 1 {
             copyEntries(selectedEntries)
-        } else if let entry = selectedEntries.first ??
-            displayedEntries.first(where: { $0.id == selectedEntryID }) {
+        } else if let entry = selectedEntries.first {
             copyEntry(entry)
         }
+    }
+
+    /// Deletes every selected row; returns false when nothing is selected.
+    @discardableResult
+    func deleteSelectedEntries() -> Bool {
+        let selectedEntries = selectedEntriesInDisplayOrder
+        guard !selectedEntries.isEmpty else { return false }
+        if selectedEntries.count == 1, let entry = selectedEntries.first {
+            deleteEntry(entry)
+        } else {
+            deleteEntries(selectedEntries.map(\.id))
+        }
+        return true
     }
 }
