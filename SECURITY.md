@@ -65,8 +65,13 @@ Pasta is designed with privacy and security in mind:
       (region dropped — `en-GB` and `en-US` both report `en`), the CPU architecture, and a random
       UUID generated on your Mac at opt-in.
     - **Never sent:** clipboard contents, search query text, source app names, file paths, URLs,
-      window titles, your name, email, account or device identifiers. Every property is an enum
-      raw value or a boolean — there is no code path that can attach a free-form string.
+      window titles, location data, your name, email, account or device identifiers. Every property
+      is an enum raw value or a boolean — there is no code path that can attach a free-form string.
+    - **IP address:** like any HTTPS request, the upload carries your IP to the server. Pasta puts
+      no location or network data in the payload and never stores your IP itself, but what the
+      receiving PostHog project does with it is a server-side setting, not something the app can
+      enforce. **Maintainer note:** GeoIP enrichment and IP storage must be disabled in the PostHog
+      project settings; the "no IP stored" guarantee holds only while they are off.
     - **Withdrawal:** turning the toggle off sends one final `analytics_opt_out` event, then deletes
       the random UUID and the on-disk queue of any events that had not yet been delivered.
     - **Unconfigured builds:** if a build has no PostHog project key (all local and self-built

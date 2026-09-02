@@ -99,14 +99,10 @@ struct GeneralSettingsTab: View {
 
                 Toggle("Share anonymous usage analytics", isOn: $analyticsEnabled)
                 Text("""
-                Off by default. Takes effect immediately — no restart needed. When enabled, \
-                Pasta sends a short list of event names (app opened for the day, paste, search, \
-                settings opened) along with the app version, macOS version, your language code, \
-                CPU architecture, and a random ID generated on your Mac.
-
-                Never sent: clipboard contents, search text, app or file names, your name, \
-                email, IP-derived location, or anything that identifies you. Turning this off \
-                deletes the random ID and any events still waiting to be sent.
+                Off by default; takes effect immediately. Sends only event names, app and macOS \
+                version, language, CPU architecture and a random ID created on this Mac — never \
+                clipboard contents, search text, location data, or anything identifying you. \
+                Turning it off deletes the ID and any unsent events.
                 """)
                     .font(.caption)
                     .foregroundStyle(.secondary)
