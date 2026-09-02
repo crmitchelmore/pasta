@@ -91,6 +91,15 @@ extension PanelContentView {
         withAnimation(.easeInOut(duration: 0.18)) {
             copyFeedbackMessage = message
         }
+        // The toast is transient and visual-only; tell VoiceOver too.
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue
+            ]
+        )
 
         copyFeedbackTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_200_000_000)

@@ -7,7 +7,8 @@ import PastaUI
 
 extension PanelContentView {
     enum Preload {
-        static let limit = 200
+        /// Kept in lock-step with the search bar's "200+" badge cap.
+        static let limit = SearchBarView.resultCountCap
         /// Coalesce bursts of copies so a rapid series of clipboard changes
         /// triggers one full rescan instead of one per emission.
         static let debounceNanoseconds: UInt64 = 250_000_000

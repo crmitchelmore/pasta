@@ -90,18 +90,20 @@ public struct SearchBarView: View {
                     .transition(.scale.combined(with: .opacity))
                 }
 
-                // Result count badge
-                Text("\(resultCount)")
+                // Result count badge — passive information, so it reads as
+                // secondary rather than competing with the accent chip.
+                Text(Self.resultCountLabel(resultCount))
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, PastaTheme.Spacing.md)
+                    .padding(.vertical, PastaTheme.Spacing.xs)
                     .background(
                         Capsule()
-                            .fill(Color.accentColor)
+                            .fill(Color.secondary.opacity(0.12))
                     )
-                    .padding(.trailing, 12)
+                    .padding(.trailing, PastaTheme.Spacing.lg)
                     .contentTransition(.numericText(value: Double(resultCount)))
+                    .accessibilityLabel("\(Self.resultCountLabel(resultCount)) results")
                     .popover(isPresented: $showContentTypePicker, arrowEdge: .bottom) {
                         ContentTypePickerView(
                             availableTypes: availableContentTypes,
@@ -655,5 +657,19 @@ public struct ContentTypePickerView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+}
+
+// MARK: - Result count label
+
+extension SearchBarView {
+    /// The main panel never displays more than this many rows at once (the
+    /// preload/search paths cap their fetches here), so a count equal to the
+    /// cap means "at least this many", not an exact total.
+    public static let resultCountCap = 200
+
+    /// "42" below the cap, "200+" once the displayed count reaches it.
+    static func resultCountLabel(_ count: Int, cap: Int = resultCountCap) -> String {
+        count >= cap ? "\(cap)+" : "\(count)"
     }
 }

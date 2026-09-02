@@ -273,8 +273,18 @@ public struct HighPerformanceListView: NSViewRepresentable {
                 copySelectionIDs = [rowData.id]
             }
 
-            menu.addItem(withTitle: "Paste", action: #selector(contextPaste(_:)), keyEquivalent: "")
-            menu.addItem(withTitle: copySelectionIDs.count > 1 ? "Copy Selected" : "Copy", action: #selector(contextCopy(_:)), keyEquivalent: "")
+            // Key equivalents are display-only here (the panel's key handler
+            // owns the real shortcuts) but they teach the shortcut on sight.
+            let pasteItem = NSMenuItem(title: "Paste", action: #selector(contextPaste(_:)), keyEquivalent: "\r")
+            pasteItem.keyEquivalentModifierMask = []
+            menu.addItem(pasteItem)
+            let copyItem = NSMenuItem(
+                title: copySelectionIDs.count > 1 ? "Copy Selected" : "Copy",
+                action: #selector(contextCopy(_:)),
+                keyEquivalent: "c"
+            )
+            copyItem.keyEquivalentModifierMask = [.command]
+            menu.addItem(copyItem)
             menu.addItem(NSMenuItem.separator())
 
             var pinItem: NSMenuItem? = nil
@@ -289,7 +299,8 @@ public struct HighPerformanceListView: NSViewRepresentable {
                 pinItem = item
             }
 
-            let deleteItem = NSMenuItem(title: "Delete", action: #selector(contextDelete(_:)), keyEquivalent: "")
+            let deleteItem = NSMenuItem(title: "Delete", action: #selector(contextDelete(_:)), keyEquivalent: "\u{8}")
+            deleteItem.keyEquivalentModifierMask = [.command]
             menu.addItem(deleteItem)
 
             if rowData.contentType == .filePath {
@@ -363,6 +374,7 @@ private final class ClipboardCellView: NSTableCellView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let metadataLabel = NSTextField(labelWithString: "")
     private let badgeView = NSTextField(labelWithString: "")
+    private let pinIndicator = NSImageView()
     private let sourceAppIconView = NSImageView()
     private let largeIndicator = NSImageView()
     private let extractedIndicator = NSImageView()
@@ -374,6 +386,8 @@ private final class ClipboardCellView: NSTableCellView {
     private var copiedFeedbackWorkItem: DispatchWorkItem?
     private var hoverTrackingArea: NSTrackingArea?
     private var sourceAppIconWidthConstraint: NSLayoutConstraint?
+    private var pinIndicatorWidthConstraint: NSLayoutConstraint?
+    private var pinIndicatorLeadingConstraint: NSLayoutConstraint?
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -421,6 +435,15 @@ private final class ClipboardCellView: NSTableCellView {
         badgeView.setContentHuggingPriority(.required, for: .horizontal)
         addSubview(badgeView)
 
+        // Pin glyph (shown beside the type badge for pinned rows)
+        pinIndicator.translatesAutoresizingMaskIntoConstraints = false
+        pinIndicator.image = NSImage(systemSymbolName: "pin.fill", accessibilityDescription: "Pinned")
+        pinIndicator.contentTintColor = NSColor(PastaTheme.pin)
+        pinIndicator.imageScaling = .scaleProportionallyDown
+        pinIndicator.toolTip = "Pinned"
+        pinIndicator.setContentHuggingPriority(.required, for: .horizontal)
+        addSubview(pinIndicator)
+
         // Source app icon
         sourceAppIconView.translatesAutoresizingMaskIntoConstraints = false
         sourceAppIconView.imageScaling = .scaleProportionallyUpOrDown
@@ -467,6 +490,10 @@ private final class ClipboardCellView: NSTableCellView {
         // Layout
         let sourceIconWidth = sourceAppIconView.widthAnchor.constraint(equalToConstant: 0)
         sourceAppIconWidthConstraint = sourceIconWidth
+        let pinWidth = pinIndicator.widthAnchor.constraint(equalToConstant: 0)
+        pinIndicatorWidthConstraint = pinWidth
+        let pinLeading = pinIndicator.leadingAnchor.constraint(equalTo: badgeView.trailingAnchor, constant: 0)
+        pinIndicatorLeadingConstraint = pinLeading
         NSLayoutConstraint.activate([
             iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -496,7 +523,12 @@ private final class ClipboardCellView: NSTableCellView {
             badgeView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
             badgeView.heightAnchor.constraint(equalToConstant: 18),
 
-            sourceAppIconView.leadingAnchor.constraint(equalTo: badgeView.trailingAnchor, constant: 8),
+            pinLeading,
+            pinWidth,
+            pinIndicator.centerYAnchor.constraint(equalTo: badgeView.centerYAnchor),
+            pinIndicator.heightAnchor.constraint(equalToConstant: 11),
+
+            sourceAppIconView.leadingAnchor.constraint(equalTo: pinIndicator.trailingAnchor, constant: 8),
             sourceAppIconView.centerYAnchor.constraint(equalTo: badgeView.centerYAnchor),
             sourceIconWidth,
             sourceAppIconView.heightAnchor.constraint(equalToConstant: 14),
@@ -602,6 +634,14 @@ private final class ClipboardCellView: NSTableCellView {
         badgeView.textColor = tint
         badgeView.backgroundColor = tint.withAlphaComponent(0.15)
 
+        // Badge text is visually uppercased; expose the readable title instead.
+        badgeView.setAccessibilityLabel(row.contentType.displayTitle)
+
+        // Pinned state
+        pinIndicator.isHidden = !row.isPinned
+        pinIndicatorWidthConstraint?.constant = row.isPinned ? 11 : 0
+        pinIndicatorLeadingConstraint?.constant = row.isPinned ? 6 : 0
+
         configureSourceAppIcon(row.sourceAppIdentifier)
         
         // Metadata (derived from shared ClipboardRowData computed property
@@ -616,6 +656,15 @@ private final class ClipboardCellView: NSTableCellView {
         
         // Sync indicator
         syncIndicator.isHidden = !row.isSynced
+
+        // VoiceOver reads the row as one element instead of five fragments.
+        var accessibilityParts: [String] = [row.singleLinePreview, row.contentType.displayTitle]
+        if row.isPinned { accessibilityParts.append("Pinned") }
+        if let sourceAppName = row.sourceAppName { accessibilityParts.append(sourceAppName) }
+        accessibilityParts.append(row.timestamp.relativeFormatted)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel(accessibilityParts.joined(separator: ", "))
     }
 
     private func setCopyButtonCopied(_ copied: Bool) {
@@ -682,6 +731,8 @@ private final class ClipboardSectionHeaderView: NSTableCellView {
 
     func configure(title: String) {
         titleLabel.stringValue = title.uppercased()
+        // Keep the readable casing for VoiceOver ("Pinned", not "P-I-N-N-E-D").
+        titleLabel.setAccessibilityLabel(title)
     }
 }
 

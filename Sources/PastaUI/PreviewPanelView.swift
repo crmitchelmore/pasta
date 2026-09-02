@@ -13,9 +13,17 @@ public struct PreviewPanelView: View {
 
     public let entry: ClipboardEntry?
     private let onCopy: ((ClipboardEntry) -> Void)?
+    /// True when the list beside this panel has nothing to select, so the
+    /// empty state can say "No items yet" instead of asking for a selection.
+    private let isListEmpty: Bool
 
-    public init(entry: ClipboardEntry?, onCopy: ((ClipboardEntry) -> Void)? = nil) {
+    public init(
+        entry: ClipboardEntry?,
+        isListEmpty: Bool = false,
+        onCopy: ((ClipboardEntry) -> Void)? = nil
+    ) {
         self.entry = entry
+        self.isListEmpty = isListEmpty
         self.onCopy = onCopy
     }
 
@@ -136,6 +144,13 @@ public struct PreviewPanelView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
                 }
+            } else if isListEmpty {
+                ContentUnavailableView(
+                    "No items yet",
+                    systemImage: "doc.on.clipboard",
+                    description: Text("Copy something and it will show up here.")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView(
                     "Select an item",
@@ -146,7 +161,7 @@ public struct PreviewPanelView: View {
             }
         }
         .background(.quaternary.opacity(0.2))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: PastaTheme.Radius.large, style: .continuous))
     }
 
     private func header(_ entry: ClipboardEntry) -> some View {
@@ -155,7 +170,8 @@ public struct PreviewPanelView: View {
                 Image(systemName: entry.contentType.systemImageName)
                     .foregroundStyle(entry.contentType.tint)
 
-                Text(entry.contentType.displayTitle.uppercased())
+                Text(entry.contentType.displayTitle)
+                    .textCase(.uppercase)
                     .font(.headline)
 
                 Spacer(minLength: 0)
