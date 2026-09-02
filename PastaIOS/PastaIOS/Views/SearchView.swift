@@ -27,7 +27,11 @@ struct SearchView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Search")
-        .searchable(text: $searchText, prompt: "Search clipboard history")
+        .searchable(
+            text: $searchText,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Search clipboard history"
+        )
         .onChange(of: searchText) { _, newValue in
             performSearch(query: newValue)
         }
