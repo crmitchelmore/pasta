@@ -295,10 +295,13 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          echo "==> Archiving $SCHEME $VERSION ($BUILD_NUMBER) with profile $PROFILE_NAME"
-          # The Release configuration is already Manual / Apple Distribution in the
-          # project; the profile is pinned by UUID here so the name of the profile
-          # stored in IOS_APPSTORE_PROFILE does not have to match the project file.
+          echo "==> Archiving $SCHEME $VERSION ($BUILD_NUMBER) unsigned; signing happens at export"
+          # Archive UNSIGNED. Passing a manual PROVISIONING_PROFILE_SPECIFIER to
+          # xcodebuild applies it to every target, including SwiftPM package
+          # targets such as GRDB_GRDB, which reject provisioning profiles and fail
+          # the archive. Signing happens in -exportArchive instead, where
+          # ExportOptions.plist pins the profile by UUID (so the profile name in
+          # IOS_APPSTORE_PROFILE need not match the project file).
           xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -309,10 +312,8 @@ jobs:
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_UUID" \
-            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
             2>&1 | tee "$BUILD_DIR/archive.log"
 
       - name: Verify archive metadata
@@ -331,9 +332,7 @@ jobs:
           [ "$ACTUAL_VERSION" = "$VERSION" ] || { echo "::error::Version mismatch: expected $VERSION, got $ACTUAL_VERSION"; exit 1; }
           [ "$ACTUAL_BUILD" = "$BUILD_NUMBER" ] || { echo "::error::Build mismatch: expected $BUILD_NUMBER, got $ACTUAL_BUILD"; exit 1; }
 
-          codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/archive-entitlements.plist"
-          CONTAINER="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-identifiers:0' "$RUNNER_TEMP/archive-entitlements.plist" 2>/dev/null || true)"
-          [ "$CONTAINER" = "$ICLOUD_CONTAINER" ] || { echo "::error::iCloud container mismatch: expected $ICLOUD_CONTAINER, got '${CONTAINER:-missing}'"; exit 1; }
+          echo "==> Entitlements are applied at export; verified against the IPA after -exportArchive"
 
           [ -d "$ARCHIVE_PATH/dSYMs/PastaIOS.app.dSYM" ] || echo "::warning::No dSYM found in archive; crash symbolication will be unavailable."
           echo "==> Archive OK: $ACTUAL_ID $ACTUAL_VERSION ($ACTUAL_BUILD), container $CONTAINER"
@@ -405,6 +404,8 @@ jobs:
           if [ "$APS" != "production" ]; then
             echo "::warning::aps-environment is '$APS' in the exported IPA; App Store builds are expected to carry 'production'. Check the App Store profile grants Push Notifications."
           fi
+          CONTAINER="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-identifiers:0' "$RUNNER_TEMP/ipa-entitlements.plist" 2>/dev/null || echo missing)"
+          [ "$CONTAINER" = "$ICLOUD_CONTAINER" ] || { echo "::error::iCloud container mismatch in exported IPA: expected $ICLOUD_CONTAINER, got '$CONTAINER'"; exit 1; }
           security cms -D -i "$APP_PATH/embedded.mobileprovision" > "$RUNNER_TEMP/ipa-profile.plist"
           if plutil -extract ProvisionedDevices raw -o - "$RUNNER_TEMP/ipa-profile.plist" >/dev/null 2>&1; then
             echo "::error::Exported IPA embeds a device-limited profile; this is not an App Store build."
