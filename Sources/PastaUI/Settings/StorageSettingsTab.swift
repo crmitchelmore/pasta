@@ -101,8 +101,7 @@ struct StorageSettingsTab: View {
                         Button("Clear All History…", role: .destructive) {
                             isConfirmingClearAll = true
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.red)
+                        .buttonStyle(.bordered)
                     }
                     Spacer()
                 }

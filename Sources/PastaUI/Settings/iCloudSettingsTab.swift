@@ -123,8 +123,7 @@ struct iCloudSettingsTab: View {
                     Button("Reset Sync…", role: .destructive) {
                         isResetting = true
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
                     Spacer()
                 }
