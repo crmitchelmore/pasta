@@ -9,8 +9,8 @@ public struct FilterSidebarView: View {
     private let domainCountsOverride: [String: Int]?
     private let pinnedCountOverride: Int?
 
-    @Binding private var selectedContentType: ContentType?
-    @Binding private var selectedURLDomain: String?
+    /// Single source of truth for the panel's filter; the parent derives
+    /// content type / domain / source app / pinned from it.
     @Binding private var selection: FilterSelection?
 
     @State private var showDomains: Bool = false
@@ -28,8 +28,6 @@ public struct FilterSidebarView: View {
         sourceAppCounts: [String: Int]? = nil,
         domainCounts: [String: Int]? = nil,
         pinnedCount: Int? = nil,
-        selectedContentType: Binding<ContentType?>,
-        selectedURLDomain: Binding<String?>,
         selection: Binding<FilterSelection?>
     ) {
         self.entries = entries
@@ -37,8 +35,6 @@ public struct FilterSidebarView: View {
         sourceAppCountsOverride = sourceAppCounts
         domainCountsOverride = domainCounts
         pinnedCountOverride = pinnedCount
-        _selectedContentType = selectedContentType
-        _selectedURLDomain = selectedURLDomain
         _selection = selection
     }
 
@@ -157,7 +153,10 @@ public struct FilterSidebarView: View {
         }
         .listStyle(.sidebar)
         .onAppear {
-            syncSelectionFromBindings()
+            // A restored domain selection should be visible, not folded away.
+            if selection?.urlDomain != nil {
+                showDomains = true
+            }
             scheduleFallbackCountsRebuild()
         }
         .onDisappear {
@@ -166,15 +165,6 @@ public struct FilterSidebarView: View {
         }
         .onChange(of: entriesChangeToken) { _, _ in
             scheduleFallbackCountsRebuild()
-        }
-        .onChange(of: selection) { _, newValue in
-            applySelection(newValue)
-        }
-        .onChange(of: selectedContentType) { _, _ in
-            syncSelectionFromBindings()
-        }
-        .onChange(of: selectedURLDomain) { _, _ in
-            syncSelectionFromBindings()
         }
     }
 
@@ -281,54 +271,6 @@ public struct FilterSidebarView: View {
         .tag(selectionValue)
         .disabled(isDisabled)
         .help("\(title) — \(count.formatted()) \(count == 1 ? "item" : "items")")
-    }
-
-    private func applySelection(_ selection: FilterSelection?) {
-        switch selection {
-        case .none, .all:
-            selectedContentType = nil
-            selectedURLDomain = nil
-        case .pinned:
-            // Pinned-only filtering is consumed by the parent panel via
-            // `selection`; clear other type/domain filters so they don't
-            // narrow the list further.
-            selectedContentType = nil
-            selectedURLDomain = nil
-        case .type(let type):
-            selectedContentType = type
-            if type != .url {
-                selectedURLDomain = nil
-            }
-        case .domain(let domain):
-            selectedContentType = .url
-            selectedURLDomain = domain.isEmpty ? nil : domain
-        case .sourceApp:
-            // Source app filter is handled separately via FilterSelection
-            selectedContentType = nil
-            selectedURLDomain = nil
-        }
-    }
-
-    private func syncSelectionFromBindings() {
-        if let domain = selectedURLDomain, !domain.isEmpty {
-            selection = .domain(domain)
-            showDomains = true
-            return
-        }
-        if let type = selectedContentType {
-            selection = .type(type)
-            return
-        }
-        // Preserve selections that don't map to type/domain bindings (.pinned,
-        // .sourceApp). `applySelection(.pinned)` deliberately clears the
-        // bindings, so seeing both nil here doesn't mean "reset to all".
-        switch selection {
-        case .pinned, .sourceApp:
-            return
-        default:
-            break
-        }
-        selection = .all
     }
 
     private func typeTitle(_ type: ContentType) -> String {

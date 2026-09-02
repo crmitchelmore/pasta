@@ -22,11 +22,14 @@ struct PanelContentView: View {
     @ObservedObject var backgroundService = BackgroundService.shared
 
     @State var searchQuery: String = ""
-    @State var contentTypeFilter: ContentType? = nil
-    @State var urlDomainFilter: String? = nil
+    /// Single source of truth for the sidebar / chip / ⌘P filter. `nil`
+    /// (a deselected sidebar list) behaves like `.all`.
     @State var filterSelection: FilterSelection? = .all
-    @State var sourceAppFilter: String = ""
-    @State var pinnedOnlyFilter: Bool = false
+
+    var contentTypeFilter: ContentType? { filterSelection?.contentType }
+    var urlDomainFilter: String? { filterSelection?.urlDomain }
+    var sourceAppFilter: String { filterSelection?.sourceApp ?? "" }
+    var pinnedOnlyFilter: Bool { filterSelection?.isPinnedOnly ?? false }
 
     @State var selectedEntryID: UUID? = nil
     @State var selectedEntryIDs: Set<UUID> = []
@@ -114,9 +117,8 @@ struct PanelContentView: View {
 
             SearchBarView(
                 query: $searchQuery,
-                contentType: $contentTypeFilter,
+                filterSelection: $filterSelection,
                 resultCount: displayedEntries.count,
-                sourceAppFilter: $sourceAppFilter,
                 availableContentTypes: availableContentTypesInHistory,
                 showContentTypePicker: $isShowingContentTypePicker,
                 onOpenSettings: {
@@ -159,8 +161,6 @@ struct PanelContentView: View {
                     sourceAppCounts: preloadedSourceAppCounts,
                     domainCounts: preloadedDomainCounts,
                     pinnedCount: preloadedPinnedCount,
-                    selectedContentType: $contentTypeFilter,
-                    selectedURLDomain: $urlDomainFilter,
                     selection: $filterSelection
                 )
                 .frame(width: widths.sidebar)
@@ -265,10 +265,7 @@ struct PanelContentView: View {
     private func applyChangeHandlers<V: View>(to view: V) -> some View {
         view
             .onChange(of: searchQuery) { handleSearchQueryChange(from: $0, to: $1) }
-            .onChange(of: contentTypeFilter) { _, newValue in handleContentTypeFilterChange(newValue) }
-            .onChange(of: sourceAppFilter) { _, _ in triggerSearchUpdate() }
-            .onChange(of: urlDomainFilter) { _, _ in triggerSearchUpdate() }
-            .onChange(of: filterSelection) { _, newValue in handleFilterSelectionChange(newValue) }
+            .onChange(of: filterSelection) { handleFilterSelectionChange(from: $0, to: $1) }
             .onChange(of: displayedEntryIDs) { handleDisplayedEntriesChange($0, $1) }
             .onChange(of: selectedEntryID) { _, newValue in handleSelectedEntryIDChange(newValue) }
             .onKeyPress { handleKeyPress($0) }
@@ -301,7 +298,9 @@ struct PanelContentView: View {
     private func handleOnDisappear() {
         // Reset the content-type filter and close the picker when the
         // panel hides so each new session starts unfiltered.
-        contentTypeFilter = nil
+        if contentTypeFilter != nil {
+            filterSelection = .all
+        }
         isShowingContentTypePicker = false
         copyFeedbackTask?.cancel()
         copyFeedbackTask = nil
@@ -317,7 +316,6 @@ struct PanelContentView: View {
     private func handleContentTypeFilterNotification(_ note: Notification) {
         let value = note.userInfo?[ApplyContentTypeFilterKey.contentType]
         let type = value as? ContentType
-        contentTypeFilter = type
         filterSelection = type.map { .type($0) } ?? .all
     }
 
@@ -363,39 +361,12 @@ struct PanelContentView: View {
         }
     }
 
-    private func handleContentTypeFilterChange(_ newValue: ContentType?) {
-        if newValue != .url {
-            urlDomainFilter = nil
+    private func handleFilterSelectionChange(from old: FilterSelection?, to new: FilterSelection?) {
+        // "Values only" is tied to the content type being browsed.
+        if old?.contentType != new?.contentType {
+            showExtractedValuesOnly = false
         }
-        // Reset "values only" toggle when filter changes
-        showExtractedValuesOnly = false
         triggerSearchUpdate()
-    }
-
-    private func handleFilterSelectionChange(_ newValue: FilterSelection?) {
-        // Handle source app filter from sidebar selection
-        if case .sourceApp(let app) = newValue {
-            sourceAppFilter = app
-            contentTypeFilter = nil
-            urlDomainFilter = nil
-            pinnedOnlyFilter = false
-        } else if case .pinned = newValue {
-            pinnedOnlyFilter = true
-            sourceAppFilter = ""
-            contentTypeFilter = nil
-            urlDomainFilter = nil
-            triggerSearchUpdate()
-        } else if case .type = newValue {
-            sourceAppFilter = ""
-            pinnedOnlyFilter = false
-        } else if case .domain = newValue {
-            sourceAppFilter = ""
-            pinnedOnlyFilter = false
-        } else if newValue == .all || newValue == nil {
-            sourceAppFilter = ""
-            pinnedOnlyFilter = false
-            triggerSearchUpdate()
-        }
     }
 
     private func handleSelectedEntryIDChange(_ newValue: UUID?) {

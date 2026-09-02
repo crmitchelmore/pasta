@@ -4,8 +4,7 @@ import SwiftUI
 
 public struct SearchBarView: View {
     @Binding private var query: String
-    @Binding private var contentType: ContentType?
-    @Binding private var sourceAppFilter: String
+    @Binding private var filterSelection: FilterSelection?
     @Binding private var showContentTypePicker: Bool
 
     private let resultCount: Int
@@ -17,22 +16,29 @@ public struct SearchBarView: View {
 
     public init(
         query: Binding<String>,
-        contentType: Binding<ContentType?>,
+        filterSelection: Binding<FilterSelection?>,
         resultCount: Int,
-        sourceAppFilter: Binding<String>,
         availableContentTypes: [ContentType] = [],
         showContentTypePicker: Binding<Bool> = .constant(false),
         onOpenSettings: @escaping () -> Void,
         searchFocused: FocusState<Bool>.Binding
     ) {
         _query = query
-        _contentType = contentType
+        _filterSelection = filterSelection
         self.resultCount = resultCount
-        _sourceAppFilter = sourceAppFilter
         self.availableContentTypes = availableContentTypes
         _showContentTypePicker = showContentTypePicker
         self.onOpenSettings = onOpenSettings
         self.searchFocused = searchFocused
+    }
+
+    /// The chip and ⌘P picker only know about content types; map their
+    /// choice onto the shared selection. Re-picking URL while a specific
+    /// domain is active keeps that domain (the picker already shows URL as
+    /// selected in that state).
+    private func applyContentType(_ type: ContentType?) {
+        if type == .url, case .domain = filterSelection { return }
+        filterSelection = type.map(FilterSelection.type) ?? .all
     }
 
     public var body: some View {
@@ -76,10 +82,10 @@ public struct SearchBarView: View {
 
                 // Active content-type filter chip (also visible to confirm
                 // selections made via the ⌘P picker or sidebar).
-                if let activeType = contentType {
+                if let activeType = filterSelection?.contentType {
                     ContentTypeFilterChip.activeDismissable(type: activeType, onClear: {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            contentType = nil
+                            applyContentType(nil)
                         }
                     })
                     .padding(.trailing, 8)
@@ -103,9 +109,9 @@ public struct SearchBarView: View {
                     .popover(isPresented: $showContentTypePicker, arrowEdge: .bottom) {
                         ContentTypePickerView(
                             availableTypes: availableContentTypes,
-                            selectedType: contentType,
+                            selectedType: filterSelection?.contentType,
                             onSelect: { newType in
-                                contentType = newType
+                                applyContentType(newType)
                                 showContentTypePicker = false
                             },
                             onCancel: {
