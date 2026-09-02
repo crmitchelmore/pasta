@@ -377,6 +377,53 @@ final class ClipboardMonitorTests: XCTestCase {
         XCTAssertEqual(received.first?.content, "captured-anyway")
     }
 
+    func testSkipsEmissionWhenSourceAppIsExcluded() {
+        let pasteboard = MockPasteboard()
+        pasteboard.changeCount = 1
+        pasteboard.contents = .text("initial")
+
+        let defaults = UserDefaults(suiteName: "ClipboardMonitorTests.exclusion")!
+        defaults.removePersistentDomain(forName: "ClipboardMonitorTests.exclusion")
+        defaults.set("com.example.Excluded", forKey: "pasta.excludedApps")
+
+        let ticks = PassthroughSubject<Void, Never>()
+        let monitor = ClipboardMonitor(
+            pasteboard: pasteboard,
+            workspace: MockWorkspace(identifier: "com.example.Excluded"),
+            exclusionManager: ExclusionManager(userDefaults: defaults),
+            tickPublisher: ticks.eraseToAnyPublisher(),
+            now: { Date(timeIntervalSince1970: 1) }
+        )
+
+        var received: [ClipboardEntry] = []
+        let cancellable = monitor.publisher.sink { received.append($0) }
+
+        monitor.start()
+        pasteboard.changeCount = 2
+        pasteboard.contents = .text("secret")
+        ticks.send(())
+
+        // The read/emit pipeline is asynchronous; give it time to complete
+        // before asserting nothing came through.
+        settle()
+        XCTAssertEqual(received.count, 0)
+
+        // Positive control: once the app is no longer excluded, the same
+        // pipeline emits — proving the earlier silence was the exclusion, not
+        // a stalled pipeline.
+        defaults.set("", forKey: "pasta.excludedApps")
+        pasteboard.changeCount = 3
+        pasteboard.contents = .text("not secret")
+        let emitted = XCTestExpectation(description: "receives entry once unexcluded")
+        let control = monitor.publisher.sink { _ in emitted.fulfill() }
+        ticks.send(())
+        wait(for: [emitted], timeout: 1.0)
+
+        cancellable.cancel()
+        control.cancel()
+        XCTAssertEqual(received.map(\.content), ["not secret"])
+    }
+
     func testTransientTypeSetIncludesNSPasteboardOrgIdentifiers() {
         XCTAssertTrue(TransientPasteboardType.contains(["org.nspasteboard.TransientType"]))
         XCTAssertTrue(TransientPasteboardType.contains(["org.nspasteboard.ConcealedType"]))

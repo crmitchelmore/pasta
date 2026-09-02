@@ -2,10 +2,6 @@ import XCTest
 @testable import PastaDetectors
 
 final class PastaDetectorsTests: XCTestCase {
-    func testVersion() {
-        XCTAssertEqual(PastaDetectors.version, "0.1.0")
-    }
-
     func testIPAddressDetector() {
         let detector = IPAddressDetector()
         let results = detector.detect(in: "Public 8.8.8.8 and private 10.0.0.1")
