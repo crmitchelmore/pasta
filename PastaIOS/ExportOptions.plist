@@ -13,7 +13,7 @@
 	                                      "export" for dry runs
 	The checked-in defaults match the Release build settings in
 	PastaIOS.xcodeproj (manual signing, Apple Distribution, profile
-	PastaIOS_AppStore_CloudKit_v2) and export to disk without uploading, so the
+	PastaIOS AppStore CI) and export to disk without uploading, so the
 	file is also usable for a local `xcodebuild -exportArchive`.
 	-->
 	<key>method</key>
@@ -29,7 +29,7 @@
 	<key>provisioningProfiles</key>
 	<dict>
 		<key>com.pasta.ios</key>
-		<string>PastaIOS_AppStore_CloudKit_v2</string>
+		<string>PastaIOS AppStore CI</string>
 	</dict>
 	<key>uploadSymbols</key>
 	<true/>

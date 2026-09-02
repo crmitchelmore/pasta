@@ -295,13 +295,14 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          echo "==> Archiving $SCHEME $VERSION ($BUILD_NUMBER) unsigned; signing happens at export"
-          # Archive UNSIGNED. Passing a manual PROVISIONING_PROFILE_SPECIFIER to
-          # xcodebuild applies it to every target, including SwiftPM package
-          # targets such as GRDB_GRDB, which reject provisioning profiles and fail
-          # the archive. Signing happens in -exportArchive instead, where
-          # ExportOptions.plist pins the profile by UUID (so the profile name in
-          # IOS_APPSTORE_PROFILE need not match the project file).
+          echo "==> Archiving $SCHEME $VERSION ($BUILD_NUMBER) signed with project profile $PROFILE_NAME"
+          # Archive SIGNED so CODE_SIGN_ENTITLEMENTS (iCloud, push) are baked in.
+          # Do NOT pass PROVISIONING_PROFILE_SPECIFIER on the command line: it
+          # would apply to every target, including SwiftPM package targets such
+          # as GRDB_GRDB, which reject provisioning profiles. The project's
+          # Release configuration sets Manual / Apple Distribution and the profile
+          # name "PastaIOS AppStore CI" on the app target only, so the profile
+          # installed from IOS_APPSTORE_PROFILE must carry exactly that name.
           xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -312,8 +313,7 @@ jobs:
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
             2>&1 | tee "$BUILD_DIR/archive.log"
 
       - name: Verify archive metadata
@@ -332,10 +332,12 @@ jobs:
           [ "$ACTUAL_VERSION" = "$VERSION" ] || { echo "::error::Version mismatch: expected $VERSION, got $ACTUAL_VERSION"; exit 1; }
           [ "$ACTUAL_BUILD" = "$BUILD_NUMBER" ] || { echo "::error::Build mismatch: expected $BUILD_NUMBER, got $ACTUAL_BUILD"; exit 1; }
 
-          echo "==> Entitlements are applied at export; verified against the IPA after -exportArchive"
+          codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/archive-entitlements.plist"
+          CONTAINER="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-identifiers:0' "$RUNNER_TEMP/archive-entitlements.plist" 2>/dev/null || true)"
+          [ "$CONTAINER" = "$ICLOUD_CONTAINER" ] || { echo "::error::iCloud container mismatch in archive: expected $ICLOUD_CONTAINER, got '${CONTAINER:-missing}'"; exit 1; }
 
           [ -d "$ARCHIVE_PATH/dSYMs/PastaIOS.app.dSYM" ] || echo "::warning::No dSYM found in archive; crash symbolication will be unavailable."
-          echo "==> Archive OK: $ACTUAL_ID $ACTUAL_VERSION ($ACTUAL_BUILD)"
+          echo "==> Archive OK: $ACTUAL_ID $ACTUAL_VERSION ($ACTUAL_BUILD), container $CONTAINER"
 
       # ==========================================================================
       # EXPORT & UPLOAD
