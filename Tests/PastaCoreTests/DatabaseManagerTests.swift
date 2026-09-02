@@ -91,7 +91,7 @@ final class DatabaseManagerTests: XCTestCase {
         XCTAssertEqual(recent.map(\.content), ["newer", "older"])
     }
 
-    func testFetchRecentSupportsOffsetAndCountsEntries() throws {
+    func testFetchHistoryPageWalksWholeLibraryNewestFirst() throws {
         let db = try DatabaseManager.inMemory()
 
         for index in 0..<5 {
@@ -104,8 +104,69 @@ final class DatabaseManagerTests: XCTestCase {
 
         XCTAssertEqual(try db.countEntries(), 5)
 
-        let page = try db.fetchRecent(limit: 2, offset: 2)
-        XCTAssertEqual(page.map(\.content), ["entry 2", "entry 1"])
+        let first = try db.fetchHistoryPage(after: nil, limit: 2)
+        XCTAssertEqual(first.entries.map(\.content), ["entry 4", "entry 3"])
+        let second = try db.fetchHistoryPage(after: first.nextCursor, limit: 2)
+        XCTAssertEqual(second.entries.map(\.content), ["entry 2", "entry 1"])
+        let third = try db.fetchHistoryPage(after: second.nextCursor, limit: 2)
+        XCTAssertEqual(third.entries.map(\.content), ["entry 0"])
+        let fourth = try db.fetchHistoryPage(after: third.nextCursor, limit: 2)
+        XCTAssertTrue(fourth.entries.isEmpty)
+        XCTAssertNil(fourth.nextCursor)
+
+        XCTAssertTrue(try db.fetchHistoryPage(after: nil, limit: 0).entries.isEmpty)
+    }
+
+    /// Rows sharing a timestamp are the case OFFSET handled trivially and a
+    /// timestamp-only cursor would skip or repeat; rowid breaks the tie.
+    func testFetchHistoryPageIsStableAcrossEqualTimestamps() throws {
+        let db = try DatabaseManager.inMemory()
+        let shared = Date(timeIntervalSince1970: 100)
+        let entries = (0..<7).map { ClipboardEntry(content: "tie \($0)", contentType: .text, timestamp: shared) }
+        try db.insertBatch(entries, deduplicate: false)
+
+        var seen: [UUID] = []
+        var cursor: DatabaseManager.HistoryCursor? = nil
+        repeat {
+            let page = try db.fetchHistoryPage(after: cursor, limit: 3)
+            seen.append(contentsOf: page.entries.map(\.id))
+            cursor = page.nextCursor
+        } while cursor != nil
+
+        XCTAssertEqual(seen.count, 7)
+        XCTAssertEqual(Set(seen).count, 7, "no row may be repeated or skipped")
+        // Same total order as the head fetch used by the incremental merge.
+        XCTAssertEqual(try db.fetchRecent(limit: 7).map(\.id), seen)
+    }
+
+    /// The whole point of the cursor: every page must be an index seek, never
+    /// a sort or an OFFSET walk.
+    func testFetchHistoryPageUsesTimestampIndexWithoutTempBTree() throws {
+        let db = try DatabaseManager.inMemory()
+        try db.insert(ClipboardEntry(content: "x", contentType: .text))
+
+        let plan: [String] = try db.dbWriter.read { conn in
+            try Row.fetchAll(
+                conn,
+                sql: """
+                EXPLAIN QUERY PLAN
+                SELECT rowid, * FROM clipboard_entries
+                WHERE (timestamp, rowid) < (?, ?)
+                ORDER BY timestamp DESC, rowid DESC
+                LIMIT ?
+                """,
+                arguments: [Date(), 1, 10]
+            ).map { $0["detail"] as String }
+        }
+
+        XCTAssertTrue(
+            plan.contains { $0.contains("idx_clipboard_entries_timestamp") },
+            "expected the timestamp index to drive the page: \(plan)"
+        )
+        XCTAssertFalse(
+            plan.contains { $0.contains("TEMP B-TREE") },
+            "ORDER BY must be satisfied by the index, not a sort: \(plan)"
+        )
     }
 
     func testInsertDeduplicatesAndIncrementsCopyCount() throws {

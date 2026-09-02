@@ -150,26 +150,105 @@ extension DatabaseManager {
         try fetchRecent(contentType: nil, limit: limit)
     }
 
+    /// Newest-first head of the history. Ties on `timestamp` are broken by
+    /// rowid so the order agrees with `fetchHistoryPage(after:limit:)`.
     public func fetchRecent(contentType: ContentType?, limit: Int = 50) throws -> [ClipboardEntry] {
-        try fetchRecent(contentType: contentType, limit: limit, offset: 0)
-    }
-
-    public func fetchRecent(limit: Int, offset: Int) throws -> [ClipboardEntry] {
-        try fetchRecent(contentType: nil, limit: limit, offset: offset)
-    }
-
-    public func fetchRecent(contentType: ContentType?, limit: Int, offset: Int) throws -> [ClipboardEntry] {
         try dbWriter.read { db in
             var request = ClipboardEntry
-                .order(Column("timestamp").desc)
+                .order(Column("timestamp").desc, Column.rowID.desc)
 
             if let contentType {
                 request = request.filter(Column("contentType") == contentType.rawValue)
             }
 
             return try request
-                .limit(limit, offset: offset)
+                .limit(limit)
                 .fetchAll(db)
+        }
+    }
+
+    /// Keyset cursor for paging the whole history newest-first without
+    /// `OFFSET`. `(timestamp, rowid)` is exactly the key order of
+    /// `idx_clipboard_entries_timestamp` (an index on `timestamp` is stored
+    /// as `(timestamp, rowid)`), so each page is a single index seek plus
+    /// `limit` steps instead of a re-walk of every skipped row.
+    public struct HistoryCursor: Sendable, Equatable {
+        public let timestamp: Date
+        public let rowID: Int64
+
+        public init(timestamp: Date, rowID: Int64) {
+            self.timestamp = timestamp
+            self.rowID = rowID
+        }
+    }
+
+    /// One page of history plus the cursor for the page after it (`nil` once
+    /// the page came back empty, i.e. the walk is complete).
+    public struct HistoryPage: Sendable {
+        public let entries: [ClipboardEntry]
+        public let nextCursor: HistoryCursor?
+
+        public init(entries: [ClipboardEntry], nextCursor: HistoryCursor?) {
+            self.entries = entries
+            self.nextCursor = nextCursor
+        }
+    }
+
+    /// Fetches one page of entries strictly older than `cursor` (newest first,
+    /// ties broken by rowid). Pass `nil` for the first page and feed each
+    /// page's `nextCursor` back in until it is `nil`.
+    ///
+    /// Replaces the old `fetchRecent(limit:offset:)` loop, whose `OFFSET n`
+    /// made SQLite walk and discard `n` index entries per page (O(n²/pageSize)
+    /// over the full library). Stable while rows are inserted mid-walk: new
+    /// rows land at the head, above every cursor already issued.
+    public func fetchHistoryPage(after cursor: HistoryCursor?, limit: Int) throws -> HistoryPage {
+        guard limit > 0 else { return HistoryPage(entries: [], nextCursor: cursor) }
+
+        return try dbWriter.read { db in
+            // The row-value comparison compiles to a single index SEARCH; the
+            // equivalent `ts < ? OR (ts = ? AND rowid < ?)` degrades to a SCAN.
+            let rows: RowCursor
+            if let cursor {
+                rows = try Row.fetchCursor(
+                    db,
+                    sql: """
+                    SELECT rowid, * FROM \(ClipboardEntry.databaseTableName)
+                    WHERE (timestamp, rowid) < (:ts, :rowid)
+                    ORDER BY timestamp DESC, rowid DESC
+                    LIMIT :limit
+                    """,
+                    arguments: ["ts": cursor.timestamp, "rowid": cursor.rowID, "limit": limit]
+                )
+            } else {
+                rows = try Row.fetchCursor(
+                    db,
+                    sql: """
+                    SELECT rowid, * FROM \(ClipboardEntry.databaseTableName)
+                    ORDER BY timestamp DESC, rowid DESC
+                    LIMIT :limit
+                    """,
+                    arguments: ["limit": limit]
+                )
+            }
+
+            // Decode straight off the cursor: materialising `[Row]` first and
+            // decoding the copies was ~2.5x slower over a 50k walk. The cursor
+            // timestamp comes from the decoded entry (already a `Date`; it
+            // round-trips to the identical stored string) so only rowid is
+            // read per row.
+            var entries: [ClipboardEntry] = []
+            entries.reserveCapacity(limit)
+            var lastRowID: Int64?
+            while let row = try rows.next() {
+                entries.append(try ClipboardEntry(row: row))
+                lastRowID = row["rowid"]
+            }
+
+            let nextCursor = entries.last.flatMap { last in
+                lastRowID.map { HistoryCursor(timestamp: last.timestamp, rowID: $0) }
+            }
+            return HistoryPage(entries: entries, nextCursor: nextCursor)
         }
     }
 
