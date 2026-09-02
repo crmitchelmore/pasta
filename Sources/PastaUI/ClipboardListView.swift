@@ -33,44 +33,12 @@ public enum TimeGroup: String, CaseIterable, Sendable {
     }
 }
 
-// MARK: - Lightweight Row Data (for Equatable diffing)
-
-/// Minimal data needed to render a row - used for efficient diffing
-private struct RowData: Equatable, Identifiable {
-    let id: UUID
-    let previewText: String
-    let contentType: ContentType
-    let sourceAppIdentifier: String?
-    let sourceAppName: String?
-    let timestamp: Date
-    let copyCount: Int
-    let isLarge: Bool
-    let hasFilePath: Bool
-    let isExtracted: Bool
-    let parentEntryId: UUID?
-    
-    init(from entry: ClipboardEntry) {
-        self.id = entry.id
-        let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.previewText = trimmed.isEmpty ? "(empty)" : String(trimmed.prefix(200))
-        self.contentType = entry.contentType
-        self.sourceAppIdentifier = entry.sourceApp
-        self.sourceAppName = entry.sourceApp?.appDisplayName
-        self.timestamp = entry.timestamp
-        self.copyCount = entry.copyCount
-        self.isLarge = entry.content.utf8.count > 10 * 1024
-        self.hasFilePath = entry.contentType == .filePath
-        self.isExtracted = entry.isExtracted
-        self.parentEntryId = entry.parentEntryId
-    }
-}
-
 // MARK: - Grouped Section Data
 
 private struct SectionData: Identifiable {
     let id: String  // group name as ID
     let name: String
-    let rows: [RowData]
+    let rows: [ClipboardRowData]
 }
 
 // MARK: - Main List View
@@ -204,17 +172,17 @@ public struct ClipboardListView: View {
         
         // If searching, return flat list
         if !trimmedQuery.isEmpty {
-            let rows = entries.map { RowData(from: $0) }
+            let rows = entries.map { ClipboardRowData(from: $0) }
             sections = [SectionData(id: "Results", name: "Results", rows: rows)]
             return
         }
         
         // Group by time
         let now = Date()
-        var groups: [TimeGroup: [RowData]] = [:]
+        var groups: [TimeGroup: [ClipboardRowData]] = [:]
         for entry in entries {
             let group = TimeGroup.group(for: entry.timestamp, now: now)
-            groups[group, default: []].append(RowData(from: entry))
+            groups[group, default: []].append(ClipboardRowData(from: entry))
         }
         
         // Build sections in order
@@ -578,7 +546,13 @@ public struct ClipboardListView: View {
             ScrollView {
                 LazyVStack(spacing: 1) {
                     ForEach(allValues) { item in
-                        ExtractedValueRow(item: item)
+                        CopyableValueRow(
+                            type: item.type,
+                            value: item.value,
+                            displayValue: item.displayValue,
+                            sourcePreview: item.sourcePreview,
+                            style: .list
+                        )
                     }
                 }
                 .padding(.vertical, 4)
@@ -630,7 +604,7 @@ public struct ClipboardListView: View {
             List(selection: $selectedEntryID) {
                 ForEach(sections) { section in
                     Section {
-                        ForEach(section.rows) { row in
+                        ForEach(section.rows, id: \.id) { row in
                             SelectionModeRowView(
                                 row: row,
                                 isSelected: bulkSelectedIDs.contains(row.id)
@@ -664,7 +638,7 @@ public struct ClipboardListView: View {
 // MARK: - Selection Mode Row View (simplified)
 
 private struct SelectionModeRowView: View {
-    let row: RowData
+    let row: ClipboardRowData
     let isSelected: Bool
 
     var body: some View {
@@ -737,12 +711,6 @@ private struct ContentTypeBadge: View {
     }
 }
 
-// MARK: - Extensions
-
-private extension String {
-    var displayName: String { appDisplayName }
-}
-
 // MARK: - Extracted Value Types
 
 /// Item representing an extracted value from an entry
@@ -753,68 +721,6 @@ private struct ExtractedValueItem: Identifiable {
     let type: ContentType
     let sourceEntryID: UUID
     let sourcePreview: String?  // nil if this IS the primary entry
-}
-
-/// Row view for displaying an extracted value
-private struct ExtractedValueRow: View {
-    let item: ExtractedValueItem
-    @State private var copied = false
-    
-    var body: some View {
-        Button {
-            copyToClipboard()
-        } label: {
-            HStack(spacing: 10) {
-                // Type icon
-                Image(systemName: item.type.systemImageName)
-                    .foregroundStyle(item.type.tint)
-                    .frame(width: 20)
-                
-                // Value
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.displayValue)
-                        .font(.system(.body, design: .monospaced))
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                    
-                    if let source = item.sourcePreview {
-                        Text("from: \(source)...")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
-                }
-                
-                Spacer(minLength: 4)
-                
-                // Copy indicator
-                Image(systemName: copied ? "checkmark.circle.fill" : "doc.on.doc")
-                    .font(.caption)
-                    .foregroundStyle(copied ? .green : .secondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color(nsColor: .controlBackgroundColor))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Click to copy: \(item.value)")
-    }
-    
-    private func copyToClipboard() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(item.value, forType: .string)
-        
-        withAnimation(.easeInOut(duration: 0.2)) {
-            copied = true
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                copied = false
-            }
-        }
-    }
 }
 
 #Preview {

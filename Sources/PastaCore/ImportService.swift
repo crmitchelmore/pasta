@@ -69,12 +69,6 @@ public final class ImportService {
 
     // MARK: - Helpers
 
-    func isDuplicate(content: String, timestamp: Date) throws -> Bool {
-        // Check if we already have this exact content using efficient hash lookup
-        let hash = ClipboardEntry.sha256Hex(content)
-        return try database.existsWithHash(hash)
-    }
-
     /// Creates a batcher bound to this service's database.
     func makeBatcher(total: Int, progress: @escaping @Sendable (ImportProgress) -> Void) -> ImportBatcher {
         ImportBatcher(database: database, total: total, progress: progress)

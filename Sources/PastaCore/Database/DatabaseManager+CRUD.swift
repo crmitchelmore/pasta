@@ -208,11 +208,6 @@ extension DatabaseManager {
         }
     }
 
-    /// Fetches an entry by its ID.
-    public func fetchEntry(id: UUID) throws -> ClipboardEntry? {
-        try fetch(id: id)
-    }
-
     /// Fetches all extracted entries for a given parent entry.
     public func fetchExtractedEntries(parentId: UUID) throws -> [ClipboardEntry] {
         try dbWriter.read { db in

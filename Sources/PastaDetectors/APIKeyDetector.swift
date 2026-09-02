@@ -248,18 +248,4 @@ public struct APIKeyDetector {
         
         return false
     }
-    
-    /// Check if the entire text is likely just an API key (vs containing one)
-    public func isEntirelyAPIKey(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let detections = detect(in: trimmed)
-        
-        guard let first = detections.first else { return false }
-        
-        // If the detected key is most of the text, it's entirely an API key
-        let keyLength = first.key.count
-        let textLength = trimmed.count
-        
-        return Double(keyLength) / Double(textLength) > 0.8 && first.confidence >= 0.70
-    }
 }

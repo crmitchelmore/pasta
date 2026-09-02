@@ -25,7 +25,12 @@ struct ExtractedItemsSection: View {
 
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 8)], alignment: .leading, spacing: 8) {
                         ForEach(items) { item in
-                            ExtractedItemRow(item: item)
+                            CopyableValueRow(
+                                type: item.type,
+                                value: item.value,
+                                displayValue: item.displayValue,
+                                style: .compact
+                            )
                         }
                     }
 
@@ -97,55 +102,5 @@ struct ExtractedItemsSection: View {
         let type: ContentType
         let value: String
         let displayValue: String
-    }
-}
-
-private struct ExtractedItemRow: View {
-    let item: PreviewPanelView.ExtractedItem
-    @State private var copied = false
-
-    var body: some View {
-        Button {
-            copyToClipboard()
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: item.type.systemImageName)
-                    .font(.caption)
-                    .foregroundStyle(item.type.tint)
-                    .frame(width: 16)
-
-                Text(item.displayValue)
-                    .font(.system(.caption, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-
-                Spacer(minLength: 4)
-
-                Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .font(.caption2)
-                    .foregroundStyle(copied ? .green : .secondary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(item.type.tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Click to copy: \(item.value)")
-    }
-
-    private func copyToClipboard() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(item.value, forType: .string)
-
-        withAnimation(.easeInOut(duration: 0.2)) {
-            copied = true
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                copied = false
-            }
-        }
     }
 }

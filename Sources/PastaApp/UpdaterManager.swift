@@ -47,37 +47,3 @@ final class UpdaterManager: ObservableObject {
         updaterController.updater
     }
 }
-
-/// SwiftUI view that wraps Sparkle's check for updates action
-struct CheckForUpdatesView: View {
-    @StateObject private var viewModel: CheckForUpdatesViewModel
-    
-    init(updater: SPUUpdater) {
-        _viewModel = StateObject(wrappedValue: CheckForUpdatesViewModel(updater: updater))
-    }
-    
-    var body: some View {
-        Button("Check for Updates…") {
-            viewModel.checkForUpdates()
-        }
-        .disabled(!viewModel.canCheckForUpdates)
-    }
-}
-
-/// View model that observes Sparkle's canCheckForUpdates state
-@MainActor
-final class CheckForUpdatesViewModel: ObservableObject {
-    @Published var canCheckForUpdates = false
-    
-    private let updater: SPUUpdater
-    
-    init(updater: SPUUpdater) {
-        self.updater = updater
-        updater.publisher(for: \.canCheckForUpdates)
-            .assign(to: &$canCheckForUpdates)
-    }
-    
-    func checkForUpdates() {
-        updater.checkForUpdates()
-    }
-}

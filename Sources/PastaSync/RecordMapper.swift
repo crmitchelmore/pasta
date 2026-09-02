@@ -111,9 +111,4 @@ public struct RecordMapper {
     public func contentSize(from record: CKRecord) -> Int {
         record["contentSize"] as? Int ?? 0
     }
-    
-    /// Returns whether the record has an image asset.
-    public func hasImageAsset(_ record: CKRecord) -> Bool {
-        record["imageAsset"] != nil
-    }
 }

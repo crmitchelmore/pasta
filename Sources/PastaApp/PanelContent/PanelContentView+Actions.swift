@@ -33,20 +33,6 @@ extension PanelContentView {
         }
     }
 
-    func deleteSelectedEntry() {
-        guard let selectedEntryID else { return }
-
-        PastaLogger.ui.debug("Deleting entry: \(selectedEntryID.uuidString)")
-        do {
-            let imageStorage = try ImageStorageManager()
-            let deleteService = DeleteService(database: database, imageStorage: imageStorage)
-            _ = try deleteService.delete(id: selectedEntryID)
-            refreshEntries()
-        } catch {
-            PastaLogger.logError(error, logger: PastaLogger.ui, context: "Failed to delete entry")
-        }
-    }
-
     func deleteEntry(_ entry: ClipboardEntry) {
         PastaLogger.ui.debug("Deleting entry: \(entry.id.uuidString)")
         do {

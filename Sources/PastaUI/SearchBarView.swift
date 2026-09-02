@@ -9,7 +9,6 @@ public struct SearchBarView: View {
     @Binding private var showContentTypePicker: Bool
 
     private let resultCount: Int
-    private let suggestions: [SearchSuggestion]
     private let availableContentTypes: [ContentType]
     private let onOpenSettings: () -> Void
     private let searchFocused: FocusState<Bool>.Binding
@@ -21,7 +20,6 @@ public struct SearchBarView: View {
         contentType: Binding<ContentType?>,
         resultCount: Int,
         sourceAppFilter: Binding<String>,
-        suggestions: [SearchSuggestion] = [],
         availableContentTypes: [ContentType] = [],
         showContentTypePicker: Binding<Bool> = .constant(false),
         onOpenSettings: @escaping () -> Void,
@@ -31,7 +29,6 @@ public struct SearchBarView: View {
         _contentType = contentType
         self.resultCount = resultCount
         _sourceAppFilter = sourceAppFilter
-        self.suggestions = suggestions
         self.availableContentTypes = availableContentTypes
         _showContentTypePicker = showContentTypePicker
         self.onOpenSettings = onOpenSettings
@@ -50,10 +47,9 @@ public struct SearchBarView: View {
                     .frame(width: 44)
                 
                 // Search input
-                SearchFieldWithSuggestions(
+                SearchField(
                     text: $query,
                     placeholder: "Search your clipboard history...",
-                    suggestions: suggestions,
                     isFocused: searchFocused,
                     onFocusChange: { focused in
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
@@ -239,35 +235,11 @@ private struct SettingsButton: NSViewRepresentable {
     }
 }
 
-// MARK: - Search Suggestions
+// MARK: - Search Field
 
-public struct SearchSuggestion: Identifiable, Equatable {
-    public let id: String
-    public let text: String
-    public let icon: String
-    public let category: Category
-    
-    public enum Category: String {
-        case recent = "Recent"
-        case content = "Content"
-        case sourceApp = "App"
-        case contentType = "Type"
-    }
-    
-    public init(id: String = UUID().uuidString, text: String, icon: String, category: Category) {
-        self.id = id
-        self.text = text
-        self.icon = icon
-        self.category = category
-    }
-}
-
-// MARK: - Search Field with Suggestions
-
-private struct SearchFieldWithSuggestions: NSViewRepresentable {
+private struct SearchField: NSViewRepresentable {
     @Binding var text: String
     let placeholder: String
-    let suggestions: [SearchSuggestion]
     let isFocused: FocusState<Bool>.Binding?
     let onFocusChange: (Bool) -> Void
 
@@ -307,247 +279,40 @@ private struct SearchFieldWithSuggestions: NSViewRepresentable {
         if isFocused?.wrappedValue == true, nsView.window?.firstResponder != nsView {
             nsView.window?.makeFirstResponder(nsView)
         }
-        
-        // Update suggestions in coordinator
-        context.coordinator.updateSuggestions(suggestions, for: nsView)
     }
 
-    final class Coordinator: NSObject, NSSearchFieldDelegate, NSTableViewDataSource, NSTableViewDelegate {
-        private let parent: SearchFieldWithSuggestions
-        private var suggestionsWindow: NSWindow?
-        private var tableView: NSTableView?
-        private var currentSuggestions: [SearchSuggestion] = []
-        private var filteredSuggestions: [SearchSuggestion] = []
-        private weak var searchField: NSSearchField?
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        private let parent: SearchField
 
-        init(_ parent: SearchFieldWithSuggestions) {
+        init(_ parent: SearchField) {
             self.parent = parent
-        }
-
-        func updateSuggestions(_ suggestions: [SearchSuggestion], for searchField: NSSearchField) {
-            self.searchField = searchField
-            self.currentSuggestions = suggestions
-            filterSuggestions()
-        }
-        
-        private func filterSuggestions() {
-            let query = parent.text.lowercased().trimmingCharacters(in: .whitespaces)
-            if query.isEmpty {
-                // Show recent suggestions when empty
-                filteredSuggestions = currentSuggestions.filter { $0.category == .recent }.prefix(8).map { $0 }
-            } else {
-                // Filter by query
-                filteredSuggestions = currentSuggestions.filter { suggestion in
-                    suggestion.text.lowercased().contains(query)
-                }.prefix(10).map { $0 }
-            }
-            tableView?.reloadData()
-            updateWindowVisibility()
-        }
-        
-        private func updateWindowVisibility() {
-            guard let searchField else { return }
-            
-            if filteredSuggestions.isEmpty {
-                hideSuggestionsWindow()
-                return
-            }
-            
-            if suggestionsWindow == nil {
-                createSuggestionsWindow(for: searchField)
-            }
-            
-            positionSuggestionsWindow(for: searchField)
-            suggestionsWindow?.orderFront(nil)
-        }
-        
-        private func createSuggestionsWindow(for searchField: NSSearchField) {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
-                styleMask: [.borderless],
-                backing: .buffered,
-                defer: true
-            )
-            window.isOpaque = false
-            window.backgroundColor = .clear
-            window.hasShadow = true
-            window.level = .floating
-            
-            // Create table view for suggestions
-            let tableView = NSTableView()
-            tableView.headerView = nil
-            tableView.rowHeight = 32
-            tableView.intercellSpacing = NSSize(width: 0, height: 2)
-            tableView.backgroundColor = .clear
-            tableView.selectionHighlightStyle = .regular
-            tableView.dataSource = self
-            tableView.delegate = self
-            tableView.target = self
-            tableView.doubleAction = #selector(suggestionSelected)
-            
-            let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("suggestion"))
-            column.width = 380
-            tableView.addTableColumn(column)
-            
-            let scrollView = NSScrollView()
-            scrollView.documentView = tableView
-            scrollView.hasVerticalScroller = true
-            scrollView.autohidesScrollers = true
-            scrollView.drawsBackground = false
-            
-            // Container with rounded corners and blur
-            let container = NSVisualEffectView()
-            container.material = .popover
-            container.state = .active
-            container.wantsLayer = true
-            container.layer?.cornerRadius = 10
-            container.layer?.masksToBounds = true
-            
-            scrollView.frame = container.bounds
-            scrollView.autoresizingMask = [.width, .height]
-            container.addSubview(scrollView)
-            
-            window.contentView = container
-            
-            self.suggestionsWindow = window
-            self.tableView = tableView
-        }
-        
-        private func positionSuggestionsWindow(for searchField: NSSearchField) {
-            guard let window = suggestionsWindow,
-                  let parentWindow = searchField.window else { return }
-            
-            let fieldRect = searchField.convert(searchField.bounds, to: nil)
-            let screenRect = parentWindow.convertToScreen(fieldRect)
-            
-            let height = min(CGFloat(filteredSuggestions.count) * 34 + 8, 250)
-            let width = max(searchField.bounds.width, 300)
-            
-            window.setFrame(
-                NSRect(
-                    x: screenRect.minX,
-                    y: screenRect.minY - height - 4,
-                    width: width,
-                    height: height
-                ),
-                display: true
-            )
-        }
-        
-        private func hideSuggestionsWindow() {
-            suggestionsWindow?.orderOut(nil)
-        }
-        
-        @objc private func suggestionSelected() {
-            guard let tableView,
-                  tableView.selectedRow >= 0,
-                  tableView.selectedRow < filteredSuggestions.count else { return }
-            
-            let suggestion = filteredSuggestions[tableView.selectedRow]
-            parent.text = suggestion.text
-            hideSuggestionsWindow()
         }
 
         func controlTextDidBeginEditing(_ obj: Notification) {
             parent.isFocused?.wrappedValue = true
             parent.onFocusChange(true)
-            filterSuggestions()
         }
 
         func controlTextDidChange(_ obj: Notification) {
             guard let field = obj.object as? NSSearchField else { return }
             parent.text = field.stringValue
-            filterSuggestions()
         }
 
         func controlTextDidEndEditing(_ obj: Notification) {
             parent.isFocused?.wrappedValue = false
             parent.onFocusChange(false)
-            // Delay hiding to allow click on suggestion
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                self?.hideSuggestionsWindow()
-            }
         }
         
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            if commandSelector == #selector(NSResponder.moveDown(_:)) {
-                if let tableView, filteredSuggestions.count > 0 {
-                    let newRow = min(tableView.selectedRow + 1, filteredSuggestions.count - 1)
-                    tableView.selectRowIndexes(IndexSet(integer: newRow), byExtendingSelection: false)
-                    tableView.scrollRowToVisible(newRow)
-                }
-                return true
-            }
-            if commandSelector == #selector(NSResponder.moveUp(_:)) {
-                if let tableView, tableView.selectedRow > 0 {
-                    let newRow = tableView.selectedRow - 1
-                    tableView.selectRowIndexes(IndexSet(integer: newRow), byExtendingSelection: false)
-                    tableView.scrollRowToVisible(newRow)
-                }
-                return true
-            }
-            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-                if let tableView, tableView.selectedRow >= 0 {
-                    suggestionSelected()
-                    return true
-                }
-            }
-            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-                hideSuggestionsWindow()
+            // Arrow keys and Escape are swallowed here so the field's text view does not
+            // act on them; the panel's key monitor handles navigation. Return is left to
+            // the search field's default handling.
+            if commandSelector == #selector(NSResponder.moveDown(_:))
+                || commandSelector == #selector(NSResponder.moveUp(_:))
+                || commandSelector == #selector(NSResponder.cancelOperation(_:)) {
                 return true
             }
             return false
-        }
-        
-        // MARK: - NSTableViewDataSource
-        
-        func numberOfRows(in tableView: NSTableView) -> Int {
-            filteredSuggestions.count
-        }
-        
-        // MARK: - NSTableViewDelegate
-        
-        func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-            guard row < filteredSuggestions.count else { return nil }
-            let suggestion = filteredSuggestions[row]
-            
-            let cellView = NSTableCellView()
-            
-            let stack = NSStackView()
-            stack.orientation = .horizontal
-            stack.spacing = 10
-            stack.edgeInsets = NSEdgeInsets(top: 4, left: 12, bottom: 4, right: 12)
-            
-            // Icon
-            let iconView = NSImageView()
-            iconView.image = NSImage(systemSymbolName: suggestion.icon, accessibilityDescription: nil)
-            iconView.contentTintColor = .secondaryLabelColor
-            iconView.setContentHuggingPriority(.required, for: .horizontal)
-            stack.addArrangedSubview(iconView)
-            
-            // Text
-            let textField = NSTextField(labelWithString: suggestion.text)
-            textField.font = .systemFont(ofSize: 13)
-            textField.lineBreakMode = .byTruncatingTail
-            stack.addArrangedSubview(textField)
-            
-            // Category badge
-            let badge = NSTextField(labelWithString: suggestion.category.rawValue)
-            badge.font = .systemFont(ofSize: 10, weight: .medium)
-            badge.textColor = .tertiaryLabelColor
-            badge.setContentHuggingPriority(.required, for: .horizontal)
-            stack.addArrangedSubview(badge)
-            
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            cellView.addSubview(stack)
-            NSLayoutConstraint.activate([
-                stack.leadingAnchor.constraint(equalTo: cellView.leadingAnchor),
-                stack.trailingAnchor.constraint(equalTo: cellView.trailingAnchor),
-                stack.topAnchor.constraint(equalTo: cellView.topAnchor),
-                stack.bottomAnchor.constraint(equalTo: cellView.bottomAnchor)
-            ])
-            
-            return cellView
         }
     }
 }

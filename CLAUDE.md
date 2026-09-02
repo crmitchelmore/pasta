@@ -49,21 +49,25 @@ bd close <id>         # Complete work
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
 
-
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+swift build              # Debug build
+swift test --parallel    # Run all tests
+swift run PastaApp       # Launch the macOS app
 ```
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+- **PastaApp** (`Sources/PastaApp/`) — macOS executable: app delegate, floating panel, hotkeys, settings, Sparkle/Sentry wiring.
+- **PastaCore** (`Sources/PastaCore/`) — platform-neutral models, GRDB database (FTS5 search), clipboard monitoring, import/export, commands.
+- **PastaUI** (`Sources/PastaUI/`) — SwiftUI/AppKit views for the panel: list, search bar, previews, filters, settings tabs.
+- **PastaDetectors** (`Sources/PastaDetectors/`) — content-type detectors (URLs, emails, colours, API keys, code, ...) and their strictness configuration.
+- **PastaSync** (`Sources/PastaSync/`) — CloudKit sync shared by macOS and iOS; see `Sources/PastaSync/README.md`.
+- **PastaIOS** (`PastaIOS/`) — Xcode project for the iOS companion app, built on PastaCore + PastaSync.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- Conventional commits drive auto-release: `feat` → minor, `fix`/`perf` → patch; other types do not release.
+- Privacy is opt-in only: no clipboard content ever leaves the device unless the user enables iCloud sync.
+- Keep `AGENTS.md` and `CLAUDE.md` in sync — the Build/Architecture/Conventions sections must match in both.
