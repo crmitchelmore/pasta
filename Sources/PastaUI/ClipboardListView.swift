@@ -465,11 +465,11 @@ public struct ClipboardListView: View {
                 .foregroundStyle(skipEnabled ? .orange : .secondary)
             
             if skipEnabled {
-                Text("API key capture is disabled in Settings → Security")
+                Text("API key capture is disabled in Settings → Clipboard")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("API keys are being captured. Disable in Settings → Security if needed.")
+                Text("API keys are being captured. Disable in Settings → Clipboard if needed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
