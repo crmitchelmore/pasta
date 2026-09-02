@@ -231,157 +231,177 @@ struct PanelContentView: View {
             .accessibilityLabel(ShortcutHints.footerAccessibilityText())
     }
 
+    // The modifier chain is split in two (chrome vs. observers) with every
+    // multi-line closure hoisted into a named method: one long chain of
+    // closures made the compiler give up type-checking on CI.
     private func applyChrome<V: View>(to view: V) -> some View {
-        view
+        let chrome = view
             .padding(16)
             .frame(minWidth: 600, minHeight: 400)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.regularMaterial)
-            .overlay(alignment: .topTrailing) {
-                if let copyFeedbackMessage {
-                    CopyFeedbackToast(message: copyFeedbackMessage)
-                        .padding(.top, 8)
-                        .padding(.trailing, 8)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-            }
+            .overlay(alignment: .topTrailing) { copyFeedbackOverlay }
             .onAppear(perform: handleOnAppear)
-            .onDisappear {
-                // Reset the content-type filter and close the picker when the
-                // panel hides so each new session starts unfiltered.
-                contentTypeFilter = nil
-                isShowingContentTypePicker = false
-                copyFeedbackTask?.cancel()
-                copyFeedbackTask = nil
-                copyFeedbackMessage = nil
-            }
-            .onReceive(backgroundService.$lastError) { error in
-                if error != nil {
-                    isShowingErrorAlert = true
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .openOnboarding)) { _ in
-                isShowingOnboarding = true
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .applyContentTypeFilter)) { note in
-                let value = note.userInfo?[ApplyContentTypeFilterKey.contentType]
-                let type = value as? ContentType
-                contentTypeFilter = type
-                filterSelection = type.map { .type($0) } ?? .all
-            }
-            .onReceive(backgroundService.$entries) { entries in
-                // The unfiltered bucket is a plain prefix, so refresh it now:
-                // a fresh copy shows immediately instead of after the debounced
-                // full rescan below.
-                preloadedEntriesByType[nil] = Array(entries.prefix(Preload.limit))
-
-                // Keep preload cache warm so type switching is instant
-                schedulePreload(for: entries)
-
-                // Update displayed entries — uses preload cache if available, async filter otherwise
-                triggerSearchUpdate()
-            }
-            .onChange(of: searchQuery) { oldQuery, newQuery in
-                // Debounce search to avoid lag
-                searchDebounceTask?.cancel()
-                let trimmed = newQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-                // Analytics: one event when a search session *starts*, not per
-                // keystroke. The query text is never passed — only whether a
-                // filter was active alongside it.
-                if !trimmed.isEmpty,
-                   oldQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    AnalyticsManager.shared.capture(.searchPerformed(
-                        hasFilter: contentTypeFilter != nil
-                            || urlDomainFilter != nil
-                            || pinnedOnlyFilter
-                            || !sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    ))
-                }
-                if trimmed.isEmpty {
-                    // Empty query - restore filtered view (uses preload cache or async)
-                    triggerSearchUpdate()
-                } else {
-                    // Debounce for typing before background search work
-                    searchDebounceTask = Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 25_000_000) // 25ms debounce
-                        guard !Task.isCancelled else { return }
-                        performSearch(query: trimmed)
-                    }
-                }
-            }
-            .onChange(of: contentTypeFilter) { _, newValue in
-                if newValue != .url {
-                    urlDomainFilter = nil
-                }
-                // Reset "values only" toggle when filter changes
-                showExtractedValuesOnly = false
-                triggerSearchUpdate()
-            }
-            .onChange(of: sourceAppFilter) { _, _ in
-                triggerSearchUpdate()
-            }
-            .onChange(of: urlDomainFilter) { _, _ in
-                triggerSearchUpdate()
-            }
-            .onChange(of: filterSelection) { _, newValue in
-                // Handle source app filter from sidebar selection
-                if case .sourceApp(let app) = newValue {
-                    sourceAppFilter = app
-                    contentTypeFilter = nil
-                    urlDomainFilter = nil
-                    pinnedOnlyFilter = false
-                } else if case .pinned = newValue {
-                    pinnedOnlyFilter = true
-                    sourceAppFilter = ""
-                    contentTypeFilter = nil
-                    urlDomainFilter = nil
-                    triggerSearchUpdate()
-                } else if case .type = newValue {
-                    sourceAppFilter = ""
-                    pinnedOnlyFilter = false
-                } else if case .domain = newValue {
-                    sourceAppFilter = ""
-                    pinnedOnlyFilter = false
-                } else if newValue == .all || newValue == nil {
-                    sourceAppFilter = ""
-                    pinnedOnlyFilter = false
-                    triggerSearchUpdate()
-                }
-            }
-            .onChange(of: displayedEntryIDs) { oldValue, newValue in
-                handleDisplayedEntriesChange(oldValue, newValue)
-            }
-            .onChange(of: selectedEntryID) { _, newValue in
-                if let newValue {
-                    lastSelectedEntryID = newValue
-                }
-            }
-            .onKeyPress { keyPress in
-                handleKeyPress(keyPress)
-            }
-            .onChange(of: searchFocused) { _, newValue in
-                if newValue { listFocused = false }
-            }
-            .onChange(of: listFocused) { _, newValue in
-                if newValue { searchFocused = false }
-            }
-            .sheet(isPresented: $isShowingOnboarding) {
-                OnboardingView { completion in
-                    switch completion {
-                    case .dismissed:
-                        isShowingOnboarding = false
-                    case .completed:
-                        didCompleteOnboarding = true
-                        isShowingOnboarding = false
-                    }
-                }
-            }
+            .onDisappear(perform: handleOnDisappear)
+        return applyObservers(to: chrome)
+            .sheet(isPresented: $isShowingOnboarding) { onboardingSheet }
             .modifier(ChromeAlertModifier(
                 isShowingErrorAlert: $isShowingErrorAlert,
                 lastError: backgroundService.lastError,
                 clearError: { backgroundService.lastError = nil },
                 errorMessage: errorMessage
             ))
+    }
+
+    private func applyObservers<V: View>(to view: V) -> some View {
+        let receiving = view
+            .onReceive(backgroundService.$lastError, perform: handleLastError)
+            .onReceive(NotificationCenter.default.publisher(for: .openOnboarding)) { _ in isShowingOnboarding = true }
+            .onReceive(NotificationCenter.default.publisher(for: .applyContentTypeFilter), perform: handleContentTypeFilterNotification)
+            .onReceive(backgroundService.$entries, perform: handleEntriesUpdate)
+        return applyChangeHandlers(to: receiving)
+    }
+
+    private func applyChangeHandlers<V: View>(to view: V) -> some View {
+        view
+            .onChange(of: searchQuery) { handleSearchQueryChange(from: $0, to: $1) }
+            .onChange(of: contentTypeFilter) { _, newValue in handleContentTypeFilterChange(newValue) }
+            .onChange(of: sourceAppFilter) { _, _ in triggerSearchUpdate() }
+            .onChange(of: urlDomainFilter) { _, _ in triggerSearchUpdate() }
+            .onChange(of: filterSelection) { _, newValue in handleFilterSelectionChange(newValue) }
+            .onChange(of: displayedEntryIDs) { handleDisplayedEntriesChange($0, $1) }
+            .onChange(of: selectedEntryID) { _, newValue in handleSelectedEntryIDChange(newValue) }
+            .onKeyPress { handleKeyPress($0) }
+            .onChange(of: searchFocused) { _, newValue in if newValue { listFocused = false } }
+            .onChange(of: listFocused) { _, newValue in if newValue { searchFocused = false } }
+    }
+
+    @ViewBuilder
+    private var copyFeedbackOverlay: some View {
+        if let copyFeedbackMessage {
+            CopyFeedbackToast(message: copyFeedbackMessage)
+                .padding(.top, 8)
+                .padding(.trailing, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    private var onboardingSheet: some View {
+        OnboardingView { completion in
+            switch completion {
+            case .dismissed:
+                isShowingOnboarding = false
+            case .completed:
+                didCompleteOnboarding = true
+                isShowingOnboarding = false
+            }
+        }
+    }
+
+    private func handleOnDisappear() {
+        // Reset the content-type filter and close the picker when the
+        // panel hides so each new session starts unfiltered.
+        contentTypeFilter = nil
+        isShowingContentTypePicker = false
+        copyFeedbackTask?.cancel()
+        copyFeedbackTask = nil
+        copyFeedbackMessage = nil
+    }
+
+    private func handleLastError(_ error: PastaError?) {
+        if error != nil {
+            isShowingErrorAlert = true
+        }
+    }
+
+    private func handleContentTypeFilterNotification(_ note: Notification) {
+        let value = note.userInfo?[ApplyContentTypeFilterKey.contentType]
+        let type = value as? ContentType
+        contentTypeFilter = type
+        filterSelection = type.map { .type($0) } ?? .all
+    }
+
+    private func handleEntriesUpdate(_ entries: [ClipboardEntry]) {
+        // The unfiltered bucket is a plain prefix, so refresh it now:
+        // a fresh copy shows immediately instead of after the debounced
+        // full rescan below.
+        preloadedEntriesByType[nil] = Array(entries.prefix(Preload.limit))
+
+        // Keep preload cache warm so type switching is instant
+        schedulePreload(for: entries)
+
+        // Update displayed entries — uses preload cache if available, async filter otherwise
+        triggerSearchUpdate()
+    }
+
+    private func handleSearchQueryChange(from oldQuery: String, to newQuery: String) {
+        // Debounce search to avoid lag
+        searchDebounceTask?.cancel()
+        let trimmed = newQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Analytics: one event when a search session *starts*, not per
+        // keystroke. The query text is never passed — only whether a
+        // filter was active alongside it.
+        if !trimmed.isEmpty,
+           oldQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            AnalyticsManager.shared.capture(.searchPerformed(
+                hasFilter: contentTypeFilter != nil
+                    || urlDomainFilter != nil
+                    || pinnedOnlyFilter
+                    || !sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ))
+        }
+        if trimmed.isEmpty {
+            // Empty query - restore filtered view (uses preload cache or async)
+            triggerSearchUpdate()
+        } else {
+            // Debounce for typing before background search work
+            searchDebounceTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 25_000_000) // 25ms debounce
+                guard !Task.isCancelled else { return }
+                performSearch(query: trimmed)
+            }
+        }
+    }
+
+    private func handleContentTypeFilterChange(_ newValue: ContentType?) {
+        if newValue != .url {
+            urlDomainFilter = nil
+        }
+        // Reset "values only" toggle when filter changes
+        showExtractedValuesOnly = false
+        triggerSearchUpdate()
+    }
+
+    private func handleFilterSelectionChange(_ newValue: FilterSelection?) {
+        // Handle source app filter from sidebar selection
+        if case .sourceApp(let app) = newValue {
+            sourceAppFilter = app
+            contentTypeFilter = nil
+            urlDomainFilter = nil
+            pinnedOnlyFilter = false
+        } else if case .pinned = newValue {
+            pinnedOnlyFilter = true
+            sourceAppFilter = ""
+            contentTypeFilter = nil
+            urlDomainFilter = nil
+            triggerSearchUpdate()
+        } else if case .type = newValue {
+            sourceAppFilter = ""
+            pinnedOnlyFilter = false
+        } else if case .domain = newValue {
+            sourceAppFilter = ""
+            pinnedOnlyFilter = false
+        } else if newValue == .all || newValue == nil {
+            sourceAppFilter = ""
+            pinnedOnlyFilter = false
+            triggerSearchUpdate()
+        }
+    }
+
+    private func handleSelectedEntryIDChange(_ newValue: UUID?) {
+        if let newValue {
+            lastSelectedEntryID = newValue
+        }
     }
 
     private func handleOnAppear() {
