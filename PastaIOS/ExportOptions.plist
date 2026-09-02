@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	Export options for PastaIOS App Store Connect / TestFlight builds.
+
+	.github/workflows/release-ios.yml copies this file and, at run time, sets:
+	  - teamID                            from the APPLE_TEAM_ID secret
+	  - provisioningProfiles:com.pasta.ios to the UUID of the profile installed
+	                                      from the IOS_APPSTORE_PROFILE secret
+	  - destination                       "upload" for real releases,
+	                                      "export" for dry runs
+	The checked-in defaults match the Release build settings in
+	PastaIOS.xcodeproj (manual signing, Apple Distribution, profile
+	PastaIOS_AppStore_CloudKit_v2) and export to disk without uploading, so the
+	file is also usable for a local `xcodebuild -exportArchive`.
+	-->
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>destination</key>
+	<string>export</string>
+	<key>teamID</key>
+	<string>8X4ZN58TYH</string>
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>signingCertificate</key>
+	<string>Apple Distribution</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>com.pasta.ios</key>
+		<string>PastaIOS_AppStore_CloudKit_v2</string>
+	</dict>
+	<key>uploadSymbols</key>
+	<true/>
+	<key>stripSwiftSymbols</key>
+	<true/>
+	<!-- CI sets CURRENT_PROJECT_VERSION explicitly; do not let Xcode rewrite it. -->
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
+	<key>testFlightInternalTestingOnly</key>
+	<false/>
+</dict>
+</plist>
