@@ -319,7 +319,7 @@ public struct ColorDetector {
         captureGroup: Int,
         fullGroup: Int
     ) -> [(String, String)] {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
+        guard let regex = RegexMatching.regex(for: pattern) else { return [] }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         let results = regex.matches(in: text, options: [], range: range)
         var out: [(String, String)] = []

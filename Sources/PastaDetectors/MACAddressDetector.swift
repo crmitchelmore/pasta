@@ -63,7 +63,7 @@ public struct MACAddressDetector {
         var out: [Detection] = []
 
         for pattern in patterns {
-            for raw in match(pattern: pattern, in: text) {
+            for raw in RegexMatching.matches(pattern: pattern, in: text) {
                 let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard let normalized = Self.normalize(trimmed) else { continue }
                 guard seen.insert(normalized).inserted else { continue }
@@ -119,25 +119,5 @@ public struct MACAddressDetector {
         if raw.contains(":") { return .colon }
         if raw.contains(".") { return .cisco }
         return .dash
-    }
-
-    private func match(pattern: String, in text: String) -> [String] {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
-        let clamped = text.count > 30_000 ? String(text.prefix(30_000)) : text
-        let range = NSRange(clamped.startIndex..<clamped.endIndex, in: clamped)
-        let matches = regex.matches(in: clamped, options: [], range: range)
-        var out: [String] = []
-        out.reserveCapacity(matches.count)
-        for m in matches {
-            let r: NSRange
-            if m.numberOfRanges > 1, m.range(at: 1).location != NSNotFound {
-                r = m.range(at: 1)
-            } else {
-                r = m.range(at: 0)
-            }
-            guard let valueRange = Range(r, in: clamped) else { continue }
-            out.append(String(clamped[valueRange]))
-        }
-        return out
     }
 }

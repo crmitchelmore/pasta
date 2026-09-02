@@ -49,7 +49,7 @@ public struct IBANDetector {
         var out: [Detection] = []
 
         for pattern in patterns {
-            for raw in match(pattern: pattern, in: text) {
+            for raw in RegexMatching.matches(pattern: pattern, in: text) {
                 let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                 let normalized = trimmed.uppercased().filter { $0.isLetter || $0.isNumber }
                 guard normalized.count >= 15, normalized.count <= 34 else { continue }
@@ -111,25 +111,5 @@ public struct IBANDetector {
             index = next
         }
         return remainder == 1
-    }
-
-    private func match(pattern: String, in text: String) -> [String] {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return [] }
-        let clamped = text.count > 30_000 ? String(text.prefix(30_000)) : text
-        let range = NSRange(clamped.startIndex..<clamped.endIndex, in: clamped)
-        let matches = regex.matches(in: clamped, options: [], range: range)
-        var out: [String] = []
-        out.reserveCapacity(matches.count)
-        for m in matches {
-            let r: NSRange
-            if m.numberOfRanges > 1, m.range(at: 1).location != NSNotFound {
-                r = m.range(at: 1)
-            } else {
-                r = m.range(at: 0)
-            }
-            guard let valueRange = Range(r, in: clamped) else { continue }
-            out.append(String(clamped[valueRange]))
-        }
-        return out
     }
 }

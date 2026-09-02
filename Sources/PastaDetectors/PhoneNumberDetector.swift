@@ -56,7 +56,7 @@ public struct PhoneNumberDetector {
         var candidates: [String] = []
         candidates.reserveCapacity(16)
         for pattern in candidatePatterns {
-            candidates.append(contentsOf: match(pattern: pattern, in: text))
+            candidates.append(contentsOf: RegexMatching.matches(pattern: pattern, in: text))
         }
 
         var seen = Set<String>()
@@ -89,44 +89,6 @@ public struct PhoneNumberDetector {
         return out
     }
 
-    /// Compiled regex cache shared across all PhoneNumberDetector instances.
-    /// Patterns are static literals (built-in) or user-provided "advanced
-    /// patterns"; either way a small set repeats across many calls, so caching
-    /// saves the per-call ICU compilation cost.
-    private static let regexCache: NSCache<NSString, NSRegularExpression> = {
-        let cache = NSCache<NSString, NSRegularExpression>()
-        cache.countLimit = 64
-        return cache
-    }()
-
-    private static func cachedRegex(for pattern: String) -> NSRegularExpression? {
-        let key = pattern as NSString
-        if let cached = regexCache.object(forKey: key) { return cached }
-        guard let compiled = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
-        regexCache.setObject(compiled, forKey: key)
-        return compiled
-    }
-
-    private func match(pattern: String, in text: String) -> [String] {
-        guard let regex = Self.cachedRegex(for: pattern) else { return [] }
-        let clamped = text.count > 30_000 ? String(text.prefix(30_000)) : text
-        let range = NSRange(clamped.startIndex..<clamped.endIndex, in: clamped)
-        let matches = regex.matches(in: clamped, options: [], range: range)
-
-        var out: [String] = []
-        out.reserveCapacity(matches.count)
-        for match in matches {
-            let selectedRange: NSRange
-            if match.numberOfRanges > 1, match.range(at: 1).location != NSNotFound {
-                selectedRange = match.range(at: 1)
-            } else {
-                selectedRange = match.range(at: 0)
-            }
-            guard let valueRange = Range(selectedRange, in: clamped) else { continue }
-            out.append(String(clamped[valueRange]))
-        }
-        return out
-    }
 
     private func normalizedForDedupe(_ value: String) -> String {
         var digits = value.filter(\.isNumber)
