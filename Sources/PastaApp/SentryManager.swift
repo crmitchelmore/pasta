@@ -95,14 +95,4 @@ enum SentryManager {
         SentrySDK.setUser(user)
         #endif
     }
-
-    /// Start a performance transaction span
-    static func startSpan(operation: String, description: String) -> Span? {
-        #if DEBUG
-        return nil
-        #else
-        guard isEnabled else { return nil }
-        return SentrySDK.startTransaction(name: description, operation: operation)
-        #endif
-    }
 }

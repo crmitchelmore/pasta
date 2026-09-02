@@ -28,12 +28,6 @@ public enum AccessibilityPermission {
         #endif
     }
     
-    /// Returns true if both Accessibility and Input Monitoring permissions are granted.
-    /// This is what's needed for full hotkey functionality.
-    public static func hasFullPermissions() -> Bool {
-        return isTrusted() && hasInputMonitoring()
-    }
-
     /// Best-effort: asks the system to show the Accessibility permission prompt.
     public static func requestPrompt() {
         #if os(macOS)

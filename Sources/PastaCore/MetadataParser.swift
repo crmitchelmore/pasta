@@ -215,43 +215,6 @@ public struct MetadataParser {
         return values
     }
     
-    /// Get count of extracted items of a type from metadata
-    public static func countItems(of type: ContentType, in metadata: String?) -> Int {
-        guard let metadata = metadata, let dict = parseJSON(metadata) else { return 0 }
-        
-        switch type {
-        case .email:
-            return (dict["emails"] as? [[String: Any]])?.count ?? 0
-        case .url:
-            return (dict["urls"] as? [[String: Any]])?.count ?? 0
-        case .phoneNumber:
-            return (dict["phoneNumbers"] as? [[String: Any]])?.count ?? 0
-        case .ipAddress:
-            return (dict["ipAddresses"] as? [[String: Any]])?.count ?? 0
-        case .uuid:
-            return (dict["uuids"] as? [[String: Any]])?.count ?? 0
-        case .hash:
-            return (dict["hashes"] as? [[String: Any]])?.count ?? 0
-        case .apiKey:
-            return (dict["apiKeys"] as? [[String: Any]])?.count ?? 0
-        case .jwt:
-            return (dict["jwt"] as? [[String: Any]])?.count ?? 0
-        case .envVar:
-            return ((dict["env"] as? [String: Any])?["vars"] as? [[String: Any]])?.count ?? 0
-        case .envVarBlock:
-            guard let env = dict["env"] as? [String: Any], (env["isBlock"] as? Bool) == true else { return 0 }
-            return (env["vars"] as? [[String: Any]])?.count ?? 0
-        case .filePath:
-            return (dict["filePaths"] as? [[String: Any]])?.count ?? 0
-        case .shellCommand:
-            return (dict["shellCommands"] as? [[String: Any]])?.count ?? 0
-        case .code:
-            return (dict["code"] as? [[String: Any]])?.count ?? 0
-        default:
-            return 0
-        }
-    }
-    
     // MARK: - Private Helpers
     
     private static func parseJSON(_ json: String) -> [String: Any]? {
@@ -391,14 +354,6 @@ public struct MetadataParser {
             guard let name = item["name"] as? String, let value = item["value"] as? String else { return nil }
             let display = "\(name): \(value)"
             return ExtractedValue(type: .text, value: value, displayValue: display)
-        }
-    }
-    
-    private static func extractCodeLanguages(from dict: [String: Any]) -> [ExtractedValue] {
-        guard let items = dict["code"] as? [[String: Any]] else { return [] }
-        return items.compactMap { item in
-            guard let lang = item["language"] as? String else { return nil }
-            return ExtractedValue(type: .code, value: lang, displayValue: lang.uppercased())
         }
     }
 }
