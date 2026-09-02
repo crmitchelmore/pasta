@@ -26,7 +26,7 @@ public struct SettingsView: View {
     }
 
     private enum Layout {
-        static let settingsWidth: CGFloat = 760
+        static let settingsWidth: CGFloat = 680
         static let settingsHeight: CGFloat = 500
     }
 
@@ -134,12 +134,6 @@ public struct SettingsView: View {
                     .tag(SettingsTab.iCloud)
             }
             
-            ImportSettingsTab()
-            .tabItem {
-                Label("Import", systemImage: "square.and.arrow.down")
-            }
-            .tag(SettingsTab.import)
-
             SnippetsSettingsTab()
             .tabItem {
                 Label("Snippets", systemImage: "text.badge.plus")
@@ -154,14 +148,9 @@ public struct SettingsView: View {
                 Label("About", systemImage: "info.circle")
             }
             .tag(SettingsTab.about)
-            
-            TipJarView()
-            .tabItem {
-                Label("Tip Jar", systemImage: "heart.fill")
-            }
-            .tag(SettingsTab.tipJar)
         }
-        // Keep this width in sync with tab count to avoid macOS "Navigation Tab Bar" overflow.
+        // Wide enough for all seven tab items; keep in sync with the tab count so
+        // the macOS tab bar never overflows.
         .frame(width: Layout.settingsWidth, height: Layout.settingsHeight)
         .padding(.top, 8)
         .withAppearance()
@@ -169,7 +158,7 @@ public struct SettingsView: View {
     }
 
     private enum SettingsTab: Hashable {
-        case general, clipboard, detection, storage, iCloud, `import`, snippets, about, tipJar
+        case general, clipboard, detection, storage, iCloud, snippets, about
     }
 }
 

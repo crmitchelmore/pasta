@@ -65,42 +65,7 @@ struct DetectionRulesSettingsTab: View {
 
             Section {
                 ForEach(BuiltInDetectorKind.allCases) { detector in
-                    let rule = configuration.rule(for: detector)
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(detector.title)
-                                .font(.callout.weight(.semibold))
-                            Spacer()
-                            Toggle("Enabled", isOn: enabledBinding(for: detector))
-                                .labelsHidden()
-                            Button("Advanced…") {
-                                openAdvancedEditor(for: detector)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-
-                        Picker("Strictness", selection: strictnessBinding(for: detector)) {
-                            ForEach(DetectorStrictnessOverride.allCases, id: \.self) { value in
-                                Text(value.displayName).tag(value)
-                            }
-                        }
-                        .pickerStyle(.menu)
-
-                        Text("Effective profile: \(effectiveStrictnessSummary(for: detector))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-
-                        if rule.useAdvancedPatterns, !rule.cleanedPatterns.isEmpty {
-                            HStack(spacing: 8) {
-                                Text("Advanced regex active")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                performanceBadge(RegexPerformanceCache.shared.result(patterns: rule.cleanedPatterns))
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
+                    detectorRow(for: detector)
                 }
             } header: {
                 Label("Built-in Detectors", systemImage: "shield.lefthalf.filled")
@@ -108,42 +73,12 @@ struct DetectionRulesSettingsTab: View {
 
             Section {
                 ForEach(configuration.customDetectors) { custom in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text(custom.name)
-                                .font(.callout.weight(.semibold))
-                            Spacer()
-                            Toggle("Enabled", isOn: customEnabledBinding(for: custom.id))
-                                .labelsHidden()
-                            Button("Edit…") {
-                                editingCustomDetector = custom
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            Button(role: .destructive) {
-                                removeCustomDetector(custom.id)
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-
-                        HStack(spacing: 8) {
-                            Text(custom.pattern)
-                                .font(.system(.caption, design: .monospaced))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer()
-                            performanceBadge(
-                                RegexPerformanceCache.shared.result(
-                                    pattern: custom.pattern,
-                                    options: custom.isCaseInsensitive ? [.caseInsensitive] : []
-                                )
-                            )
-                        }
-                    }
-                    .padding(.vertical, 4)
+                    CustomDetectorRow(
+                        detector: custom,
+                        isEnabled: customEnabledBinding(for: custom.id),
+                        onEdit: { editingCustomDetector = custom },
+                        onRemove: { removeCustomDetector(custom.id) }
+                    )
                 }
             } header: {
                 Label("Custom Detectors", systemImage: "wand.and.stars")
@@ -161,7 +96,7 @@ struct DetectionRulesSettingsTab: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         if let newPatternPerformance {
-                            performanceBadge(newPatternPerformance)
+                            RegexPerformanceBadge(result: newPatternPerformance)
                         } else {
                             ProgressView()
                                 .controlSize(.small)
@@ -257,6 +192,17 @@ struct DetectionRulesSettingsTab: View {
         .onChange(of: newCustomCaseInsensitive) { _, _ in
             scheduleNewPatternEvaluation()
         }
+    }
+
+    private func detectorRow(for detector: BuiltInDetectorKind) -> DetectorRuleRow {
+        DetectorRuleRow(
+            detector: detector,
+            rule: configuration.rule(for: detector),
+            effectiveProfile: configuration.effectiveStrictnessSummary(for: detector),
+            isEnabled: enabledBinding(for: detector),
+            strictness: strictnessBinding(for: detector),
+            onAdvanced: { openAdvancedEditor(for: detector) }
+        )
     }
 
     /// Debounced, off-main-thread regex benchmark for the "add detector" field.
@@ -367,7 +313,7 @@ struct DetectionRulesSettingsTab: View {
                             .font(.callout.weight(.semibold))
                     }
                     LabeledContent("Selected profile") {
-                        Text(effectiveStrictnessSummary(for: detector))
+                        Text(configuration.effectiveStrictnessSummary(for: detector))
                             .font(.callout.weight(.semibold))
                     }
 
@@ -415,7 +361,7 @@ struct DetectionRulesSettingsTab: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             if let result = advancedPatternsPerformance {
-                                performanceBadge(result)
+                                RegexPerformanceBadge(result: result)
                             } else {
                                 ProgressView()
                                     .controlSize(.small)
@@ -493,17 +439,6 @@ struct DetectionRulesSettingsTab: View {
 
     private func defaultAdvancedPatterns(for detector: BuiltInDetectorKind, strictness: DetectorStrictness) -> [String] {
         detector.builtInPatterns(for: strictness)
-    }
-
-    private func effectiveStrictnessSummary(for detector: BuiltInDetectorKind) -> String {
-        let rule = configuration.rule(for: detector)
-        let effective = configuration.strictness(for: detector).displayName
-        switch rule.strictnessOverride {
-        case .inherit:
-            return "Inherit (\(configuration.globalStrictness.displayName))"
-        case .lax, .medium, .strict:
-            return effective
-        }
     }
 
     private func addCustomDetector() {
@@ -664,11 +599,107 @@ struct DetectionRulesSettingsTab: View {
             }
         }
     }
+}
 
-    private func performanceBadge(_ result: RegexPerformanceResult) -> some View {
-        let color = performanceColor(for: result.rating)
+// MARK: - Shared Rows
 
-        return Text(result.rating.displayName)
+/// One built-in detector: title, enabled toggle, "Advanced…" button, strictness
+/// picker and the effective-profile caption.
+private struct DetectorRuleRow: View {
+    let detector: BuiltInDetectorKind
+    let rule: DetectorRuleConfig
+    let effectiveProfile: String
+    @Binding var isEnabled: Bool
+    @Binding var strictness: DetectorStrictnessOverride
+    let onAdvanced: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(detector.title)
+                    .font(.callout.weight(.semibold))
+                Spacer()
+                Toggle("Enabled", isOn: $isEnabled)
+                    .labelsHidden()
+                Button("Advanced…", action: onAdvanced)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+
+            Picker("Strictness", selection: $strictness) {
+                ForEach(DetectorStrictnessOverride.allCases, id: \.self) { value in
+                    Text(value.displayName).tag(value)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Text("Effective profile: \(effectiveProfile)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            if rule.useAdvancedPatterns, !rule.cleanedPatterns.isEmpty {
+                HStack(spacing: 8) {
+                    Text("Advanced regex active")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    RegexPerformanceBadge(result: RegexPerformanceCache.shared.result(patterns: rule.cleanedPatterns))
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// One user-defined detector: name, enabled toggle, edit/remove buttons and the
+/// pattern with its performance badge.
+private struct CustomDetectorRow: View {
+    let detector: CustomDetectorDefinition
+    @Binding var isEnabled: Bool
+    let onEdit: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(detector.name)
+                    .font(.callout.weight(.semibold))
+                Spacer()
+                Toggle("Enabled", isOn: $isEnabled)
+                    .labelsHidden()
+                Button("Edit…", action: onEdit)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            HStack(spacing: 8) {
+                Text(detector.pattern)
+                    .font(.system(.caption, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                RegexPerformanceBadge(
+                    result: RegexPerformanceCache.shared.result(
+                        pattern: detector.pattern,
+                        options: detector.isCaseInsensitive ? [.caseInsensitive] : []
+                    )
+                )
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// Capsule showing a regex benchmark rating, coloured green/orange/red.
+private struct RegexPerformanceBadge: View {
+    let result: RegexPerformanceResult
+
+    var body: some View {
+        Text(result.rating.displayName)
             .font(.caption2.weight(.semibold))
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
@@ -676,14 +707,27 @@ struct DetectionRulesSettingsTab: View {
             .foregroundStyle(color)
     }
 
-    private func performanceColor(for rating: RegexPerformanceRating) -> Color {
-        switch rating {
+    private var color: Color {
+        switch result.rating {
         case .fast:
             return .green
         case .reasonable:
             return .orange
         case .slow, .invalid:
             return .red
+        }
+    }
+}
+
+private extension DetectorConfiguration {
+    /// "Inherit (Medium)" when the detector follows the global profile,
+    /// otherwise the override's own name.
+    func effectiveStrictnessSummary(for detector: BuiltInDetectorKind) -> String {
+        switch rule(for: detector).strictnessOverride {
+        case .inherit:
+            return "Inherit (\(globalStrictness.displayName))"
+        case .lax, .medium, .strict:
+            return strictness(for: detector).displayName
         }
     }
 }
