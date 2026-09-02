@@ -34,6 +34,7 @@ struct PanelContentView: View {
     @State var showExtractedValuesOnly: Bool = false
 
     @State var isShowingOnboarding: Bool = false
+    @State var isAccessibilityTrusted: Bool = AccessibilityPermission.isTrusted()
     @State var isShowingErrorAlert: Bool = false
     @State var isShowingContentTypePicker: Bool = false
     @State var copyFeedbackMessage: String? = nil
@@ -123,11 +124,13 @@ struct PanelContentView: View {
                 searchFocused: $searchFocused
             )
 
-            if backgroundService.isLoadingEntries {
-                HistoryLoadingLine(
-                    loadedCount: backgroundService.loadedEntryCount,
-                    totalCount: backgroundService.totalEntryCount
-                )
+            // Once onboarding is done, a missing Accessibility grant is a
+            // one-line banner, not a reason to replay the whole walkthrough.
+            if didCompleteOnboarding && !isAccessibilityTrusted {
+                AccessibilityPermissionBanner {
+                    AccessibilityPermission.requestPrompt()
+                    AccessibilityPermission.openAccessibilitySettings()
+                }
                 .transition(.opacity)
             }
 
@@ -201,6 +204,7 @@ struct PanelContentView: View {
 
                 PreviewPanelView(
                     entry: displayedEntries.first(where: { $0.id == selectedEntryID }),
+                    isListEmpty: backgroundService.entries.isEmpty && !backgroundService.isLoadingEntries,
                     onCopy: { copyEntry($0) }
                 )
                     .frame(width: widths.preview)
@@ -213,7 +217,13 @@ struct PanelContentView: View {
 
     @ViewBuilder
     private var footerView: some View {
-        EmptyView()
+        Text(ShortcutHints.footerText())
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, PastaTheme.Spacing.xs)
+            .accessibilityLabel(ShortcutHints.footerAccessibilityText())
     }
 
     private func applyChrome<V: View>(to view: V) -> some View {
@@ -385,9 +395,10 @@ struct PanelContentView: View {
         DispatchQueue.main.async {
             searchFocused = true
         }
-        isShowingOnboarding = !didCompleteOnboarding || !AccessibilityPermission.isTrusted()
+        isAccessibilityTrusted = AccessibilityPermission.isTrusted()
+        isShowingOnboarding = !didCompleteOnboarding
         if isShowingOnboarding {
-            PastaLogger.ui.debug("Showing onboarding (completed=\(didCompleteOnboarding), accessibilityTrusted=\(AccessibilityPermission.isTrusted()))")
+            PastaLogger.ui.debug("Showing onboarding (completed=\(didCompleteOnboarding), accessibilityTrusted=\(isAccessibilityTrusted))")
         }
     }
 
@@ -600,39 +611,36 @@ private struct CopyFeedbackToast: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.green.opacity(0.92), in: Capsule())
+            .background(PastaTheme.success.opacity(0.92), in: Capsule())
             .shadow(radius: 8, y: 3)
             .accessibilityLabel(message)
     }
 }
 
-private struct HistoryLoadingLine: View {
-    let loadedCount: Int
-    let totalCount: Int?
+/// Compact reminder shown above the list when Accessibility has not been
+/// granted after onboarding. Pasting into other apps needs it; capture does not.
+private struct AccessibilityPermissionBanner: View {
+    let onOpenSettings: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let totalCount, totalCount > 0 {
-                ProgressView(value: Double(min(loadedCount, totalCount)), total: Double(totalCount))
-            } else {
-                ProgressView()
-                    .progressViewStyle(.linear)
-            }
-
-            Text(statusText)
-                .font(.caption2)
+        HStack(spacing: PastaTheme.Spacing.md) {
+            Image(systemName: "hand.raised.fill")
+                .foregroundStyle(.secondary)
+            Text("Grant Accessibility access so Pasta can paste into other apps.")
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+            Spacer(minLength: 0)
+            Button("Open System Settings", action: onOpenSettings)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
         }
-        .padding(.horizontal, 2)
-        .accessibilityLabel(statusText)
-    }
-
-    private var statusText: String {
-        if let totalCount, totalCount > 0 {
-            "Loading clipboard history \(min(loadedCount, totalCount).formatted()) of \(totalCount.formatted())"
-        } else {
-            "Loading clipboard history"
-        }
+        .padding(.horizontal, PastaTheme.Spacing.lg)
+        .padding(.vertical, PastaTheme.Spacing.md)
+        .background(
+            Color.secondary.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: PastaTheme.Radius.medium, style: .continuous)
+        )
+        .accessibilityElement(children: .contain)
     }
 }

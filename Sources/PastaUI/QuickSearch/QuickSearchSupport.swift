@@ -13,7 +13,7 @@ struct CommandRow: View {
             // Command icon
             Image(systemName: command.icon)
                 .font(.title3)
-                .foregroundStyle(command.isDestructive ? .red : .orange)
+                .foregroundStyle(command.isDestructive ? PastaTheme.destructive : PastaTheme.command)
                 .frame(width: 28)
 
             // Command info
@@ -51,7 +51,7 @@ struct CommandRow: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? Color.orange.opacity(0.2) : Color.clear)
+                .fill(isSelected ? PastaTheme.command.opacity(0.2) : Color.clear)
         )
         .contentShape(Rectangle())
     }
@@ -67,9 +67,10 @@ struct QuickSearchSectionHeader: View {
             if title == "Pinned" {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(PastaTheme.pin)
             }
-            Text(title.uppercased())
+            Text(title)
+                .textCase(.uppercase)
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                 .foregroundStyle(.secondary)
                 .tracking(0.5)

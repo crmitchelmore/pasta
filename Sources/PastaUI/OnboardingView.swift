@@ -23,12 +23,14 @@ public struct OnboardingView: View {
     @State private var hasInputMonitoring: Bool = AccessibilityPermission.hasInputMonitoring()
     @State private var pollTimer: Timer? = nil
     @State private var appearAnimation: Bool = false
-    @State private var tipAutoAdvance: Bool = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let onComplete: (Completion) -> Void
     
-    private var hasAllPermissions: Bool {
-        hasAccessibility && hasInputMonitoring
+    /// Accessibility is the only permission pasting depends on; Input
+    /// Monitoring is surfaced as optional and never gates progress.
+    private var hasRequiredPermissions: Bool {
+        hasAccessibility
     }
     
     private let featureTips: [FeatureTip] = [
@@ -41,7 +43,7 @@ public struct OnboardingView: View {
         FeatureTip(
             icon: "rectangle.and.text.magnifyingglass",
             title: "Preview + Quick Actions",
-            description: "Use → to open preview, Return to paste, and ⌘⌫ to delete without leaving the keyboard.",
+            description: "In Quick Search, press → to open the preview, Return to paste, and ⌘⌫ to delete — all without leaving the keyboard.",
             accent: Color(red: 0.35, green: 0.65, blue: 0.95)
         ),
         FeatureTip(
@@ -107,7 +109,7 @@ public struct OnboardingView: View {
             }
         }
         .frame(width: 540, height: 450)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: PastaTheme.Radius.xl, style: .continuous))
         .onAppear {
             withAnimation(.easeOut(duration: 0.5)) {
                 appearAnimation = true
@@ -166,7 +168,7 @@ public struct OnboardingView: View {
         case .welcome: return PastaTheme.accent
         case .features: return featureTips[featureTipIndex].accent
         case .permissions: return Color.orange
-        case .ready: return Color.green
+        case .ready: return PastaTheme.success
         }
     }
     
@@ -248,7 +250,6 @@ public struct OnboardingView: View {
                         .fill(index == featureTipIndex ? featureTips[featureTipIndex].accent : Color.primary.opacity(0.15))
                         .frame(width: index == featureTipIndex ? 8 : 6, height: index == featureTipIndex ? 8 : 6)
                         .onTapGesture {
-                            tipAutoAdvance = false
                             withAnimation(.spring(response: 0.35)) {
                                 featureTipIndex = index
                             }
@@ -260,9 +261,6 @@ public struct OnboardingView: View {
             Spacer()
         }
         .padding(.horizontal, 40)
-        .onAppear {
-            startTipAutoAdvance()
-        }
     }
     
     private func featureCard(tip: FeatureTip) -> some View {
@@ -276,7 +274,8 @@ public struct OnboardingView: View {
                 Image(systemName: tip.icon)
                     .font(.system(size: 32, weight: .medium))
                     .foregroundStyle(tip.accent)
-                    .symbolEffect(.pulse.byLayer, options: .repeating)
+                    // One pulse as the card appears; nothing when Reduce Motion is on.
+                    .symbolEffect(.pulse.byLayer, options: .nonRepeating, isActive: !reduceMotion)
             }
             
             VStack(spacing: 8) {
@@ -295,23 +294,12 @@ public struct OnboardingView: View {
         .padding(.vertical, 32)
         .padding(.horizontal, 24)
         .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: PastaTheme.Radius.xl, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    RoundedRectangle(cornerRadius: PastaTheme.Radius.xl, style: .continuous)
                         .stroke(tip.accent.opacity(0.2), lineWidth: 1)
                 }
-        }
-    }
-    
-    private func startTipAutoAdvance() {
-        guard tipAutoAdvance else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-            guard tipAutoAdvance, step == .features else { return }
-            withAnimation(.spring(response: 0.35)) {
-                featureTipIndex = (featureTipIndex + 1) % featureTips.count
-            }
-            startTipAutoAdvance()
         }
     }
     
@@ -325,7 +313,7 @@ public struct OnboardingView: View {
                 Text("Quick Setup")
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                 
-                Text("Two permissions for the full experience")
+                Text("Accessibility is required to paste. Input Monitoring is optional.")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
             }
@@ -337,13 +325,13 @@ public struct OnboardingView: View {
                     granted: hasAccessibility,
                     action: { 
                         AccessibilityPermission.requestPrompt()
-                        openAccessibilitySettings() 
+                        AccessibilityPermission.openAccessibilitySettings()
                     }
                 )
                 
                 permissionRow(
                     title: "Input Monitoring",
-                    subtitle: "Global hotkey support",
+                    subtitle: "Optional — not needed for the default hotkey",
                     granted: hasInputMonitoring,
                     action: { 
                         AccessibilityPermission.requestInputMonitoring()
@@ -353,17 +341,17 @@ public struct OnboardingView: View {
             }
             .padding(.horizontal, 20)
             
-            if hasAllPermissions {
+            if hasRequiredPermissions {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(PastaTheme.success)
                     Text("All set!")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(PastaTheme.success)
                 }
                 .padding(.vertical, 8)
                 .padding(.horizontal, 16)
-                .background(Color.green.opacity(0.1), in: Capsule())
+                .background(PastaTheme.success.opacity(0.1), in: Capsule())
             } else {
                 Text("Tip: You may need to restart Pasta after granting permissions")
                     .font(.system(size: 11))
@@ -381,12 +369,12 @@ public struct OnboardingView: View {
             // Status indicator
             ZStack {
                 Circle()
-                    .fill(granted ? Color.green.opacity(0.15) : Color.orange.opacity(0.15))
+                    .fill(granted ? PastaTheme.success.opacity(0.15) : Color.orange.opacity(0.15))
                     .frame(width: 40, height: 40)
                 
                 Image(systemName: granted ? "checkmark" : "lock.open")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(granted ? .green : .orange)
+                    .foregroundStyle(granted ? PastaTheme.success : .orange)
             }
             
             VStack(alignment: .leading, spacing: 2) {
@@ -409,11 +397,11 @@ public struct OnboardingView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: PastaTheme.Radius.large, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(granted ? Color.green.opacity(0.3) : Color.primary.opacity(0.08), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: PastaTheme.Radius.large, style: .continuous)
+                        .stroke(granted ? PastaTheme.success.opacity(0.3) : Color.primary.opacity(0.08), lineWidth: 1)
                 }
         }
     }
@@ -428,12 +416,12 @@ public struct OnboardingView: View {
                 // ever pushing the only visible dismissal control off-screen.
                 ZStack {
                     Circle()
-                        .fill(Color.green.opacity(0.1))
+                        .fill(PastaTheme.success.opacity(0.1))
                         .frame(width: 64, height: 64)
 
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 40))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(PastaTheme.success)
                         .symbolEffect(.bounce, value: step == .ready)
                 }
                 
@@ -450,6 +438,7 @@ public struct OnboardingView: View {
                 VStack(spacing: 10) {
                     quickRefRow(keys: "⌃⌘V", action: "Open Pasta")
                     quickRefRow(keys: "↩︎", action: "Paste selected")
+                    quickRefRow(keys: ShortcutHints.pastePlainText.keys, action: "Paste as plain text")
                     quickRefRow(keys: "!", action: "Enter command mode")
                     quickRefRow(keys: "→", action: "Open preview panel")
                     quickRefRow(keys: "⌘1-⌘9", action: "Quick paste by slot")
@@ -458,7 +447,7 @@ public struct OnboardingView: View {
                 }
                 .padding(14)
                 .background {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: PastaTheme.Radius.large, style: .continuous)
                         .fill(.ultraThinMaterial)
                 }
                 .frame(maxWidth: 260)
@@ -517,7 +506,6 @@ public struct OnboardingView: View {
             // Skip (only on features step)
             if step == .features {
                 Button("Skip tips") {
-                    tipAutoAdvance = false
                     withAnimation(.spring(response: 0.35)) {
                         step = .permissions
                     }
@@ -549,7 +537,7 @@ public struct OnboardingView: View {
         switch step {
         case .welcome: return "Get Started"
         case .features: return "Continue"
-        case .permissions: return hasAllPermissions ? "Continue" : "Skip for now"
+        case .permissions: return hasRequiredPermissions ? "Continue" : "Skip for now"
         case .ready: return "Start Using Pasta"
         }
     }
@@ -560,7 +548,6 @@ public struct OnboardingView: View {
             case .welcome:
                 step = .features
             case .features:
-                tipAutoAdvance = false
                 step = .permissions
             case .permissions:
                 step = .ready
@@ -591,12 +578,6 @@ public struct OnboardingView: View {
         pollTimer = nil
     }
 
-    private func openAccessibilitySettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-    
     private func openInputMonitoringSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
             NSWorkspace.shared.open(url)

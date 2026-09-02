@@ -156,7 +156,7 @@ struct ClipboardSettingsTab: View {
 
             Section {
                 Toggle("Show Pinned section at top of Quick Search", isOn: $showPinnedSectionInQuickSearch)
-                Text("When off, Quick Search omits the auto-injected Pinned section. You can still see pinned items by tapping the Pinned filter chip.")
+                Text("Groups pinned items under their own heading above recent history. Pinned items are always available via the Pinned filter chip.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {

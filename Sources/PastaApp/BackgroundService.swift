@@ -18,8 +18,6 @@ final class BackgroundService: ObservableObject {
     
     @Published private(set) var entries: [ClipboardEntry] = []
     @Published private(set) var isLoadingEntries: Bool = false
-    @Published private(set) var loadedEntryCount: Int = 0
-    @Published private(set) var totalEntryCount: Int? = nil
     @Published var lastError: PastaError? = nil
     
     let database: DatabaseManager
@@ -177,8 +175,6 @@ final class BackgroundService: ObservableObject {
         refreshTask?.cancel()
         isLoadingEntries = true
         isHistoryPagingComplete = false
-        loadedEntryCount = entries.isEmpty ? 0 : min(entries.count, limit)
-        totalEntryCount = nil
 
         refreshTask = Task {
             do {
@@ -193,7 +189,6 @@ final class BackgroundService: ObservableObject {
 
                 let total = try await totalTask.value
                 let expectedCount = min(total, limit)
-                totalEntryCount = expectedCount
                 if entries.isEmpty || firstPage.count >= expectedCount {
                     // Initial load, or the first page already holds the whole
                     // (post-change) library — it IS the fresh state. Assigning
@@ -208,7 +203,6 @@ final class BackgroundService: ObservableObject {
                     // replaced once paging completes below.
                     entries = HistoryWindow.merge(head: firstPage, into: entries, limit: limit)
                 }
-                loadedEntryCount = firstPage.count
                 PastaLogger.ui.debug("Loaded initial clipboard history page: \(firstPage.count)/\(expectedCount) items")
 
                 guard firstPage.count < expectedCount else {
@@ -232,11 +226,9 @@ final class BackgroundService: ObservableObject {
                     guard !nextPage.isEmpty else { break }
 
                     allEntries.append(contentsOf: nextPage)
-                    loadedEntryCount = allEntries.count
                 }
 
                 entries = allEntries
-                loadedEntryCount = allEntries.count
                 isHistoryPagingComplete = true
                 isLoadingEntries = false
                 refreshTask = nil
@@ -289,7 +281,6 @@ final class BackgroundService: ObservableObject {
         }.value
 
         entries = merged
-        loadedEntryCount = merged.count
         PastaLogger.ui.debug("Incrementally refreshed entries: \(entries.count) items")
 
         // The head merge only refreshes the top of the list. If the last full
@@ -297,7 +288,7 @@ final class BackgroundService: ObservableObject {
         // it — otherwise the visible history stays truncated, or keeps stale
         // rows that only the wholesale replacement removes. The completion
         // FLAG matters here: the merged array's count can exceed the fresh
-        // totalEntryCount after a delete, so counts cannot tell us whether
+        // database total after a delete, so counts cannot tell us whether
         // the load finished.
         guard !isHistoryPagingComplete else { return }
 

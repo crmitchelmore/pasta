@@ -3,6 +3,7 @@ import ApplicationServices
 #endif
 
 #if os(macOS)
+import AppKit
 import CoreGraphics
 #endif
 
@@ -36,6 +37,16 @@ public enum AccessibilityPermission {
         #endif
     }
     
+    /// Opens System Settings → Privacy & Security → Accessibility so the user
+    /// can grant the permission without hunting for the pane.
+    public static func openAccessibilitySettings() {
+        #if os(macOS)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+        #endif
+    }
+
     /// Request Input Monitoring permission.
     /// Returns true if granted, false otherwise.
     @discardableResult
