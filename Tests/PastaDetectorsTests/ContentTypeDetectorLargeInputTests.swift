@@ -3,8 +3,11 @@ import XCTest
 
 final class ContentTypeDetectorLargeInputTests: XCTestCase {
     /// Detection clamps its analysis input, so a multi-megabyte paste must not
-    /// cost ~15 full-text regex passes. The bound is deliberately generous —
-    /// this is a "did we regress to unbounded scanning" guard, not a benchmark.
+    /// cost ~15 full-text regex passes. The bound is deliberately loose: this
+    /// test runs under `swift test --parallel` load on CI, where a clamped run
+    /// has been observed to take ~1 s. An unclamped regression takes far longer
+    /// than 3 s, so the guard still fires. It is a "did we regress to unbounded
+    /// scanning" check, not a benchmark.
     func testDetectionOfMultiMegabyteInputCompletesQuickly() {
         let detector = ContentTypeDetector()
 
@@ -21,7 +24,7 @@ final class ContentTypeDetectorLargeInputTests: XCTestCase {
         let output = detector.detect(in: text)
         let elapsed = Date().timeIntervalSince(start)
 
-        XCTAssertLessThan(elapsed, 1.0, "Detection took \(elapsed)s — analysis input is probably unclamped again")
+        XCTAssertLessThan(elapsed, 3.0, "Detection took \(elapsed)s — analysis input is probably unclamped again")
         XCTAssertNotEqual(output.primaryType, .unknown)
     }
 
