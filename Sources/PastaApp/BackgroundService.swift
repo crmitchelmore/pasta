@@ -42,6 +42,10 @@ final class BackgroundService: ObservableObject {
     /// replacement), so `entries.count >= total` must not be read as "fully
     /// loaded" or a cancelled reload would never be resumed.
     private var isHistoryPagingComplete = false
+    /// Set by `start()` once the clipboard monitor is polling. Together with
+    /// `isHistoryPagingComplete` this gates the `PASTA_CI` readiness marker.
+    private var isMonitoringStarted = false
+    private var hasSignalledCIReadiness = false
 
     private enum RefreshTuning {
         static let initialDisplayLimit = 200
@@ -137,7 +141,22 @@ final class BackgroundService: ObservableObject {
         clipboardMonitor.start()
         screenshotMonitor.start()
         startPruneTimer()
+        isMonitoringStarted = true
         PastaLogger.app.info("Background clipboard monitoring started")
+        signalCIReadinessIfReady()
+    }
+
+    /// Under `PASTA_CI` the launch smoke test waits for this marker instead of
+    /// merely checking the process is alive. It fires exactly once, when the
+    /// database has answered the initial history load AND the clipboard
+    /// monitor is running — the two things "the app started" actually means.
+    private func signalCIReadinessIfReady() {
+        guard CIReadiness.isEnabled,
+              !hasSignalledCIReadiness,
+              isMonitoringStarted,
+              isHistoryPagingComplete else { return }
+        hasSignalledCIReadiness = true
+        CIReadiness.signal(entryCount: entries.count)
     }
     
     private func setupSync() {
@@ -214,6 +233,7 @@ final class BackgroundService: ObservableObject {
                     isHistoryPagingComplete = true
                     isLoadingEntries = false
                     refreshTask = nil
+                    signalCIReadinessIfReady()
                     return
                 }
 
@@ -238,6 +258,7 @@ final class BackgroundService: ObservableObject {
                 isLoadingEntries = false
                 refreshTask = nil
                 PastaLogger.ui.debug("Refreshed entries incrementally: \(allEntries.count) items")
+                signalCIReadinessIfReady()
             } catch {
                 guard !Task.isCancelled else { return }
                 let wrapped = (error as? PastaError) ?? PastaError.unknown(underlying: error)
