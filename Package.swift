@@ -92,6 +92,14 @@ let package = Package(
         .testTarget(
             name: "PastaUITests",
             dependencies: ["PastaUI", "PastaCore"]
+        ),
+        // Headless full-stack macOS e2e: real service stack (monitor → detectors
+        // → database → search → paste → row/preview derivation) against temp
+        // databases. Cannot depend on the PastaApp executable, so the glue that
+        // BackgroundService performs is mirrored in the fixtures.
+        .testTarget(
+            name: "PastaE2ETests",
+            dependencies: ["PastaCore", "PastaUI", "PastaDetectors", "PastaSync"]
         )
     ]
 )
