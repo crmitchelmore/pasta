@@ -421,7 +421,10 @@ jobs:
     name: Auto Version & Release
     needs: [test, ios-e2e, appcast-contract, landing-changes, landing-e2e]
     if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.result == 'success' && needs.ios-e2e.result == 'success' && needs.appcast-contract.result == 'success' && (needs.landing-e2e.result == 'success' || needs.landing-e2e.result == 'skipped') }}
-    runs-on: macos-15
+    # Pure git + shell (version bump from conventional commits, tag push): no
+    # Xcode needed. Keeping this off macOS spares every release a second wait in
+    # the account-wide macOS runner queue, which can run to an hour or more.
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     
