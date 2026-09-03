@@ -39,17 +39,30 @@ Nothing else is needed. The workflow never reads Apple ID passwords.
 ## How a release happens
 
 1. Merge to `main`. `ci.yml`'s `auto-release` job derives the next semantic
-   version from the conventional-commit messages and pushes a `vX.Y.Z` tag.
+   version from the conventional-commit messages and pushes a `vX.Y.Z` tag —
+   but only if every CI suite on that push was green (macOS tests + launch
+   smoke, iOS XCUITests, appcast contract, landing e2e when it ran). A red
+   suite means no tag and therefore no release of either app.
 2. That tag triggers both `release.yml` (macOS DMG, Sparkle, Homebrew) and
    `release-ios.yml` (TestFlight). The two are independent; an iOS failure does
    not block the macOS release and vice versa.
-3. `release-ios.yml` sets `MARKETING_VERSION` to the tag (`v1.5.0` → `1.5.0`)
+3. `release-ios.yml` first runs the **`preflight`** job: the full XCUITest e2e
+   suite on an iPhone simulator, via `scripts/ci-ios-e2e.sh` — the very same
+   script and steps as `ci.yml`'s `ios-e2e` job, so the two cannot drift. The
+   `testflight` job `needs: preflight`; nothing is archived, let alone
+   uploaded, if the suite fails. Its result bundle and crash logs are attached
+   as the `release-ios-preflight-diagnostics` artifact on failure.
+4. `testflight` then sets `MARKETING_VERSION` to the tag (`v1.5.0` → `1.5.0`)
    and `CURRENT_PROJECT_VERSION` to the build number described below, archives,
    verifies the archive's bundle id / version / build / iCloud container, then
    exports and uploads.
-4. Apple processes the build (5–30 minutes). It appears under the app's
-   TestFlight tab; internal testers get it automatically, external groups need
-   the usual review.
+5. After the upload, `scripts/ci-asc-wait-for-build.sh` polls the App Store
+   Connect API (a JWT minted from the same `APP_STORE_CONNECT_*` secrets) every
+   60 s for up to 20 minutes until the build's `processingState` is `VALID`.
+   `INVALID`/`FAILED` fails the job and prints the build's attributes; a
+   timeout is only a warning (Apple can be slow — check the TestFlight tab).
+   Once `VALID`, the build is under the app's TestFlight tab; internal testers
+   get it automatically, external groups need the usual review.
 
 Runs are serialised (`concurrency: release-ios`) so two tags pushed close
 together cannot race App Store Connect.
@@ -62,10 +75,11 @@ together cannot race App Store Connect.
   reachable from the selected ref.
 - `build_number`: override `CFBundleVersion` (for example to recover after an
   out-of-band upload used a higher number).
-- `upload`: untick for a **dry run**. The workflow still signs and exports the
-  IPA, verifies its signature and embedded profile, and attaches the IPA plus
-  dSYMs as a workflow artifact, but does not talk to App Store Connect, so no
-  build number is consumed. **Do this first** after adding the secrets.
+- `upload`: untick for a **dry run**. The workflow still runs `preflight`,
+  signs and exports the IPA, verifies its signature and embedded profile, and
+  attaches the IPA plus dSYMs as a workflow artifact, but does not talk to App
+  Store Connect (no upload, no processing poll), so no build number is
+  consumed. **Do this first** after adding the secrets.
 
 ## Build numbers
 
@@ -100,6 +114,13 @@ App Store profile must grant both; the workflow checks the archive carries the
 value of the exported IPA (expected `production`).
 
 ## Verifying locally without secrets
+
+The preflight suite runs locally with the same script CI uses. On a Mac that
+can create simulators, `scripts/ci-ios-e2e.sh all` does everything (create and
+boot a simulator, resolve, build-for-testing, test, summarise, clean up); where
+`simctl create` is broken, `scripts/ci-ios-e2e.sh build-for-testing` still
+compiles the app and the UI test bundle against the generic simulator
+destination.
 
 The archive step (the part that compiles the app and resolves the PastaCore /
 PastaSync / PastaDetectors packages from the repo-root `Package.swift`) can be

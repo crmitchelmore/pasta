@@ -107,4 +107,15 @@ swift run PastaApp                   # Launch the macOS app
 
 - Conventional commits drive auto-release: `feat` → minor, `fix`/`perf` → patch; other types do not release.
 - Privacy is opt-in only: no clipboard content ever leaves the device unless the user enables iCloud sync.
-- Keep `AGENTS.md` and `CLAUDE.md` in sync — the Build/Architecture/Conventions sections must match in both.
+- Keep `AGENTS.md` and `CLAUDE.md` in sync — the Build/Architecture/Conventions/Release gates sections must match in both.
+
+## Release gates
+
+The rule is simple: **nothing reaches users unless every e2e suite on every surface is green, and what was published is re-verified from the outside.** Never add a `needs:`/`if:` bypass to these jobs; fix the red suite instead.
+
+1. **A PR merges to `main`** only when `.github/workflows/ci.yml` is green: `test` (macOS `swift test --parallel` incl. `Tests/PastaE2ETests`, ad-hoc-signed bundle + `scripts/ci-launch-smoke.sh` readiness smoke), `ios-e2e` (XCUITests on a simulator via `scripts/ci-ios-e2e.sh`), `appcast-contract` (appcast/Cloudflare contract), and `landing-e2e` (Playwright; path-filtered, so it may be skipped).
+2. **A macOS release is tagged** by ci.yml's `auto-release` only on a push to `main` where `test`, `ios-e2e` and `appcast-contract` succeeded and `landing-e2e` succeeded or was skipped. Any failure or cancellation means no tag, hence no release of either app. **It is published** by `.github/workflows/release.yml` only after the Developer-ID-signed, notarized, stapled DMG's contents pass `codesign --verify --deep --strict` and the same `scripts/ci-launch-smoke.sh` readiness smoke (PASTA_CI_READY marker, clean exit on SIGTERM) — this runs before "Create GitHub Release", so a failure publishes nothing.
+3. **A TestFlight upload** happens in `.github/workflows/release-ios.yml` only after its `preflight` job has run the XCUITest suite (`scripts/ci-ios-e2e.sh`, identical to ci.yml's `ios-e2e`) on the ref being released. After the upload, `scripts/ci-asc-wait-for-build.sh` polls App Store Connect (≤20 min) until the build is `VALID`; `INVALID`/`FAILED` fails the job, a timeout only warns.
+4. **Post-publish verification** (`verify-release` in release.yml, `scripts/ci-verify-release.sh`) treats the live world as the source of truth: fetches `https://pasta-app.com/appcast.xml`, asserts the top item is the tag, that its enclosure is the just-published DMG returning HTTP 200 with a matching `Content-Length`, downloads it, mounts it, runs `stapler validate`, `spctl --assess --type execute`, `codesign --verify --deep --strict`, checks the bundle's version/build/`SUFeedURL`, and re-runs the readiness smoke on a copy. On failure it converts the GitHub release to a **draft** (Sparkle can no longer download it) and fails with a `::error::` telling you what to roll back.
+
+The shared scripts live in `scripts/ci-*.sh` and are the single source of truth — edit them, not the workflow steps. They all run locally: `scripts/ci-launch-smoke.sh <Pasta.app>`, `scripts/ci-ios-e2e.sh build-for-testing` (no simulator needed), `scripts/ci-verify-release.sh <version>` (against the live release).
