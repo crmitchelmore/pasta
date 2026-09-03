@@ -229,7 +229,11 @@ final class PastaIOSUITests: PastaUITestCase {
         let list = element("whatsNew.list")
         XCTAssertTrue(list.waitForExistence(timeout: Self.uiTimeout), "What's New sheet did not appear")
 
-        element("whatsNew.done").tap()
+        // A toolbar Button surfaces its identifier on both the toolbar item and
+        // the button, so narrow to the button type and take the first match.
+        let done = app.buttons["whatsNew.done"].firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: Self.uiTimeout), "Done button missing on What's New")
+        done.tap()
         XCTAssertTrue(waitForDisappearance(of: list), "What's New sheet did not dismiss")
         XCTAssertTrue(element("settings.list").exists)
     }
