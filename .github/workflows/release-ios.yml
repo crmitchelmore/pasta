@@ -313,6 +313,7 @@ jobs:
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS="$(inherited) PASTA_IOS_CLOUDKIT_PROVISIONED" \
             OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
             2>&1 | tee "$BUILD_DIR/archive.log"
 
