@@ -52,10 +52,13 @@ bd close <id>         # Complete work
 ## Build & Test
 
 ```bash
-swift build              # Debug build
-swift test --parallel    # Run all tests
-swift run PastaApp       # Launch the macOS app
+swift build                          # Debug build
+swift test --parallel                # Run all tests (unit suites + PastaE2ETests)
+swift test --filter PastaE2ETests    # Headless full-stack macOS e2e suite only (~2s)
+swift run PastaApp                   # Launch the macOS app
 ```
+
+`Tests/PastaE2ETests` drives the real service stack (fake pasteboard → `ClipboardMonitor` → detectors → on-disk `DatabaseManager` → `SearchService` → `PasteService` → row/preview rendering), plus legacy-schema migration and keyset history loads. It cannot import the `PastaApp` executable, so the glue `BackgroundService` performs is mirrored in `Tests/PastaE2ETests/E2EFixtures.swift` — keep the two in step. CI's launch smoke test runs the built bundle with `PASTA_CI=1` and waits for the `PASTA_CI_READY` marker `BackgroundService` emits (see `Sources/PastaApp/CIReadiness.swift`), then asserts a clean exit on SIGTERM.
 
 ## Architecture Overview
 
