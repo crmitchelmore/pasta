@@ -436,50 +436,26 @@ jobs:
           
           echo "==> ✅ All verifications passed!"
       
-      - name: Launch smoke test (signed binary)
+      # RELEASE GATE: the app inside the signed, notarized, stapled DMG — the
+      # exact bytes users download — must initialise (PASTA_CI_READY marker
+      # from BackgroundService, see Sources/PastaApp/CIReadiness.swift) and quit
+      # cleanly on SIGTERM. Same script as ci.yml's PR smoke test, so a PR-green
+      # build cannot ship a launch regression that only the notarized bundle
+      # exhibits (AMFI, dyld library validation, entitlement/profile mismatch).
+      # Runs BEFORE "Create GitHub Release": a failure here publishes nothing.
+      - name: Launch readiness smoke test (notarized DMG contents)
         run: |
-          set -e
-          echo "==> Smoke test: launching the ACTUAL signed release binary..."
-          echo "    This catches AMFI, dyld, and code signing issues that"
-          echo "    codesign --verify and spctl --assess do NOT detect."
-          
-          # Launch with CloudKit disabled (CI has no iCloud account)
-          PASTA_CI=1 "${APP_DIR}/Contents/MacOS/PastaApp" 2> /tmp/release_launch_error.log &
-          APP_PID=$!
-          
-          # Wait for app to either crash or start
-          sleep 5
-          
-          # Check if still running
-          if kill -0 $APP_PID 2>/dev/null; then
-            echo "✓ App launched successfully and is running (PID $APP_PID)"
-            kill $APP_PID 2>/dev/null || true
-            wait $APP_PID 2>/dev/null || true
-          else
-            EXIT_CODE=0
-            wait $APP_PID 2>/dev/null || EXIT_CODE=$?
-            echo ""
-            echo "============================================================"
-            echo "ERROR: Release binary crashed or failed to launch!"
-            echo "============================================================"
-            echo ""
-            echo "Exit code: $EXIT_CODE"
-            echo ""
-            echo "Stderr:"
-            cat /tmp/release_launch_error.log || true
-            echo ""
-            echo "System log (AMFI/dyld/codesign):"
-            log show --last 30s --predicate 'process == "amfid" OR process == "syspolicyd" OR subsystem == "com.apple.MobileFileIntegrity" OR eventMessage CONTAINS "code signature"' 2>/dev/null | tail -20 || true
-            echo ""
-            echo "Common causes:"
-            echo "  - AMFI SIGKILL: restricted entitlement not in provisioning profile"
-            echo "  - dyld crash: framework signed with app entitlements"
-            echo "  - dyld crash: framework not copied to Contents/Frameworks"
-            echo "  - Code signature invalid: binary modified after signing"
-            exit 1
-          fi
-          
-          echo "==> Release smoke test PASSED!"
+          set -euo pipefail
+          DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
+          MOUNTPOINT="$RUNNER_TEMP/pasta-smoke-mnt"
+          INSTALL_DIR="$RUNNER_TEMP/pasta-smoke-Applications"
+          mkdir -p "$MOUNTPOINT" "$INSTALL_DIR"
+          hdiutil attach "$DMG_FILE" -mountpoint "$MOUNTPOINT" -nobrowse -readonly -noautoopen
+          # Copy out exactly as a user dragging to /Applications would (ditto keeps
+          # the signature and resource forks intact), then release the DMG.
+          ditto "$MOUNTPOINT/${DMG_NAME}.app" "$INSTALL_DIR/${DMG_NAME}.app"
+          hdiutil detach "$MOUNTPOINT"
+          scripts/ci-launch-smoke.sh "$INSTALL_DIR/${DMG_NAME}.app"
       
       # ============================================================================
       # RELEASE
@@ -685,3 +661,43 @@ jobs:
             entitlements.plist
             release_notes.md
           retention-days: 7
+
+  # ============================================================================
+  # POST-PUBLISH VERIFICATION — the "certainty" gate for auto-update users.
+  # ============================================================================
+  # Treats the live world as the source of truth: fetches the appcast Sparkle
+  # clients poll, follows its enclosure to the GitHub release asset, downloads
+  # the DMG, and puts the shipped app through Gatekeeper, codesign and the same
+  # launch-readiness smoke test. If anything fails the GitHub release is flipped
+  # back to DRAFT (asset URLs stop resolving, so Sparkle cannot fetch it) and the
+  # job fails loudly. See scripts/ci-verify-release.sh for the exact checks.
+  verify-release:
+    name: Verify published release (live appcast + DMG)
+    needs: build-and-release
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: write  # gh release edit --draft on failure
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify live appcast, DMG, Gatekeeper, signature and launch
+        id: verify
+        run: scripts/ci-verify-release.sh "${GITHUB_REF_NAME#v}"
+
+      - name: Pull the release back to draft
+        if: failure() && steps.verify.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          echo "==> Post-publish verification FAILED for $TAG; converting the GitHub release to a draft so Sparkle clients cannot download it."
+          if gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft; then
+            echo "::error title=Release $TAG pulled::verify-release failed. The GitHub release $TAG has been converted to a DRAFT (its DMG is no longer downloadable, so auto-update cannot pick it up). The appcast at https://pasta-app.com/appcast.xml still advertises $TAG and the Homebrew cask was already bumped: re-deploy the previous landing-page/appcast.xml (or fix and re-tag) and revert crmitchelmore/homebrew-pasta if the build is bad. See the 'Verify live appcast, DMG, Gatekeeper, signature and launch' step for what failed."
+          else
+            echo "::error title=Release $TAG NOT pulled::verify-release failed AND 'gh release edit --draft' also failed. Manually draft or delete the GitHub release $TAG NOW: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+          fi
+          exit 1

@@ -333,88 +333,16 @@ jobs:
           fi
           echo "✓ rpath OK"
       
+      # Shared with release.yml (pre- and post-publish, on the notarized bundle)
+      # so the smoke test users' builds get is byte-for-byte the one PRs get.
+      # Waits for the PASTA_CI_READY marker (see Sources/PastaApp/CIReadiness.swift),
+      # then SIGTERM must exit 0.
       - name: Launch smoke test
-        run: |
-          set -e
-          APP_DIR="${{ steps.bundle.outputs.APP_DIR }}"
-          READY_FILE="$RUNNER_TEMP/pasta-ci-ready"
-          LAUNCH_LOG=/tmp/launch_error.log
-          rm -f "$READY_FILE" "$LAUNCH_LOG"
+        run: scripts/ci-launch-smoke.sh "${{ steps.bundle.outputs.APP_DIR }}"
 
-          dump_logs() {
-            echo "==> App stderr ($LAUNCH_LOG):"
-            cat "$LAUNCH_LOG" 2>/dev/null || true
-            echo ""
-            echo "==> App os_log (errors, AppKit termination, Sparkle) — last 90s:"
-            log show --last 90s --style compact \
-              --predicate 'process == "PastaApp" AND (messageType == error OR messageType == fault OR subsystem == "com.apple.AppKit" OR subsystem CONTAINS "sparkle" OR subsystem CONTAINS "pasta")' \
-              2>/dev/null | tail -60 || true
-            echo ""
-            echo "==> System log (AMFI/codesign):"
-            log show --last 90s --predicate 'process == "amfid" OR process == "syspolicyd" OR subsystem == "com.apple.MobileFileIntegrity"' 2>/dev/null | tail -20 || true
-          }
-
-          echo "==> Smoke test: launching signed app bundle..."
-
-          # PASTA_CI disables CloudKit init and analytics, makes BackgroundService
-          # emit `PASTA_CI_READY` (stderr + PASTA_CI_READY_FILE) once the database
-          # has answered the initial history load and clipboard monitoring is
-          # running, and routes SIGTERM through NSApplication.terminate.
-          PASTA_CI=1 PASTA_CI_READY_FILE="$READY_FILE" \
-            "$APP_DIR/Contents/MacOS/PastaApp" 2> "$LAUNCH_LOG" &
-          APP_PID=$!
-
-          # 1. Wait (<= 20s) for the app to prove it initialised, not just that it has a PID.
-          READY=0
-          for _ in $(seq 1 40); do
-            if [ -f "$READY_FILE" ] || grep -q "PASTA_CI_READY" "$LAUNCH_LOG" 2>/dev/null; then
-              READY=1
-              break
-            fi
-            if ! kill -0 $APP_PID 2>/dev/null; then
-              break
-            fi
-            sleep 0.5
-          done
-
-          if [ "$READY" != "1" ]; then
-            if kill -0 $APP_PID 2>/dev/null; then
-              echo "ERROR: App is running (PID $APP_PID) but never reported PASTA_CI_READY within 20s."
-              echo "       Database open / initial history load / clipboard monitor start did not complete."
-              kill -KILL $APP_PID 2>/dev/null || true
-              wait $APP_PID 2>/dev/null || true
-            else
-              EXIT_CODE=0
-              wait $APP_PID 2>/dev/null || EXIT_CODE=$?
-              echo "ERROR: App exited before becoming ready (exit code $EXIT_CODE)."
-            fi
-            dump_logs
-            exit 1
-          fi
-          echo "✓ App initialised: $(cat "$READY_FILE" 2>/dev/null || grep PASTA_CI_READY "$LAUNCH_LOG")"
-
-          # 2. Graceful quit must exit 0 — a crash on teardown is a regression too.
-          echo "==> Sending SIGTERM (routed to NSApplication.terminate under PASTA_CI)..."
-          kill -TERM $APP_PID
-          ( sleep 15; kill -KILL $APP_PID 2>/dev/null ) &
-          WATCHDOG_PID=$!
-          EXIT_CODE=0
-          wait $APP_PID || EXIT_CODE=$?
-          kill $WATCHDOG_PID 2>/dev/null || true
-
-          if [ "$EXIT_CODE" != "0" ]; then
-            if [ "$EXIT_CODE" = "137" ]; then
-              echo "ERROR: App did not quit within 15s of SIGTERM (killed by watchdog)."
-            else
-              echo "ERROR: App exited with code $EXIT_CODE on quit (expected 0)."
-            fi
-            dump_logs
-            exit 1
-          fi
-          echo "✓ App quit cleanly (exit 0)"
-
-          echo "==> Smoke test PASSED!"
-
+  # Every step below is a subcommand of scripts/ci-ios-e2e.sh, which
+  # release-ios.yml's `preflight` job runs identically before any TestFlight
+  # upload. Change the script, not the steps, so the two cannot drift.
   ios-e2e:
     name: iOS E2E (XCUITest)
     runs-on: macos-15
@@ -447,168 +375,24 @@ jobs:
             ios-e2e-${{ runner.os }}-
 
       - name: Create iPhone simulator
-        id: sim
-        run: |
-          set -euo pipefail
-          # The XCUITest keyboard needs the software keyboard; a "connected"
-          # hardware keyboard makes typeText fail with no keyboard focus.
-          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
-
-          RUNTIME=$(xcrun simctl list runtimes -j | python3 -c '
-          import json, sys
-          rts = [r for r in json.load(sys.stdin)["runtimes"] if r["platform"] == "iOS" and r["isAvailable"]]
-          rts.sort(key=lambda r: [int(x) for x in r["version"].split(".")])
-          print(rts[-1]["identifier"])')
-          DEVICE_TYPE=$(xcrun simctl list devicetypes -j | python3 -c '
-          import json, sys
-          types = json.load(sys.stdin)["devicetypes"]
-          for wanted in ("iPhone 17", "iPhone 16", "iPhone 16e", "iPhone 15"):
-              for t in types:
-                  if t["name"] == wanted:
-                      print(t["identifier"]); sys.exit(0)
-          print(types[0]["identifier"])')
-          echo "==> Runtime: $RUNTIME"
-          echo "==> Device type: $DEVICE_TYPE"
-          UDID=$(xcrun simctl create "$SIM_NAME" "$DEVICE_TYPE" "$RUNTIME")
-          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
-          xcrun simctl boot "$UDID"
-          xcrun simctl bootstatus "$UDID" -b
-          echo "==> Booted $SIM_NAME ($UDID)"
+        run: scripts/ci-ios-e2e.sh create-simulator
 
       - name: Resolve Swift packages
-        run: |
-          xcodebuild -resolvePackageDependencies \
-            -project "$PROJECT" -scheme "$SCHEME" \
-            -derivedDataPath "$DERIVED_DATA"
+        run: scripts/ci-ios-e2e.sh resolve
 
       - name: Build for testing
-        run: |
-          set -o pipefail
-          xcodebuild build-for-testing \
-            -project "$PROJECT" -scheme "$SCHEME" \
-            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
-            -derivedDataPath "$DERIVED_DATA" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            COMPILER_INDEX_STORE_ENABLE=NO \
-            | tee .build/ios-e2e-build.log | grep -E "^(=== |\*\* |error:|.*error:|.*warning: .*PastaIOS)" || true
-          # tee swallows the exit status through grep; re-check the summary line.
-          grep -q "\*\* TEST BUILD SUCCEEDED \*\*" .build/ios-e2e-build.log
+        run: scripts/ci-ios-e2e.sh build-for-testing
 
       - name: Run XCUITests
-        id: test
-        run: |
-          set -o pipefail
-          mkdir -p "$(dirname "$RESULT_BUNDLE")"
-          xcodebuild test-without-building \
-            -project "$PROJECT" -scheme "$SCHEME" \
-            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -resultBundlePath "$RESULT_BUNDLE" \
-            -test-timeouts-enabled YES -default-test-execution-time-allowance 180 \
-            -retry-tests-on-failure -test-iterations 2 \
-            2>&1 | tee .build/ios-e2e-test.log \
-            | grep -E "Test Case|Test Suite|passed|failed|error|Executed|Restarting|crash" || true
-          grep -q "\*\* TEST EXECUTE SUCCEEDED \*\*" .build/ios-e2e-test.log
+        run: scripts/ci-ios-e2e.sh test
 
       - name: Summarise results
         if: always()
-        run: |
-          set +e
-          mkdir -p "$DIAG_DIR"
-          if [ ! -d "$RESULT_BUNDLE" ]; then
-            echo "No result bundle produced at $RESULT_BUNDLE" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          xcrun xcresulttool get test-results summary --path "$RESULT_BUNDLE" > "$DIAG_DIR/xcresult-summary.json" 2>/dev/null
-          xcrun xcresulttool get test-results tests   --path "$RESULT_BUNDLE" > "$DIAG_DIR/xcresult-tests.json"   2>/dev/null
-          python3 - "$DIAG_DIR/xcresult-summary.json" "$DIAG_DIR/xcresult-tests.json" >> "$GITHUB_STEP_SUMMARY" <<'PY'
-          import json, sys
-
-          def load(path):
-              try:
-                  with open(path) as fh:
-                      return json.load(fh)
-              except Exception as exc:
-                  print(f"(could not read {path}: {exc})")
-                  return {}
-
-          summary, tests = load(sys.argv[1]), load(sys.argv[2])
-          print("## iOS E2E results")
-          result = summary.get("result", "unknown")
-          print(f"- Result: **{result}** — passed {summary.get('passedTests', '?')}, "
-                f"failed {summary.get('failedTests', '?')}, skipped {summary.get('skippedTests', '?')}")
-          for failure in summary.get("testFailures", []):
-              text = (failure.get("failureText") or "").splitlines()
-              first = text[0] if text else ""
-              print(f"- FAILED `{failure.get('testName')}`: {first}")
-          print()
-          print("```")
-
-          def walk(nodes, depth=0):
-              for node in nodes:
-                  kind = node.get("nodeType", "")
-                  if kind in ("Test Case", "Test Suite", "Unit test bundle", "UI test bundle"):
-                      res = node.get("result", "")
-                      print("  " * depth + f"{res:<8} {node.get('name', '')} {node.get('duration', '')}")
-                  walk(node.get("children", []), depth + 1)
-
-          walk(tests.get("testNodes", []))
-          print("```")
-          PY
+        run: scripts/ci-ios-e2e.sh summarise
 
       - name: Collect crash logs and simulator log on failure
         if: failure()
-        run: |
-          set +e
-          mkdir -p "$DIAG_DIR"
-          UDID="${{ steps.sim.outputs.udid }}"
-
-          echo "==> Crash reports (host DiagnosticReports)"
-          for dir in "$HOME/Library/Logs/DiagnosticReports" "/Library/Logs/DiagnosticReports"; do
-            find "$dir" -maxdepth 1 \( -name 'PastaIOS*' -o -name 'PastaIOSUITests*' -o -name 'xctest*' \) \
-              -newer "$PROJECT/project.pbxproj" -exec cp -v {} "$DIAG_DIR/" \; 2>/dev/null
-          done
-          # Simulator-side crash reports live under the device's data directory.
-          if [ -n "$UDID" ]; then
-            SIM_DATA="$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data"
-            for sub in Library/Logs/DiagnosticReports Library/Logs/CrashReporter; do
-              [ -d "$SIM_DATA/$sub" ] && find "$SIM_DATA/$sub" -type f -exec cp -v {} "$DIAG_DIR/" \; 2>/dev/null
-            done
-          fi
-
-          echo "==> Print any crash headers we found"
-          for f in "$DIAG_DIR"/*.ips "$DIAG_DIR"/*.crash; do
-            [ -f "$f" ] || continue
-            echo "----- $f"
-            grep -E '"procName"|"exception"|"termination"|Exception Type|Termination Reason|Crashed:' "$f" | head -20
-          done
-
-          echo "==> Simulator unified log for PastaIOS (last 20 minutes)"
-          if [ -n "$UDID" ]; then
-            xcrun simctl spawn "$UDID" log show --last 20m --style compact \
-              --predicate 'process == "PastaIOS" OR (process == "SpringBoard" AND eventMessage CONTAINS "PastaIOS") OR eventMessage CONTAINS "com.pasta.ios"' \
-              > "$DIAG_DIR/simulator-pastaios.log" 2>&1
-            xcrun simctl spawn "$UDID" log show --last 20m --style compact \
-              --predicate 'eventMessage CONTAINS "crash" OR process == "ReportCrash" OR process == "osanalyticshelper"' \
-              > "$DIAG_DIR/simulator-crash-reporter.log" 2>&1
-            tail -50 "$DIAG_DIR/simulator-pastaios.log"
-          fi
-
-          echo "==> Test failures from the result bundle"
-          python3 - "$DIAG_DIR/xcresult-summary.json" <<'PY'
-          import json, sys
-          try:
-              with open(sys.argv[1]) as fh:
-                  summary = json.load(fh)
-          except Exception:
-              raise SystemExit(0)
-          for failure in summary.get("testFailures", []):
-              print("FAILED", failure.get("testName"))
-              print(failure.get("failureText"))
-              print()
-          PY
-          cp .build/ios-e2e-build.log .build/ios-e2e-test.log "$DIAG_DIR/" 2>/dev/null
-          ls -la "$DIAG_DIR"
+        run: scripts/ci-ios-e2e.sh diagnostics
 
       - name: Upload result bundle and diagnostics
         if: failure()
@@ -623,14 +407,20 @@ jobs:
 
       - name: Shut down simulator
         if: always()
-        run: |
-          xcrun simctl shutdown "${{ steps.sim.outputs.udid }}" 2>/dev/null || true
-          xcrun simctl delete "${{ steps.sim.outputs.udid }}" 2>/dev/null || true
+        run: scripts/ci-ios-e2e.sh cleanup
 
+  # RELEASE GATE. Tagging a release must wait for EVERY suite on every surface:
+  # macOS build+tests+launch smoke, iOS XCUITests, the appcast/Cloudflare
+  # contract, and the landing-page Playwright suite when it ran (it is
+  # path-filtered, so "skipped" is the only other acceptable result). A red,
+  # cancelled or missing result on any of them means no tag, hence no
+  # release.yml / release-ios.yml run. `always()` is needed so this job is
+  # evaluated when landing-e2e was skipped; the explicit result checks below
+  # then decide.
   auto-release:
     name: Auto Version & Release
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, ios-e2e, appcast-contract, landing-changes, landing-e2e]
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.result == 'success' && needs.ios-e2e.result == 'success' && needs.appcast-contract.result == 'success' && (needs.landing-e2e.result == 'success' || needs.landing-e2e.result == 'skipped') }}
     runs-on: macos-15
     permissions:
       contents: write
