@@ -54,7 +54,9 @@ class PastaUITestCase: XCTestCase {
     /// Any element carrying the given accessibility identifier, regardless of
     /// the element type SwiftUI chose for it on this OS version.
     func element(_ identifier: String) -> XCUIElement {
-        app.descendants(matching: .any)[identifier]
+        let buttons = app.buttons.matching(identifier: identifier)
+        if buttons.count > 0 { return buttons.firstMatch }
+        return app.descendants(matching: .any).matching(identifier: identifier).firstMatch
     }
 
     var tabBar: XCUIElement { app.tabBars.firstMatch }
