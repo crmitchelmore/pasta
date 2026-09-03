@@ -19,6 +19,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Preserve the live Sparkle appcast
+        # release.yml regenerates appcast.xml at release time and deploys it, but
+        # never commits it back, so the copy in git is stale. Deploying the repo
+        # directory verbatim would overwrite the live feed and break auto-update
+        # for every installed Mac. Always publish the current live feed instead;
+        # fail loudly rather than ship a broken one.
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 https://pasta-app.com/appcast.xml -o landing-page/appcast.xml
+          grep -q "<item>" landing-page/appcast.xml || { echo "::error::Fetched appcast has no <item>; refusing to deploy"; exit 1; }
+          echo "Preserving live appcast: $(grep -oE '<title>Version [0-9.]+</title>' landing-page/appcast.xml | head -1)"
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
