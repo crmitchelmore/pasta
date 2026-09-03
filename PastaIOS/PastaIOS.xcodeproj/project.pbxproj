@@ -24,7 +24,20 @@
 		A1000020 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000020 /* AppState.swift */; };
 		A1000021 /* TimeGrouper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000021 /* TimeGrouper.swift */; };
 		A1000030 /* ContentType+iOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030 /* ContentType+iOS.swift */; };
+		A1000022 /* UITestConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000022 /* UITestConfiguration.swift */; };
+		B1000001 /* PastaIOSUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000001 /* PastaIOSUITests.swift */; };
+		B1000002 /* PastaUITestCase.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000002 /* PastaUITestCase.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B6000002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A9000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A5000001;
+			remoteInfo = PastaIOS;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		A2000000 /* PastaIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PastaIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -44,6 +57,10 @@
 		A2000020 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		A2000021 /* TimeGrouper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeGrouper.swift; sourceTree = "<group>"; };
 		A2000030 /* ContentType+iOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ContentType+iOS.swift"; sourceTree = "<group>"; };
+		A2000022 /* UITestConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestConfiguration.swift; sourceTree = "<group>"; };
+		B2000000 /* PastaIOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PastaIOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B2000001 /* PastaIOSUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PastaIOSUITests.swift; sourceTree = "<group>"; };
+		B2000002 /* PastaUITestCase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PastaUITestCase.swift; sourceTree = "<group>"; };
 		A2000099 /* Pasta */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = Pasta; path = ..; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -58,6 +75,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B3000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -65,6 +89,7 @@
 			isa = PBXGroup;
 			children = (
 				A4000001 /* PastaIOS */,
+				B4000001 /* PastaIOSUITests */,
 				A4000099 /* Packages */,
 				A4000098 /* Products */,
 			);
@@ -105,14 +130,25 @@
 			children = (
 				A2000020 /* AppState.swift */,
 				A2000021 /* TimeGrouper.swift */,
+				A2000022 /* UITestConfiguration.swift */,
 			);
 			path = Services;
+			sourceTree = "<group>";
+		};
+		B4000001 /* PastaIOSUITests */ = {
+			isa = PBXGroup;
+			children = (
+				B2000001 /* PastaIOSUITests.swift */,
+				B2000002 /* PastaUITestCase.swift */,
+			);
+			path = PastaIOSUITests;
 			sourceTree = "<group>";
 		};
 		A4000098 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				A2000000 /* PastaIOS.app */,
+				B2000000 /* PastaIOSUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -150,6 +186,24 @@
 			productReference = A2000000 /* PastaIOS.app */;
 			productType = "com.apple.product-type.application";
 		};
+		B5000001 /* PastaIOSUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B7000001 /* Build configuration list for PBXNativeTarget "PastaIOSUITests" */;
+			buildPhases = (
+				B6000010 /* Sources */,
+				B3000001 /* Frameworks */,
+				B6000011 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B6000001 /* PBXTargetDependency */,
+			);
+			name = PastaIOSUITests;
+			productName = PastaIOSUITests;
+			productReference = B2000000 /* PastaIOSUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -162,6 +216,10 @@
 				TargetAttributes = {
 					A5000001 = {
 						CreatedOnToolsVersion = 15.4;
+					};
+					B5000001 = {
+						CreatedOnToolsVersion = 15.4;
+						TestTargetID = A5000001;
 					};
 				};
 			};
@@ -182,6 +240,7 @@
 			projectRoot = "";
 			targets = (
 				A5000001 /* PastaIOS */,
+				B5000001 /* PastaIOSUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -192,6 +251,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000003 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B6000011 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -215,10 +281,28 @@
 				A1000017 /* OnboardingView.swift in Sources */,
 				A1000020 /* AppState.swift in Sources */,
 				A1000021 /* TimeGrouper.swift in Sources */,
+				A1000022 /* UITestConfiguration.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B6000010 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B1000001 /* PastaIOSUITests.swift in Sources */,
+				B1000002 /* PastaUITestCase.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B6000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A5000001 /* PastaIOS */;
+			targetProxy = B6000002 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AB000001 /* Debug */ = {
@@ -404,6 +488,50 @@
 			};
 			name = Release;
 		};
+		BB000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8X4ZN58TYH;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pasta.ios.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PastaIOS;
+			};
+			name = Debug;
+		};
+		BB000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8X4ZN58TYH;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.pasta.ios.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PastaIOS;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -421,6 +549,15 @@
 			buildConfigurations = (
 				AB000001 /* Debug */,
 				AB000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B7000001 /* Build configuration list for PBXNativeTarget "PastaIOSUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BB000001 /* Debug */,
+				BB000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

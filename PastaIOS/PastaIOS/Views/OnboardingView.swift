@@ -22,6 +22,7 @@ struct OnboardingView: View {
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .padding(.bottom, 8)
+                .accessibilityIdentifier("onboarding.title")
 
             Text("Your iPhone clipboard companion for Pasta on Mac")
                 .font(.title3)
@@ -87,6 +88,7 @@ struct OnboardingView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .accessibilityIdentifier("onboarding.primaryButton")
 
                 if !isReplay {
                     Text("You can replay this any time from Settings.")
