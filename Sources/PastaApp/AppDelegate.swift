@@ -45,6 +45,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // key is configured; always a no-op under PASTA_CI.
         AnalyticsManager.shared.start()
 
+        // PASTA_CI only: let the smoke test quit us with SIGTERM through the
+        // normal terminate path so it can assert a clean exit code.
+        CIReadiness.installGracefulTerminationHandler()
+
         // Observe settings open notification
         NotificationCenter.default.addObserver(
             self,

@@ -337,34 +337,82 @@ jobs:
         run: |
           set -e
           APP_DIR="${{ steps.bundle.outputs.APP_DIR }}"
-          
-          echo "==> Smoke test: launching signed app bundle..."
-          
-          # PASTA_CI disables CloudKit init (requires real signing)
-          PASTA_CI=1 "$APP_DIR/Contents/MacOS/PastaApp" 2> /tmp/launch_error.log &
-          APP_PID=$!
-          
-          # Wait for app to either crash or start
-          sleep 5
-          
-          # Check if still running
-          if kill -0 $APP_PID 2>/dev/null; then
-            echo "✓ App launched successfully and is running (PID $APP_PID)"
-            kill $APP_PID 2>/dev/null || true
-            wait $APP_PID 2>/dev/null || true
-          else
-            EXIT_CODE=0
-            wait $APP_PID 2>/dev/null || EXIT_CODE=$?
-            echo "ERROR: App crashed or failed to launch!"
-            echo "==> Exit code: $EXIT_CODE"
-            echo "==> Error log:"
-            cat /tmp/launch_error.log || true
+          READY_FILE="$RUNNER_TEMP/pasta-ci-ready"
+          LAUNCH_LOG=/tmp/launch_error.log
+          rm -f "$READY_FILE" "$LAUNCH_LOG"
+
+          dump_logs() {
+            echo "==> App stderr ($LAUNCH_LOG):"
+            cat "$LAUNCH_LOG" 2>/dev/null || true
+            echo ""
+            echo "==> App os_log (errors, AppKit termination, Sparkle) — last 90s:"
+            log show --last 90s --style compact \
+              --predicate 'process == "PastaApp" AND (messageType == error OR messageType == fault OR subsystem == "com.apple.AppKit" OR subsystem CONTAINS "sparkle" OR subsystem CONTAINS "pasta")' \
+              2>/dev/null | tail -60 || true
             echo ""
             echo "==> System log (AMFI/codesign):"
-            log show --last 30s --predicate 'process == "amfid" OR process == "syspolicyd" OR subsystem == "com.apple.MobileFileIntegrity"' 2>/dev/null | tail -20 || true
+            log show --last 90s --predicate 'process == "amfid" OR process == "syspolicyd" OR subsystem == "com.apple.MobileFileIntegrity"' 2>/dev/null | tail -20 || true
+          }
+
+          echo "==> Smoke test: launching signed app bundle..."
+
+          # PASTA_CI disables CloudKit init and analytics, makes BackgroundService
+          # emit `PASTA_CI_READY` (stderr + PASTA_CI_READY_FILE) once the database
+          # has answered the initial history load and clipboard monitoring is
+          # running, and routes SIGTERM through NSApplication.terminate.
+          PASTA_CI=1 PASTA_CI_READY_FILE="$READY_FILE" \
+            "$APP_DIR/Contents/MacOS/PastaApp" 2> "$LAUNCH_LOG" &
+          APP_PID=$!
+
+          # 1. Wait (<= 20s) for the app to prove it initialised, not just that it has a PID.
+          READY=0
+          for _ in $(seq 1 40); do
+            if [ -f "$READY_FILE" ] || grep -q "PASTA_CI_READY" "$LAUNCH_LOG" 2>/dev/null; then
+              READY=1
+              break
+            fi
+            if ! kill -0 $APP_PID 2>/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+
+          if [ "$READY" != "1" ]; then
+            if kill -0 $APP_PID 2>/dev/null; then
+              echo "ERROR: App is running (PID $APP_PID) but never reported PASTA_CI_READY within 20s."
+              echo "       Database open / initial history load / clipboard monitor start did not complete."
+              kill -KILL $APP_PID 2>/dev/null || true
+              wait $APP_PID 2>/dev/null || true
+            else
+              EXIT_CODE=0
+              wait $APP_PID 2>/dev/null || EXIT_CODE=$?
+              echo "ERROR: App exited before becoming ready (exit code $EXIT_CODE)."
+            fi
+            dump_logs
             exit 1
           fi
-          
+          echo "✓ App initialised: $(cat "$READY_FILE" 2>/dev/null || grep PASTA_CI_READY "$LAUNCH_LOG")"
+
+          # 2. Graceful quit must exit 0 — a crash on teardown is a regression too.
+          echo "==> Sending SIGTERM (routed to NSApplication.terminate under PASTA_CI)..."
+          kill -TERM $APP_PID
+          ( sleep 15; kill -KILL $APP_PID 2>/dev/null ) &
+          WATCHDOG_PID=$!
+          EXIT_CODE=0
+          wait $APP_PID || EXIT_CODE=$?
+          kill $WATCHDOG_PID 2>/dev/null || true
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            if [ "$EXIT_CODE" = "137" ]; then
+              echo "ERROR: App did not quit within 15s of SIGTERM (killed by watchdog)."
+            else
+              echo "ERROR: App exited with code $EXIT_CODE on quit (expected 0)."
+            fi
+            dump_logs
+            exit 1
+          fi
+          echo "✓ App quit cleanly (exit 0)"
+
           echo "==> Smoke test PASSED!"
 
   auto-release:
