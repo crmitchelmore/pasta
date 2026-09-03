@@ -58,10 +58,81 @@ env:
   EXPORT_PATH: build/export
 
 jobs:
+  # ============================================================================
+  # RELEASE GATE: the XCUITest e2e suite must pass on the exact ref being
+  # released before anything is archived or uploaded. Every step is a
+  # subcommand of scripts/ci-ios-e2e.sh — the same script ci.yml's `ios-e2e`
+  # job runs on every PR — so the two cannot drift.
+  # ============================================================================
+  preflight:
+    name: Preflight — iOS E2E (XCUITest)
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      DERIVED_DATA: .build/ios-derived
+      RESULT_BUNDLE: .build/ios-e2e/PastaIOSUITests.xcresult
+      DIAG_DIR: .build/ios-e2e/diagnostics
+      SIM_NAME: PastaCI iPhone
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Cache SwiftPM checkouts and build intermediates
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/ios-derived/SourcePackages
+            .build/ios-derived/Build/Intermediates.noindex
+          key: ios-e2e-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift', 'PastaIOS/PastaIOS.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ios-e2e-${{ runner.os }}-
+
+      - name: Create iPhone simulator
+        run: scripts/ci-ios-e2e.sh create-simulator
+
+      - name: Resolve Swift packages
+        run: scripts/ci-ios-e2e.sh resolve
+
+      - name: Build for testing
+        run: scripts/ci-ios-e2e.sh build-for-testing
+
+      - name: Run XCUITests
+        run: scripts/ci-ios-e2e.sh test
+
+      - name: Summarise results
+        if: always()
+        run: scripts/ci-ios-e2e.sh summarise
+
+      - name: Collect crash logs and simulator log on failure
+        if: failure()
+        run: scripts/ci-ios-e2e.sh diagnostics
+
+      - name: Upload result bundle and diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ios-preflight-diagnostics
+          path: |
+            .build/ios-e2e/PastaIOSUITests.xcresult
+            .build/ios-e2e/diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Shut down simulator
+        if: always()
+        run: scripts/ci-ios-e2e.sh cleanup
+
   testflight:
     name: Archive, Export & Upload to TestFlight
+    needs: preflight
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       # ==========================================================================
@@ -388,6 +459,22 @@ jobs:
             echo "==> Dry run: exported IPA(s):"
             ls -la "$EXPORT_PATH"
           fi
+
+      # The upload returning is not the same as Apple accepting the build:
+      # processing can still end INVALID/FAILED. Poll the App Store Connect API
+      # (JWT minted from the same APP_STORE_CONNECT_* secrets) until the build
+      # is VALID; a rejection fails the job with the build's attributes, a
+      # 20-minute timeout is only a warning. See scripts/ci-asc-wait-for-build.sh.
+      - name: Wait for App Store Connect processing
+        if: steps.upload.outputs.enabled == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          ASC_TIMEOUT_MINUTES: 20
+          ASC_POLL_SECONDS: 60
+        run: scripts/ci-asc-wait-for-build.sh "$VERSION" "$BUILD_NUMBER"
 
       - name: Verify exported IPA (dry run)
         if: steps.upload.outputs.enabled != 'true'
