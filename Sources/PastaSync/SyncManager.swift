@@ -3,21 +3,6 @@ import Foundation
 import os.log
 import PastaCore
 import Security
-#if canImport(Darwin)
-import Darwin
-#endif
-
-#if os(iOS)
-@_silgen_name("SecTaskCreateFromSelf")
-private func PastaSecTaskCreateFromSelf(_ allocator: CFAllocator?) -> CFTypeRef?
-
-@_silgen_name("SecTaskCopyValueForEntitlement")
-private func PastaSecTaskCopyValueForEntitlement(
-    _ task: CFTypeRef,
-    _ entitlement: CFString,
-    _ error: UnsafeMutablePointer<Unmanaged<CFError>?>?
-) -> CFTypeRef?
-#endif
 
 /// Orchestrates CloudKit sync for clipboard entries.
 /// Used by both macOS (push) and iOS (pull + push responses).
@@ -90,23 +75,20 @@ public final class SyncManager: ObservableObject {
     
     /// Checks whether the running binary has the icloud-services entitlement.
     private static func hasCloudKitEntitlement() -> Bool {
-        #if os(iOS)
-        guard let task = PastaSecTaskCreateFromSelf(nil) else { return false }
-        let value = PastaSecTaskCopyValueForEntitlement(
-            task,
-            "com.apple.developer.icloud-services" as CFString,
-            nil
-        )
-        #else
+        #if os(macOS)
         guard let task = SecTaskCreateFromSelf(nil) else { return false }
         let value = SecTaskCopyValueForEntitlement(
             task,
             "com.apple.developer.icloud-services" as CFString,
             nil
         )
-        #endif
         guard let services = value as? [String] else { return false }
         return services.contains("CloudKit")
+        #else
+        // iOS does not expose a public runtime entitlement API. The app target
+        // must opt in explicitly after its signed archive has been validated.
+        return false
+        #endif
     }
     
     // MARK: - Zone Setup
