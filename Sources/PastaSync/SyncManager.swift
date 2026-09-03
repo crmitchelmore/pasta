@@ -85,12 +85,14 @@ public final class SyncManager: ObservableObject {
         guard let services = value as? [String] else { return false }
         return services.contains("CloudKit")
         #else
-        // iOS has no public runtime entitlement API and App Store validation
-        // rejects the private SecTask symbols (#85). Read the granted
-        // entitlements from the embedded provisioning profile instead; simulator
-        // and unsigned builds have none and run with sync unavailable rather
-        // than trapping in CKContainer(identifier:) at launch (#84, pasta-uoh).
-        return ProvisioningProfileEntitlements.grantsCloudKit(containerIdentifier: nil)
+        // App Store builds may not retain a readable embedded provisioning
+        // profile after installation. The release lane defines this flag only
+        // after validating the profile and signed archive grant our container.
+        #if PASTA_IOS_CLOUDKIT_PROVISIONED
+        return true
+        #else
+        return false
+        #endif
         #endif
     }
     
