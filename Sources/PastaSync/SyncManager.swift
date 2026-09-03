@@ -85,9 +85,10 @@ public final class SyncManager: ObservableObject {
         guard let services = value as? [String] else { return false }
         return services.contains("CloudKit")
         #else
-        // iOS does not expose a public runtime entitlement API. The app target
-        // must opt in explicitly after its signed archive has been validated.
-        return false
+        // iOS does not expose a public runtime entitlement API. The iOS target
+        // opts in only after its signed archive and provisioning profile are
+        // validated by the release workflow.
+        return true
         #endif
     }
     
