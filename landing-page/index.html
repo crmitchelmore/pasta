@@ -33,6 +33,7 @@
       --color-accent-glow: rgba(59, 130, 246, 0.25);
       --color-secondary: #10b981;
       --color-tertiary: #8b5cf6;
+      --color-code: var(--color-tertiary);
       --color-border: rgba(255, 255, 255, 0.06);
       --font-display: 'Satoshi', -apple-system, sans-serif;
       --font-body: 'General Sans', -apple-system, sans-serif;
@@ -997,7 +998,7 @@
     }
     .highlight__body code {
       background: rgba(139, 92, 246, 0.15);
-      color: var(--color-tertiary);
+      color: var(--color-code);
       padding: 0.1em 0.4em;
       border-radius: 4px;
       font-family: 'SF Mono', 'Menlo', monospace;
@@ -1153,6 +1154,8 @@
       --color-accent-glow: transparent;
       --color-secondary: var(--basil);
       --color-tertiary: var(--yolk);
+      /* Inline code chips sit on a pale purple tint; the yolk accent is only 1.7:1 there. */
+      --color-code: #8a4f00;
       --color-border: var(--line);
       --font-display: 'Zodiak', Georgia, serif;
       --font-body: 'General Sans', -apple-system, sans-serif;

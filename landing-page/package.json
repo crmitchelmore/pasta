@@ -1,0 +1,25 @@
+{
+  "name": "pasta-landing-page",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Static landing page for pasta-app.com plus its e2e / contract test suite",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "serve": "node tests/support/static-server.mjs",
+    "test": "npm run test:contract && npm run test:e2e",
+    "test:contract": "node --test tests/contract/*.test.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:live": "node --test tests/live/*.test.mjs",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.62.1",
+    "@types/node": "26.4.1",
+    "fast-xml-parser": "5.11.1"
+  }
+}
