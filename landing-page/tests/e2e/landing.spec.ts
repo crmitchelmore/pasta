@@ -197,6 +197,12 @@ test.describe('accessibility', () => {
   });
 
   test('axe-core: no WCAG 2.0/2.1 A or AA violations', async ({ page }) => {
+    // The scroll-reveal `.fade-in` elements start at opacity 0 and fade in over
+    // 0.45s, so axe's color-contrast check can sample them mid-transition on a
+    // slow runner. The page honours prefers-reduced-motion by rendering them
+    // fully opaque with no transition; emulate it so the audit measures the
+    // real final colours deterministically.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/', { waitUntil: 'load' });
 
     const results = await new AxeBuilder({ page })
