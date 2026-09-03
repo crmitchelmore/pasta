@@ -5,7 +5,7 @@
 # handed between steps through $GITHUB_ENV when running under Actions and
 # through $STATE_DIR/sim-udid otherwise.
 #
-# Usage: scripts/ci-ios-e2e.sh <create-simulator|resolve|build-for-testing|test|summarise|diagnostics|cleanup|all>
+# Usage: scripts/ci-ios-e2e.sh <create-simulator|resolve|verify-release-settings|build-for-testing|test|summarise|diagnostics|cleanup|all>
 #
 # Environment (defaults match ci.yml):
 #   PROJECT        PastaIOS/PastaIOS.xcodeproj
@@ -87,7 +87,38 @@ cmd_resolve() {
     -derivedDataPath "$DERIVED_DATA"
 }
 
+# The Release configuration must carry PASTA_IOS_CLOUDKIT_PROVISIONED, the
+# compile-time gate that lets SyncManager touch CloudKit (see
+# Sources/PastaSync/SyncManager.swift). It has to live in the app target's
+# Release build settings: passing it on the xcodebuild command line applies to
+# every target and replaces the SWIFT_PACKAGE define GRDB needs to import its
+# SQLite shim, which is exactly how the v1.5.9 TestFlight archive failed.
+# Without the flag a TestFlight build ships with iCloud sync silently disabled.
+cmd_verify_release_settings() {
+  echo "==> Verifying Release build settings for $SCHEME"
+  local settings conds
+  if ! settings="$(xcodebuild -showBuildSettings \
+      -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+      -destination 'generic/platform=iOS' 2>&1)"; then
+    echo "::error::xcodebuild -showBuildSettings failed for $SCHEME (Release); cannot prove the CloudKit compile flag is set."
+    printf '%s\n' "$settings" | tail -20
+    return 1
+  fi
+  conds="$(printf '%s\n' "$settings" \
+    | awk -F' = ' '/^ *SWIFT_ACTIVE_COMPILATION_CONDITIONS = /{print $2; exit}')"
+  case " $conds " in
+    *" PASTA_IOS_CLOUDKIT_PROVISIONED "*)
+      echo "    Release SWIFT_ACTIVE_COMPILATION_CONDITIONS = $conds"
+      ;;
+    *)
+      echo "::error::Release configuration of $SCHEME lacks PASTA_IOS_CLOUDKIT_PROVISIONED (got '${conds:-<unset>}'); a TestFlight build would ship with CloudKit sync disabled. Set it in the app target's Release build settings in $PROJECT, not on the xcodebuild command line."
+      return 1
+      ;;
+  esac
+}
+
 cmd_build_for_testing() {
+  cmd_verify_release_settings
   echo "==> Destination: $(destination)"
   set +e
   xcodebuild build-for-testing \
@@ -235,6 +266,7 @@ cmd_cleanup() {
 case "${1:-}" in
   create-simulator) cmd_create_simulator ;;
   resolve)          cmd_resolve ;;
+  verify-release-settings) cmd_verify_release_settings ;;
   build-for-testing) cmd_build_for_testing ;;
   test)             cmd_test ;;
   summarise)        cmd_summarise ;;
@@ -252,7 +284,7 @@ case "${1:-}" in
     exit "$STATUS"
     ;;
   *)
-    echo "usage: $0 <create-simulator|resolve|build-for-testing|test|summarise|diagnostics|cleanup|all>" >&2
+    echo "usage: $0 <create-simulator|resolve|verify-release-settings|build-for-testing|test|summarise|diagnostics|cleanup|all>" >&2
     exit 2
     ;;
 esac

@@ -368,12 +368,17 @@ jobs:
           set -euo pipefail
           echo "==> Archiving $SCHEME $VERSION ($BUILD_NUMBER) signed with project profile $PROFILE_NAME"
           # Archive SIGNED so CODE_SIGN_ENTITLEMENTS (iCloud, push) are baked in.
-          # Do NOT pass PROVISIONING_PROFILE_SPECIFIER on the command line: it
-          # would apply to every target, including SwiftPM package targets such
-          # as GRDB_GRDB, which reject provisioning profiles. The project's
-          # Release configuration sets Manual / Apple Distribution and the profile
-          # name "PastaIOS AppStore CI" on the app target only, so the profile
-          # installed from IOS_APPSTORE_PROFILE must carry exactly that name.
+          # Do NOT pass target-specific settings on the command line: a CLI
+          # override applies to every target, including SwiftPM package targets.
+          #   - PROVISIONING_PROFILE_SPECIFIER would hit GRDB_GRDB, which rejects
+          #     provisioning profiles.
+          #   - SWIFT_ACTIVE_COMPILATION_CONDITIONS would replace the SWIFT_PACKAGE
+          #     define GRDB needs to import its SQLite shim (v1.5.9 failed with
+          #     "cannot find '_registerErrorLogCallback' in scope").
+          # The project's Release configuration owns Manual / Apple Distribution,
+          # the "PastaIOS AppStore CI" profile name and the
+          # PASTA_IOS_CLOUDKIT_PROVISIONED compile flag on the app target only;
+          # scripts/ci-ios-e2e.sh asserts the flag is present before any upload.
           xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -384,7 +389,6 @@ jobs:
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-            SWIFT_ACTIVE_COMPILATION_CONDITIONS="$(inherited) PASTA_IOS_CLOUDKIT_PROVISIONED" \
             OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
             2>&1 | tee "$BUILD_DIR/archive.log"
 
