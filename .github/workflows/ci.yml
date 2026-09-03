@@ -5,8 +5,148 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Manual runs exist for the landing page jobs below (e.g. to re-run the
+  # advisory live probe after a release). Note that a manual run also executes
+  # the macOS "Build & Test" job.
+  workflow_dispatch:
 
 jobs:
+  # ============================================================================
+  # LANDING PAGE / UPDATE SURFACE (cheap ubuntu jobs; see landing-page/README.md)
+  # ============================================================================
+
+  # Runs on EVERY push/PR: releases rewrite appcast.xml, and a malformed feed
+  # silently breaks Sparkle auto-updates for every installed copy of the app.
+  appcast-contract:
+    name: Appcast & Cloudflare config contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code (with tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: landing-page/package-lock.json
+
+      - name: Install dependencies
+        working-directory: landing-page
+        run: npm ci
+
+      - name: Contract checks (appcast.xml, _redirects, _headers)
+        working-directory: landing-page
+        run: npm run test:contract
+
+  # Detect whether the landing page surface changed so the browser suite only
+  # runs when it can possibly be affected.
+  landing-changes:
+    name: Detect landing page changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      landing: ${{ steps.filter.outputs.landing }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Filter paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            landing:
+              - 'landing-page/**'
+              - 'scripts/generate-appcast.sh'
+              - '.github/workflows/ci.yml'
+
+  landing-e2e:
+    name: Landing page e2e (Playwright)
+    needs: landing-changes
+    if: github.event_name == 'workflow_dispatch' || needs.landing-changes.outputs.landing == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: landing-page/package-lock.json
+
+      - name: Install dependencies
+        working-directory: landing-page
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: landing-page
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright smoke suite
+        working-directory: landing-page
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            landing-page/playwright-report/
+            landing-page/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ADVISORY: probes the live site (pasta-app.com, GitHub release assets).
+  # continue-on-error keeps a CDN/GitHub hiccup from ever blocking a merge; a red
+  # run here is a prompt to look, not a broken build. Main pushes + manual only.
+  landing-live-probe:
+    name: Landing page live probe (advisory)
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code (with tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: landing-page/package-lock.json
+
+      - name: Install dependencies
+        working-directory: landing-page
+        run: npm ci
+
+      - name: Probe https://pasta-app.com
+        working-directory: landing-page
+        run: npm run test:live
+
+  # ============================================================================
+  # MACOS APP
+  # ============================================================================
+
   test:
     name: Build & Test
     runs-on: macos-15
