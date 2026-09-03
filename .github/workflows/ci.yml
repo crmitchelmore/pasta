@@ -415,6 +415,218 @@ jobs:
 
           echo "==> Smoke test PASSED!"
 
+  ios-e2e:
+    name: iOS E2E (XCUITest)
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      PROJECT: PastaIOS/PastaIOS.xcodeproj
+      SCHEME: PastaIOS
+      DERIVED_DATA: .build/ios-derived
+      RESULT_BUNDLE: .build/ios-e2e/PastaIOSUITests.xcresult
+      DIAG_DIR: .build/ios-e2e/diagnostics
+      SIM_NAME: PastaCI iPhone
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Cache SwiftPM checkouts and build intermediates
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build/ios-derived/SourcePackages
+            .build/ios-derived/Build/Intermediates.noindex
+          key: ios-e2e-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift', 'PastaIOS/PastaIOS.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ios-e2e-${{ runner.os }}-
+
+      - name: Create iPhone simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          # The XCUITest keyboard needs the software keyboard; a "connected"
+          # hardware keyboard makes typeText fail with no keyboard focus.
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+
+          RUNTIME=$(xcrun simctl list runtimes -j | python3 -c '
+          import json, sys
+          rts = [r for r in json.load(sys.stdin)["runtimes"] if r["platform"] == "iOS" and r["isAvailable"]]
+          rts.sort(key=lambda r: [int(x) for x in r["version"].split(".")])
+          print(rts[-1]["identifier"])')
+          DEVICE_TYPE=$(xcrun simctl list devicetypes -j | python3 -c '
+          import json, sys
+          types = json.load(sys.stdin)["devicetypes"]
+          for wanted in ("iPhone 17", "iPhone 16", "iPhone 16e", "iPhone 15"):
+              for t in types:
+                  if t["name"] == wanted:
+                      print(t["identifier"]); sys.exit(0)
+          print(types[0]["identifier"])')
+          echo "==> Runtime: $RUNTIME"
+          echo "==> Device type: $DEVICE_TYPE"
+          UDID=$(xcrun simctl create "$SIM_NAME" "$DEVICE_TYPE" "$RUNTIME")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          echo "==> Booted $SIM_NAME ($UDID)"
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project "$PROJECT" -scheme "$SCHEME" \
+            -derivedDataPath "$DERIVED_DATA"
+
+      - name: Build for testing
+        run: |
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project "$PROJECT" -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$DERIVED_DATA" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            | tee .build/ios-e2e-build.log | grep -E "^(=== |\*\* |error:|.*error:|.*warning: .*PastaIOS)" || true
+          # tee swallows the exit status through grep; re-check the summary line.
+          grep -q "\*\* TEST BUILD SUCCEEDED \*\*" .build/ios-e2e-build.log
+
+      - name: Run XCUITests
+        id: test
+        run: |
+          set -o pipefail
+          mkdir -p "$(dirname "$RESULT_BUNDLE")"
+          xcodebuild test-without-building \
+            -project "$PROJECT" -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath "$DERIVED_DATA" \
+            -resultBundlePath "$RESULT_BUNDLE" \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 180 \
+            -retry-tests-on-failure -test-iterations 2 \
+            2>&1 | tee .build/ios-e2e-test.log \
+            | grep -E "Test Case|Test Suite|passed|failed|error|Executed|Restarting|crash" || true
+          grep -q "\*\* TEST EXECUTE SUCCEEDED \*\*" .build/ios-e2e-test.log
+
+      - name: Summarise results
+        if: always()
+        run: |
+          set +e
+          mkdir -p "$DIAG_DIR"
+          if [ ! -d "$RESULT_BUNDLE" ]; then
+            echo "No result bundle produced at $RESULT_BUNDLE" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          xcrun xcresulttool get test-results summary --path "$RESULT_BUNDLE" > "$DIAG_DIR/xcresult-summary.json" 2>/dev/null
+          xcrun xcresulttool get test-results tests   --path "$RESULT_BUNDLE" > "$DIAG_DIR/xcresult-tests.json"   2>/dev/null
+          python3 - "$DIAG_DIR/xcresult-summary.json" "$DIAG_DIR/xcresult-tests.json" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json, sys
+
+          def load(path):
+              try:
+                  with open(path) as fh:
+                      return json.load(fh)
+              except Exception as exc:
+                  print(f"(could not read {path}: {exc})")
+                  return {}
+
+          summary, tests = load(sys.argv[1]), load(sys.argv[2])
+          print("## iOS E2E results")
+          result = summary.get("result", "unknown")
+          print(f"- Result: **{result}** — passed {summary.get('passedTests', '?')}, "
+                f"failed {summary.get('failedTests', '?')}, skipped {summary.get('skippedTests', '?')}")
+          for failure in summary.get("testFailures", []):
+              text = (failure.get("failureText") or "").splitlines()
+              first = text[0] if text else ""
+              print(f"- FAILED `{failure.get('testName')}`: {first}")
+          print()
+          print("```")
+
+          def walk(nodes, depth=0):
+              for node in nodes:
+                  kind = node.get("nodeType", "")
+                  if kind in ("Test Case", "Test Suite", "Unit test bundle", "UI test bundle"):
+                      res = node.get("result", "")
+                      print("  " * depth + f"{res:<8} {node.get('name', '')} {node.get('duration', '')}")
+                  walk(node.get("children", []), depth + 1)
+
+          walk(tests.get("testNodes", []))
+          print("```")
+          PY
+
+      - name: Collect crash logs and simulator log on failure
+        if: failure()
+        run: |
+          set +e
+          mkdir -p "$DIAG_DIR"
+          UDID="${{ steps.sim.outputs.udid }}"
+
+          echo "==> Crash reports (host DiagnosticReports)"
+          for dir in "$HOME/Library/Logs/DiagnosticReports" "/Library/Logs/DiagnosticReports"; do
+            find "$dir" -maxdepth 1 \( -name 'PastaIOS*' -o -name 'PastaIOSUITests*' -o -name 'xctest*' \) \
+              -newer "$PROJECT/project.pbxproj" -exec cp -v {} "$DIAG_DIR/" \; 2>/dev/null
+          done
+          # Simulator-side crash reports live under the device's data directory.
+          if [ -n "$UDID" ]; then
+            SIM_DATA="$HOME/Library/Developer/CoreSimulator/Devices/$UDID/data"
+            for sub in Library/Logs/DiagnosticReports Library/Logs/CrashReporter; do
+              [ -d "$SIM_DATA/$sub" ] && find "$SIM_DATA/$sub" -type f -exec cp -v {} "$DIAG_DIR/" \; 2>/dev/null
+            done
+          fi
+
+          echo "==> Print any crash headers we found"
+          for f in "$DIAG_DIR"/*.ips "$DIAG_DIR"/*.crash; do
+            [ -f "$f" ] || continue
+            echo "----- $f"
+            grep -E '"procName"|"exception"|"termination"|Exception Type|Termination Reason|Crashed:' "$f" | head -20
+          done
+
+          echo "==> Simulator unified log for PastaIOS (last 20 minutes)"
+          if [ -n "$UDID" ]; then
+            xcrun simctl spawn "$UDID" log show --last 20m --style compact \
+              --predicate 'process == "PastaIOS" OR (process == "SpringBoard" AND eventMessage CONTAINS "PastaIOS") OR eventMessage CONTAINS "com.pasta.ios"' \
+              > "$DIAG_DIR/simulator-pastaios.log" 2>&1
+            xcrun simctl spawn "$UDID" log show --last 20m --style compact \
+              --predicate 'eventMessage CONTAINS "crash" OR process == "ReportCrash" OR process == "osanalyticshelper"' \
+              > "$DIAG_DIR/simulator-crash-reporter.log" 2>&1
+            tail -50 "$DIAG_DIR/simulator-pastaios.log"
+          fi
+
+          echo "==> Test failures from the result bundle"
+          python3 - "$DIAG_DIR/xcresult-summary.json" <<'PY'
+          import json, sys
+          try:
+              with open(sys.argv[1]) as fh:
+                  summary = json.load(fh)
+          except Exception:
+              raise SystemExit(0)
+          for failure in summary.get("testFailures", []):
+              print("FAILED", failure.get("testName"))
+              print(failure.get("failureText"))
+              print()
+          PY
+          cp .build/ios-e2e-build.log .build/ios-e2e-test.log "$DIAG_DIR/" 2>/dev/null
+          ls -la "$DIAG_DIR"
+
+      - name: Upload result bundle and diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-e2e-diagnostics
+          path: |
+            .build/ios-e2e/PastaIOSUITests.xcresult
+            .build/ios-e2e/diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Shut down simulator
+        if: always()
+        run: |
+          xcrun simctl shutdown "${{ steps.sim.outputs.udid }}" 2>/dev/null || true
+          xcrun simctl delete "${{ steps.sim.outputs.udid }}" 2>/dev/null || true
+
   auto-release:
     name: Auto Version & Release
     needs: test
