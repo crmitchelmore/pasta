@@ -7,7 +7,7 @@ struct PastaIOSApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var syncManager = SyncManager(
         containerIdentifier: "iCloud.com.pasta.ios",
-        syncEnabled: false
+        syncEnabled: true
     )
     @StateObject private var appState = AppState()
     @State private var foregroundActivationTask: Task<Void, Never>?
