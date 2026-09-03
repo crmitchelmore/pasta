@@ -31,6 +31,11 @@ final class AppState: ObservableObject {
     private var isActivationPipelineRunning = false
 
     init() {
+        // No-op unless launched by the XCUITest suite with `-uiTesting`.
+        UITestConfiguration.applyIfNeeded(
+            databaseURL: Self.databaseURL(),
+            currentAppVersion: Self.currentAppVersion()
+        )
         self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: Defaults.hasCompletedOnboarding)
     }
 

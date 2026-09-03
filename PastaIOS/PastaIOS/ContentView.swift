@@ -24,6 +24,7 @@ struct ContentView: View {
                             Button("Done") {
                                 appState.dismissOnboarding()
                             }
+                            .accessibilityIdentifier("onboarding.toolbarDone")
                         }
                     }
             }
@@ -42,6 +43,8 @@ private struct LoadingView: View {
             Text("Syncing clipboard history…")
                 .foregroundStyle(.secondary)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("loading.view")
     }
 }
 
@@ -70,12 +73,14 @@ private struct WhatsNewView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .accessibilityIdentifier("whatsNew.list")
             .navigationTitle("What’s New")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
                         appState.dismissWhatsNew()
                     }
+                    .accessibilityIdentifier("whatsNew.done")
                 }
             }
         }

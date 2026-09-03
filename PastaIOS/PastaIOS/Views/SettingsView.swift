@@ -13,6 +13,7 @@ struct SettingsView: View {
             dangerSection
         }
         .listStyle(.insetGrouped)
+        .accessibilityIdentifier("settings.list")
         .navigationTitle("Settings")
     }
 
@@ -31,6 +32,8 @@ struct SettingsView: View {
                         .foregroundStyle(.red)
                 }
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("settings.iCloudStatus")
 
             if let lastSync = syncManager.lastSyncDate {
                 HStack {
@@ -46,6 +49,7 @@ struct SettingsView: View {
                 Spacer()
                 Text("\(appState.entries.count)")
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("settings.entryCount")
             }
 
             Button {
@@ -68,12 +72,14 @@ struct SettingsView: View {
             } label: {
                 Label("Replay Walkthrough", systemImage: "sparkles")
             }
+            .accessibilityIdentifier("settings.replayWalkthrough")
 
             Button {
                 appState.showWhatsNew()
             } label: {
                 Label("What’s New", systemImage: "star.bubble")
             }
+            .accessibilityIdentifier("settings.whatsNew")
         } header: {
             Text("Help")
         } footer: {
@@ -90,6 +96,7 @@ struct SettingsView: View {
                 Spacer()
                 Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0")
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("settings.version")
             }
         }
     }

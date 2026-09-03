@@ -20,6 +20,7 @@ struct EntryListView: View {
     var body: some View {
         entryList
             .listStyle(.insetGrouped)
+            .accessibilityIdentifier("history.list")
             .navigationTitle("Clipboard History")
             .navigationBarTitleDisplayMode(.large)
             .refreshable {
@@ -51,6 +52,7 @@ struct EntryListView: View {
                             NavigationLink(destination: EntryDetailView(entry: entry)) {
                                 EntryRowView(entry: entry)
                             }
+                            .accessibilityIdentifier("history.row")
                         }
                     }
                 }
@@ -121,6 +123,8 @@ struct EntryListView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 40)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("history.emptyState")
         }
         .listRowBackground(Color.clear)
     }

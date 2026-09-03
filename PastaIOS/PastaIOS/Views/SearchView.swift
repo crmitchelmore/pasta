@@ -22,10 +22,12 @@ struct SearchView: View {
                     NavigationLink(destination: EntryDetailView(entry: entry)) {
                         EntryRowView(entry: entry)
                     }
+                    .accessibilityIdentifier("search.row")
                 }
             }
         }
         .listStyle(.insetGrouped)
+        .accessibilityIdentifier("search.list")
         .navigationTitle("Search")
         .searchable(
             text: $searchText,
@@ -94,6 +96,8 @@ struct SearchView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 40)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("search.emptyPrompt")
         }
         .listRowBackground(Color.clear)
     }
@@ -110,6 +114,8 @@ struct SearchView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 40)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("search.noResults")
         }
         .listRowBackground(Color.clear)
     }
