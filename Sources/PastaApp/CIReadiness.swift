@@ -56,12 +56,13 @@ enum CIReadiness {
             FileHandle.standardError.write(Data("PASTA_CI_TERMINATING\n".utf8))
             PastaLogger.app.info("SIGTERM received under PASTA_CI; terminating gracefully")
 
-            // AppKit silently refuses `terminate:` while a sheet or modal session
-            // is up — on a fresh runner that is the first-launch onboarding
-            // sheet. Dismiss them so the harness exercises the real quit path
-            // (applicationShouldTerminate → exit 0) instead of timing out.
-            dismissSheetsAndModals()
-
+            // No sheet/modal dismissal here on purpose: AppKit silently refuses
+            // `terminate:` while a sheet is attached, and first-launch
+            // onboarding is exactly what a fresh CI runner shows. Onboarding is
+            // therefore presented as its own window (OnboardingWindowController),
+            // and this smoke path is the regression test that quitting works
+            // while it is on screen (pasta-adt). If a sheet ever creeps back,
+            // PASTA_CI_TERMINATE_REFUSED below fails the run loudly.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 NSApp.terminate(nil)
                 // `terminate(_:)` only returns when AppKit refused to quit; make
@@ -73,22 +74,6 @@ enum CIReadiness {
         }
         source.resume()
         terminationSource = source
-    }
-
-    /// Stops any modal session and closes every window that has a sheet
-    /// attached. Merely ending the sheet is not enough: SwiftUI re-presents
-    /// the onboarding sheet while its `isPresented` binding is still true, so
-    /// the parent window goes too (CI is quitting anyway).
-    @MainActor
-    private static func dismissSheetsAndModals() {
-        if NSApp.modalWindow != nil {
-            NSApp.stopModal()
-        }
-        for window in NSApp.windows {
-            guard let sheet = window.attachedSheet else { continue }
-            window.endSheet(sheet)
-            window.close()
-        }
     }
 
     /// One line per window, for the CI log when a quit is refused.

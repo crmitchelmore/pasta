@@ -36,7 +36,6 @@ struct PanelContentView: View {
     @State var lastSelectedEntryID: UUID? = nil
     @State var showExtractedValuesOnly: Bool = false
 
-    @State var isShowingOnboarding: Bool = false
     @State var isAccessibilityTrusted: Bool = AccessibilityPermission.isTrusted()
     @State var isShowingErrorAlert: Bool = false
     @State var isShowingContentTypePicker: Bool = false
@@ -243,8 +242,10 @@ struct PanelContentView: View {
             .overlay(alignment: .topTrailing) { copyFeedbackOverlay }
             .onAppear(perform: handleOnAppear)
             .onDisappear(perform: handleOnDisappear)
+        // Onboarding is deliberately NOT a `.sheet`: AppKit refuses to quit while
+        // a sheet is attached, which made ⌘Q / Quit / SIGTERM no-ops on first
+        // launch (pasta-adt). See OnboardingWindowController.
         return applyObservers(to: chrome)
-            .sheet(isPresented: $isShowingOnboarding) { onboardingSheet }
             .modifier(ChromeAlertModifier(
                 isShowingErrorAlert: $isShowingErrorAlert,
                 lastError: backgroundService.lastError,
@@ -256,7 +257,7 @@ struct PanelContentView: View {
     private func applyObservers<V: View>(to view: V) -> some View {
         let receiving = view
             .onReceive(backgroundService.$lastError, perform: handleLastError)
-            .onReceive(NotificationCenter.default.publisher(for: .openOnboarding)) { _ in isShowingOnboarding = true }
+            .onReceive(NotificationCenter.default.publisher(for: .openOnboarding)) { _ in presentOnboarding() }
             .onReceive(NotificationCenter.default.publisher(for: .applyContentTypeFilter), perform: handleContentTypeFilterNotification)
             .onReceive(backgroundService.$entries, perform: handleEntriesUpdate)
         return applyChangeHandlers(to: receiving)
@@ -283,14 +284,10 @@ struct PanelContentView: View {
         }
     }
 
-    private var onboardingSheet: some View {
-        OnboardingView { completion in
-            switch completion {
-            case .dismissed:
-                isShowingOnboarding = false
-            case .completed:
+    private func presentOnboarding() {
+        OnboardingWindowController.shared.present { completion in
+            if completion == .completed {
                 didCompleteOnboarding = true
-                isShowingOnboarding = false
             }
         }
     }
@@ -397,9 +394,9 @@ struct PanelContentView: View {
             searchFocused = true
         }
         isAccessibilityTrusted = AccessibilityPermission.isTrusted()
-        isShowingOnboarding = !didCompleteOnboarding
-        if isShowingOnboarding {
+        if !didCompleteOnboarding {
             PastaLogger.ui.debug("Showing onboarding (completed=\(didCompleteOnboarding), accessibilityTrusted=\(isAccessibilityTrusted))")
+            presentOnboarding()
         }
     }
 
