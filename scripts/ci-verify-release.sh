@@ -14,7 +14,11 @@
 #      (Gatekeeper: Developer ID + notarization) and
 #      `codesign --verify --deep --strict`, and its CFBundleShortVersionString
 #      is <version> (and CFBundleVersion is sparkle:version).
-#   5. The app is copied out (as a user dragging it to /Applications would) and
+#   5. The enclosure's sparkle:edSignature is a valid Ed25519 signature of the
+#      downloaded DMG under the SUPublicEDKey baked into the shipped app
+#      (scripts/ci-verify-eddsa.sh) — otherwise every installed copy silently
+#      refuses the update.
+#   6. The app is copied out (as a user dragging it to /Applications would) and
 #      scripts/ci-launch-smoke.sh proves it initialises and quits cleanly.
 #
 # Usage: scripts/ci-verify-release.sh <version>            e.g. 1.5.8
@@ -56,7 +60,7 @@ trap cleanup EXIT
 # ---------------------------------------------------------------------------
 # 1. Live appcast: top item must be this version.
 # ---------------------------------------------------------------------------
-echo "==> [1/5] Fetching live appcast: $APPCAST_URL"
+echo "==> [1/6] Fetching live appcast: $APPCAST_URL"
 APPCAST="$VERIFY_TMP/appcast.xml"
 DEADLINE=$(( $(date +%s) + APPCAST_WAIT_SECONDS ))
 while :; do
@@ -105,7 +109,7 @@ echo "✓ appcast top item: version $TOP_SHORT (build $TOP_BUILD), enclosure $TO
 # ---------------------------------------------------------------------------
 # 2. Enclosure URL is the just-published DMG and is actually downloadable.
 # ---------------------------------------------------------------------------
-echo "==> [2/5] Checking enclosure URL"
+echo "==> [2/6] Checking enclosure URL"
 [ "$TOP_URL" = "$EXPECTED_DMG_URL" ] || fail "enclosure url is '$TOP_URL', expected '$EXPECTED_DMG_URL'"
 HEADERS="$VERIFY_TMP/dmg-headers.txt"
 HEAD_CODE=$(curl -sS -I -L -o "$HEADERS" -w '%{http_code}' "$TOP_URL" || echo 000)
@@ -118,7 +122,7 @@ echo "✓ HTTP 200, Content-Length $CONTENT_LENGTH matches enclosure length"
 # ---------------------------------------------------------------------------
 # 3. Download and size-check.
 # ---------------------------------------------------------------------------
-echo "==> [3/5] Downloading DMG"
+echo "==> [3/6] Downloading DMG"
 DMG="$VERIFY_TMP/$(basename "$TOP_URL")"
 GET_CODE=$(curl -sS -L -o "$DMG" -w '%{http_code}' "$TOP_URL" || echo 000)
 [ "$GET_CODE" = "200" ] || fail "GET $TOP_URL returned HTTP $GET_CODE"
@@ -129,7 +133,7 @@ echo "✓ downloaded $(basename "$DMG"): $ACTUAL_SIZE bytes, sha256 $(shasum -a 
 # ---------------------------------------------------------------------------
 # 4. Mount; Gatekeeper + codesign + version of the app inside.
 # ---------------------------------------------------------------------------
-echo "==> [4/5] Mounting DMG and assessing the app"
+echo "==> [4/6] Mounting DMG and assessing the app"
 mkdir -p "$MOUNTPOINT"
 hdiutil attach "$DMG" -mountpoint "$MOUNTPOINT" -nobrowse -readonly -noautoopen >/dev/null || fail "hdiutil could not attach $DMG"
 APP_IN_DMG=$(find "$MOUNTPOINT" -maxdepth 1 -name '*.app' -print -quit)
@@ -157,9 +161,19 @@ APP_FEED=$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$INFO" 2>/dev/null || 
 echo "✓ notarized, Gatekeeper-accepted, signature intact, version $APP_SHORT ($APP_BUILD), SUFeedURL $APP_FEED"
 
 # ---------------------------------------------------------------------------
-# 5. Launch-readiness smoke on a copy (what the user's /Applications holds).
+# 5. Sparkle EdDSA: the appcast signature must verify under the public key the
+#    shipped app will check it with. Wrong key = silent update failure for all.
 # ---------------------------------------------------------------------------
-echo "==> [5/5] Launch-readiness smoke test"
+echo "==> [5/6] Verifying sparkle:edSignature against the shipped SUPublicEDKey"
+APP_PUBKEY=$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$INFO" 2>/dev/null || true)
+[ -n "$APP_PUBKEY" ] || fail "shipped app has no SUPublicEDKey in Info.plist; Sparkle cannot verify any update"
+"$SCRIPT_DIR/ci-verify-eddsa.sh" "$DMG" "$TOP_SIG" "$APP_PUBKEY" \
+  || fail "the appcast's sparkle:edSignature does not verify under the shipped app's SUPublicEDKey (or the check could not run). Installed copies would refuse this update."
+
+# ---------------------------------------------------------------------------
+# 6. Launch-readiness smoke on a copy (what the user's /Applications holds).
+# ---------------------------------------------------------------------------
+echo "==> [6/6] Launch-readiness smoke test"
 INSTALL_DIR="$VERIFY_TMP/Applications"
 mkdir -p "$INSTALL_DIR"
 ditto "$APP_IN_DMG" "$INSTALL_DIR/$(basename "$APP_IN_DMG")"

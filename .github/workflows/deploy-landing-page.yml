@@ -20,11 +20,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Preserve the live Sparkle appcast
-        # release.yml regenerates appcast.xml at release time and deploys it, but
-        # never commits it back, so the copy in git is stale. Deploying the repo
-        # directory verbatim would overwrite the live feed and break auto-update
-        # for every installed Mac. Always publish the current live feed instead;
-        # fail loudly rather than ship a broken one.
+        # release.yml regenerates appcast.xml at release time, deploys it and
+        # commits it back to main (scripts/ci-commit-appcast.sh), so the copy in
+        # git should already match. Belt and braces: if that commit-back ever
+        # fails, deploying the repo directory verbatim would overwrite the live
+        # feed and break auto-update for every installed Mac, so always publish
+        # the current live feed and fail loudly rather than ship a broken one.
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 https://pasta-app.com/appcast.xml -o landing-page/appcast.xml

@@ -42,6 +42,11 @@ jobs:
 
       - name: Contract checks (appcast.xml, _redirects, _headers)
         working-directory: landing-page
+        env:
+          # release.yml commits the regenerated appcast back to main
+          # (scripts/ci-commit-appcast.sh), so the git copy must name the
+          # newest tag; a lag now means that commit-back failed.
+          APPCAST_REQUIRE_LATEST: '1'
         run: npm run test:contract
 
   # Detect whether the landing page surface changed so the browser suite only
@@ -166,6 +171,9 @@ jobs:
 
       - name: Test release-notes generator
         run: node --test Tests/ReleaseNotesTests/*.test.mjs
+
+      - name: Test release verification scripts (Sparkle EdDSA)
+        run: scripts/tests/ci-verify-eddsa.test.sh
       
       - name: Build release
         run: swift build -c release
