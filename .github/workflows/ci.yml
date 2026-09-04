@@ -20,7 +20,9 @@ jobs:
   appcast-contract:
     name: Appcast & Cloudflare config contract
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Two bounded npm ci attempts (scripts/ci-npm-ci.sh, 180s each) must fit:
+    # a stalled registry connection once pushed a plain npm ci past 5 minutes.
+    timeout-minutes: 8
     permissions:
       contents: read
     steps:
