@@ -6,22 +6,27 @@
     <description>Most recent updates to Pasta</description>
     <language>en</language>
     <item>
-      <title>Version 1.5.10</title>
-      <sparkle:version>151</sparkle:version>
-      <sparkle:shortVersionString>1.5.10</sparkle:shortVersionString>
-      <pubDate>Thu, 03 Sep 2026 14:46:57 +0000</pubDate>
+      <title>Version 1.5.11</title>
+      <sparkle:version>152</sparkle:version>
+      <sparkle:shortVersionString>1.5.11</sparkle:shortVersionString>
+      <pubDate>Fri, 04 Sep 2026 08:04:53 +0000</pubDate>
       <description><![CDATA[
 <h2>What’s new</h2>
 <h3>Fixes</h3>
 <ul>
-<li>put the CloudKit compile flag on Release and stop overriding it from the CLI (#95)</li>
+<li>quit works during onboarding, multi-file copies paste as file URLs (#98)</li>
 </ul>
-<p><strong>Full changelog:</strong> <a href="https://github.com/crmitchelmore/pasta/compare/v1.5.9...v1.5.10">https://github.com/crmitchelmore/pasta/compare/v1.5.9...v1.5.10</a></p>
+<h3>Under the hood</h3>
+<ul>
+<li>run auto-release on ubuntu-latest instead of macOS (#96)</li>
+<li>verify the Sparkle EdDSA signature and commit the appcast back to main (#97)</li>
+</ul>
+<p><strong>Full changelog:</strong> <a href="https://github.com/crmitchelmore/pasta/compare/v1.5.10...v1.5.11">https://github.com/crmitchelmore/pasta/compare/v1.5.10...v1.5.11</a></p>
       ]]></description>
       <enclosure
-        url="https://github.com/crmitchelmore/pasta/releases/download/v1.5.10/Pasta-1.5.10.dmg"
-        sparkle:edSignature="xTIEOmWQpM6w/4wrElR5UjiNbk0QIhgejTmjT4RF1wLK8k1pIbBbEwZRFpKyUN7MF2y2X4j4aEGuPQncEWkzBQ=="
-        length="17287906"
+        url="https://github.com/crmitchelmore/pasta/releases/download/v1.5.11/Pasta-1.5.11.dmg"
+        sparkle:edSignature="fhfVYcri8gQsqn+J6f3GFXsFLj+vXB9vfbW+OT1kOw7YDfKe8H7SrPgLF4bIlhhokuJZjZPAZTwPz71xOxz9Bw=="
+        length="17289212"
         type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
