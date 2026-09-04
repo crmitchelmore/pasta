@@ -582,7 +582,18 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy landing-page --project-name=pasta-app --branch=main
-      
+
+      # Keep landing-page/appcast.xml in git equal to the feed just deployed, so
+      # deploy-landing-page.yml never re-publishes a stale copy and the
+      # appcast-contract test can require the newest tag. Non-fatal by design:
+      # the release is already live and verify-release must still run. The
+      # script falls back to a release/appcast-v* branch + PR if main is
+      # protected against direct pushes (see scripts/ci-commit-appcast.sh).
+      - name: Commit regenerated appcast back to main
+        env:
+          GH_TOKEN: ${{ secrets.AUTO_RELEASE_TOKEN }}
+        run: scripts/ci-commit-appcast.sh "$APPCAST_PATH" "${{ steps.version.outputs.version }}"
+
       # ============================================================================
       # UPDATE HOMEBREW TAP
       # ============================================================================

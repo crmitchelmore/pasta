@@ -4,12 +4,13 @@
 // job "appcast-contract"). The macOS app reads https://pasta-app.com/appcast.xml
 // via SUFeedURL, so a malformed feed here silently breaks auto-updates.
 //
-// Note on freshness: .github/workflows/release.yml regenerates the appcast and
-// deploys it straight to Cloudflare Pages WITHOUT committing it back, so the
-// copy in git legitimately lags the newest tag. The tag comparison below is
-// therefore an ordering check (never *ahead* of the tags, always pointing at a
-// real tag) and only reports lag as a diagnostic. Set APPCAST_REQUIRE_LATEST=1
-// to turn the lag into a failure once the release flow commits the appcast.
+// Note on freshness: .github/workflows/release.yml regenerates the appcast,
+// deploys it to Cloudflare Pages and then commits it back to main
+// (scripts/ci-commit-appcast.sh), so the copy in git is expected to name the
+// newest tag. CI runs with APPCAST_REQUIRE_LATEST=1, which turns a lag into a
+// failure: it means the commit-back did not land (check the release run for a
+// ::warning:: and a release/appcast-v* branch). Without the variable the lag
+// is only reported, for local runs on older checkouts.
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -111,8 +112,8 @@ test('top item points at a real release tag and is never ahead of the newest tag
   if (compareSemver(top, latest) < 0) {
     const message =
       `landing-page/appcast.xml top item is ${top} but the newest tag is v${latest}. ` +
-      'This is expected while release.yml deploys the regenerated appcast without committing it; ' +
-      'the live feed is checked by tests/live.';
+      'release.yml should have committed the regenerated appcast back (scripts/ci-commit-appcast.sh); ' +
+      'check that release run for a ::warning:: and merge its release/appcast-v* branch, or copy the live feed in.';
     if (process.env.APPCAST_REQUIRE_LATEST === '1') {
       assert.fail(message);
     }

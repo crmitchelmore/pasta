@@ -6,22 +6,22 @@
     <description>Most recent updates to Pasta</description>
     <language>en</language>
     <item>
-      <title>Version 1.5.4</title>
-      <sparkle:version>145</sparkle:version>
-      <sparkle:shortVersionString>1.5.4</sparkle:shortVersionString>
-      <pubDate>Thu, 03 Sep 2026 07:23:49 +0000</pubDate>
+      <title>Version 1.5.10</title>
+      <sparkle:version>151</sparkle:version>
+      <sparkle:shortVersionString>1.5.10</sparkle:shortVersionString>
+      <pubDate>Thu, 03 Sep 2026 14:46:57 +0000</pubDate>
       <description><![CDATA[
 <h2>What’s new</h2>
 <h3>Fixes</h3>
 <ul>
-<li>disable unsafe CloudKit startup (#85)</li>
+<li>put the CloudKit compile flag on Release and stop overriding it from the CLI (#95)</li>
 </ul>
-<p><strong>Full changelog:</strong> <a href="https://github.com/crmitchelmore/pasta/compare/v1.5.3...v1.5.4">https://github.com/crmitchelmore/pasta/compare/v1.5.3...v1.5.4</a></p>
+<p><strong>Full changelog:</strong> <a href="https://github.com/crmitchelmore/pasta/compare/v1.5.9...v1.5.10">https://github.com/crmitchelmore/pasta/compare/v1.5.9...v1.5.10</a></p>
       ]]></description>
       <enclosure
-        url="https://github.com/crmitchelmore/pasta/releases/download/v1.5.4/Pasta-1.5.4.dmg"
-        sparkle:edSignature="tSmhZlDHW5lJQByPDY9++KRRy881Q9ZiQ6tE8rrprW5mDYCr7WoCDQAMkURDhujH+GnA1QQOmstb50yncoEhDg=="
-        length="17285111"
+        url="https://github.com/crmitchelmore/pasta/releases/download/v1.5.10/Pasta-1.5.10.dmg"
+        sparkle:edSignature="xTIEOmWQpM6w/4wrElR5UjiNbk0QIhgejTmjT4RF1wLK8k1pIbBbEwZRFpKyUN7MF2y2X4j4aEGuPQncEWkzBQ=="
+        length="17287906"
         type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
