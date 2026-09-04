@@ -680,7 +680,14 @@ final class BackgroundService: ObservableObject {
             return EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: splitEntries)
         }
 
-        entry.contentType = output.primaryType
+        // Keep the monitor's `.filePath` type: it comes from real file URLs on
+        // the pasteboard, which is stronger evidence than any text heuristic.
+        // For a multi-file Finder copy no single path covers most of the joined
+        // text, so the detector would re-type the entry as prose and
+        // PasteService would paste plain text instead of file URLs (pasta-af5).
+        if entry.contentType != .filePath {
+            entry.contentType = output.primaryType
+        }
         entry.metadata = output.metadataJSON
 
         // Create extracted entries with parentEntryId set to the primary entry's ID

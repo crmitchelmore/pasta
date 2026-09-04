@@ -131,7 +131,11 @@ struct E2ECapturePipeline {
             return Result(primary: entry, extracted: [], envVarSplit: split)
         }
 
-        entry.contentType = output.primaryType
+        // Mirrors BackgroundService.enrich: pasteboard file URLs keep their
+        // `.filePath` type regardless of what the text detectors conclude.
+        if entry.contentType != .filePath {
+            entry.contentType = output.primaryType
+        }
         entry.metadata = output.metadataJSON
 
         var extracted: [ClipboardEntry] = []

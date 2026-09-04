@@ -143,9 +143,39 @@ final class CaptureToPasteFlowTests: XCTestCase {
 
     // MARK: - File paths
 
+    func testMultiFileFinderCopyStaysFilePathAndPastesAllURLs() throws {
+        // Two files: no single path covers most of the joined text, so the
+        // text detectors alone re-type this as prose. The pasteboard carried
+        // real file URLs, and that must win end to end (pasta-af5).
+        let report = env.root.appendingPathComponent("report.pdf")
+        let notes = env.root.appendingPathComponent("notes.txt")
+        try Data("pdf".utf8).write(to: report)
+        try "hello".write(to: notes, atomically: true, encoding: .utf8)
+
+        let captured = try XCTUnwrap(harness.capture(.filePaths([report.path, notes.path]), in: self))
+        XCTAssertEqual(captured.contentType, .filePath)
+        XCTAssertEqual(captured.content, "\(report.path)\n\(notes.path)")
+
+        // Precondition that makes this test meaningful: the detectors on their
+        // own would NOT call this content a file path.
+        let verdict = pipeline.detector.detect(in: captured.content, configuration: .default).primaryType
+        XCTAssertNotEqual(verdict, .filePath, "detector verdict changed; this test no longer exercises the override")
+
+        try pipeline.ingest(captured)
+        let stored = try XCTUnwrap(database.fetch(id: captured.id))
+        XCTAssertEqual(stored.contentType, .filePath, "enrichment must keep the monitor's file-path type")
+        XCTAssertTrue(stored.contentTypeMask.contains(.filePath))
+
+        let writer = E2EPasteboardWriter()
+        let paste = PasteService(pasteboard: writer, simulator: E2EPasteSimulator())
+        XCTAssertTrue(paste.paste(stored))
+        guard case .fileURLs(let urls)? = writer.lastWrite else {
+            return XCTFail("multi-file entries must be pasted as file URLs, got \(String(describing: writer.lastWrite))")
+        }
+        XCTAssertEqual(urls.map(\.path), [report.path, notes.path])
+    }
+
     func testFilePathCopyRoundTripsAsFileURLs() throws {
-        // A single file: multi-file Finder copies are re-typed by the detectors
-        // once no single path covers most of the text (tracked separately).
         let file = env.root.appendingPathComponent("notes.txt")
         try "hello".write(to: file, atomically: true, encoding: .utf8)
 
