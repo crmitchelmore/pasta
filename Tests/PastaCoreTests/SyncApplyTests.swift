@@ -64,6 +64,9 @@ final class SyncApplyTests: XCTestCase {
         var expected = remote
         expected.isPinned = true
         expected.isSynced = true
+        // copyCount keeps the larger local value (8 > 3); the newer remote
+        // timestamp wins. See testReplayKeepsHigherLocalCopyCountAndNewerTimestamp.
+        expected.copyCount = 8
         XCTAssertEqual(try db.fetch(id: local.id), expected)
         XCTAssertEqual(try db.fetch(id: local.id)?.contentTypeMask, .url)
         XCTAssertTrue(try db.existsWithHash(remote.contentHash))
@@ -81,8 +84,40 @@ final class SyncApplyTests: XCTestCase {
         var expectedCleared = cleared
         expectedCleared.isPinned = true
         expectedCleared.isSynced = true
+        expectedCleared.copyCount = 8
         XCTAssertEqual(try db.fetch(id: local.id), expectedCleared)
         XCTAssertEqual(try db.fetch(id: local.id)?.contentTypeMask, [])
+    }
+
+    func testReplayKeepsHigherLocalCopyCountAndNewerTimestamp() throws {
+        // After the checkpoint moved into the database, an upgraded app
+        // re-downloads the whole zone. Every entry this device pushed comes
+        // back with its at-push copyCount/timestamp; applying those verbatim
+        // would erase copies made since. Local wins when larger/newer, remote
+        // wins when it is the one that is larger/newer.
+        let db = try DatabaseManager.inMemory()
+        let local = ClipboardEntry(
+            content: "shared", contentType: .text,
+            timestamp: Date(timeIntervalSince1970: 5_000), copyCount: 7
+        )
+        try db.insert(local)
+
+        var stale = local
+        stale.timestamp = Date(timeIntervalSince1970: 1_000)
+        stale.copyCount = 2
+        try db.applySyncChanges(modified: [stale], deleted: [])
+        var afterStale = try XCTUnwrap(db.fetch(id: local.id))
+        XCTAssertEqual(afterStale.copyCount, 7, "a stale replay must not lower the local copy count")
+        XCTAssertEqual(afterStale.timestamp, Date(timeIntervalSince1970: 5_000), "a stale replay must not rewind the timestamp")
+        XCTAssertTrue(afterStale.isSynced)
+
+        var fresher = local
+        fresher.timestamp = Date(timeIntervalSince1970: 9_000)
+        fresher.copyCount = 11
+        try db.applySyncChanges(modified: [fresher], deleted: [])
+        afterStale = try XCTUnwrap(db.fetch(id: local.id))
+        XCTAssertEqual(afterStale.copyCount, 11)
+        XCTAssertEqual(afterStale.timestamp, Date(timeIntervalSince1970: 9_000))
     }
 
     func testPreservesImagePathOnlyForMatchingImageContent() throws {

@@ -307,17 +307,21 @@ public final class SyncManager: ObservableObject {
         operation.recordWasChangedBlock = { _, result in
             switch result {
             case .success(let record):
-                guard let entry = mapper.entry(from: record) else {
-                    changes.fail(CKError(.internalError))
-                    return
-                }
-                // An unreadable asset must fail the batch. Otherwise the
-                // token would skip image bytes that never reached SQLite.
-                if record["imageAsset"] is CKAsset, entry.rawData == nil {
+                switch Self.disposition(for: record, mapper: mapper) {
+                case .apply(let entry):
+                    changes.modify(entry)
+                case .assetUnavailable:
+                    // An unreadable asset must fail the batch. Otherwise the
+                    // token would skip image bytes that never reached SQLite.
                     changes.fail(CKError(.assetFileNotFound))
-                    return
+                case .unmappable(let reason):
+                    // Never fail the batch for a record this build cannot
+                    // represent (e.g. a contentType introduced by a newer app
+                    // on another device): it would be refetched and fail on
+                    // every later pull, freezing sync until the app updates.
+                    changes.skipUnmappable()
+                    Self.pullLogger.warning("Skipping remote record \(record.recordID.recordName): \(reason)")
                 }
-                changes.modify(entry)
             case .failure(let error):
                 changes.fail(error)
             }
@@ -349,7 +353,53 @@ public final class SyncManager: ObservableObject {
         } onCancel: {
             operation.cancel()
         }
+        let skipped = changes.skippedUnmappableCount
+        if skipped > 0 {
+            Self.pullLogger.warning("Pull skipped \(skipped) remote record(s) this app version cannot represent; update the app to receive them")
+        }
         return try changes.batch()
+    }
+
+    /// The pull runs in a static context (no instance), so it logs through this.
+    private static let pullLogger = Logger(subsystem: "com.pasta.sync", category: "SyncPull")
+
+    /// How `pullChanges` treats one fetched record. A pure function so the
+    /// decision is unit-testable without CloudKit.
+    enum RemoteRecordDisposition: Equatable {
+        /// Persist this entry.
+        case apply(ClipboardEntry)
+        /// The record carries an image asset whose bytes could not be read.
+        /// Transient: the batch must fail so the token does not move past it.
+        case assetUnavailable
+        /// This build cannot represent the record (unknown `contentType`,
+        /// malformed id, missing required fields). Permanent for this build,
+        /// so it is skipped rather than allowed to poison every later pull.
+        case unmappable(reason: String)
+    }
+
+    static func disposition(for record: CKRecord, mapper: RecordMapper) -> RemoteRecordDisposition {
+        if let entry = mapper.entry(from: record) {
+            if record["imageAsset"] is CKAsset, entry.rawData == nil {
+                return .assetUnavailable
+            }
+            return .apply(entry)
+        }
+        if UUID(uuidString: record.recordID.recordName) == nil {
+            return .unmappable(reason: "record name is not a UUID")
+        }
+        guard let contentTypeRaw = record["contentType"] as? String else {
+            return .unmappable(reason: "missing contentType")
+        }
+        if ContentType(rawValue: contentTypeRaw) == nil {
+            return .unmappable(reason: "unknown contentType '\(contentTypeRaw)'")
+        }
+        if record["content"] as? String == nil {
+            return .unmappable(reason: "missing content")
+        }
+        if record["timestamp"] as? Date == nil {
+            return .unmappable(reason: "missing timestamp")
+        }
+        return .unmappable(reason: "record could not be mapped")
     }
 
     // MARK: - Subscriptions
@@ -403,6 +453,19 @@ private final class PendingCloudChanges: @unchecked Sendable {
     private var deleted: Set<UUID> = []
     private var token: CKServerChangeToken?
     private var error: Error?
+    private var skippedUnmappable = 0
+
+    /// Records this build cannot represent are counted and left out of the
+    /// batch; the token still advances past them (see `RemoteRecordDisposition`).
+    func skipUnmappable() {
+        lock.lock(); defer { lock.unlock() }
+        skippedUnmappable += 1
+    }
+
+    var skippedUnmappableCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return skippedUnmappable
+    }
 
     func modify(_ entry: ClipboardEntry) {
         lock.lock(); defer { lock.unlock() }

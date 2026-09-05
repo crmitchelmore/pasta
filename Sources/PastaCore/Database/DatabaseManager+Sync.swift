@@ -11,7 +11,12 @@ extension DatabaseManager {
     /// local path survives only if both versions are images/screenshots and their
     /// content hashes match. Missing image bytes cannot prove that match, so an
     /// incompatible or unverifiable cache is cleared instead of showing stale
-    /// pixels. Raw data and all other remote fields replace their local values.
+    /// pixels. Raw data and all other remote fields replace their local values,
+    /// except `timestamp` and `copyCount`, which keep the larger of local and
+    /// remote: a remote record carries the pushing device's count and time, and
+    /// a replay (notably the full re-download after the checkpoint moved into
+    /// the database) must not snap this device's own copies back to their
+    /// at-push values.
     /// A supplied checkpoint commits in the same transaction, including for
     /// empty batches. A nil checkpoint leaves the previous cursor unchanged.
     public func applySyncChanges(modified: [ClipboardEntry], deleted: [UUID], checkpoint: Data? = nil) throws {
@@ -39,8 +44,8 @@ extension DatabaseManager {
                             THEN clipboard_entries.imagePath
                             ELSE NULL
                         END,
-                        timestamp = excluded.timestamp,
-                        copyCount = excluded.copyCount,
+                        timestamp = MAX(clipboard_entries.timestamp, excluded.timestamp),
+                        copyCount = MAX(clipboard_entries.copyCount, excluded.copyCount),
                         sourceApp = excluded.sourceApp,
                         metadata = excluded.metadata,
                         contentHash = excluded.contentHash,
