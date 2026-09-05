@@ -52,9 +52,15 @@ with successful path detection may skip Playwright. An ongoing CI run is
 accepted only with these completed gates, avoiding a dependency on the
 auto-release job that just created the tag. Superseded main source is checked
 before GitHub publication and again before publishing the landing directory.
-The iOS release retains its existing tag/manual preflight behavior. Both page publishers share a concurrency group, and a failure or cancellation
-following GitHub Release creation attempts to draft that release even when the
-postpublish verification job cannot run. Landing deployment preserves the
+The iOS release retains native preflight and requires this shared exact-commit
+main CI evidence immediately before every upload, including manual runs/tags.
+Dry runs can still export after native preflight without publishing. Both page
+publishers share a workflow-level concurrency group held through live release
+verification. Failure or cancellation after publication was attempted queries
+the release and drafts it if public, including when asset upload failed after
+release creation. Only a 404 is harmless; API lookup/draft errors fail loudly.
+The Homebrew cask update can be retried when it already matches. Portable tests
+exercise partial publication recovery, API errors and a real git/tap retry. Landing deployment preserves the
 fetched live feed after CI rather than publishing CI's feed bytes. Source
 checks are snapshots: main can still advance after a check. Publishing GitHub,
 Pages and Homebrew is not atomic, and drafting cannot undo feed/cask writes

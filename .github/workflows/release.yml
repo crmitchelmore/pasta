@@ -9,6 +9,12 @@ permissions:
   contents: write  # Required to create releases
   actions: read  # Independently verify CI evidence for manually or automatically created tags
 
+# Hold the publisher lock through live verification as well as publication.
+# Otherwise a later release could replace the feed before this tag is checked.
+concurrency:
+  group: landing-page-deploy
+  cancel-in-progress: false
+
 env:
   APP_NAME: PastaApp
   BUNDLE_ID: com.pasta.clipboard
@@ -18,10 +24,6 @@ jobs:
   build-and-release:
     name: Build, Sign, Notarize & Release
     runs-on: macos-15
-    # Same group as deploy-landing-page.yml: both write the whole Pages site.
-    concurrency:
-      group: landing-page-deploy
-      cancel-in-progress: false
 
     steps:
       # ============================================================================
@@ -573,6 +575,10 @@ jobs:
             const { verifyReleasePublication } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
             await verifyReleasePublication({ github, ...context.repo, sha: process.env.RELEASE_SHA });
 
+      - name: Mark publication attempt
+        id: publication_attempt
+        run: echo 'started=true' >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         id: publish
         uses: softprops/action-gh-release@v1
@@ -668,9 +674,7 @@ jobs:
           # Commit and push
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/pasta.rb
-          git commit -m "Update Pasta to v$VERSION"
-          git push
+          bash "$GITHUB_WORKSPACE/scripts/ci-commit-homebrew.sh" "$VERSION"
           
           echo "==> Homebrew tap updated successfully"
       
@@ -698,20 +702,16 @@ jobs:
           retention-days: 7
 
       # A later deploy/source-check/tap failure skips verify-release entirely.
-      # Pull any release we created back to draft even when this job is cancelled.
+      # An asset upload may fail after creating a public release. Query after
+      # every publication attempt, including failed/cancelled action outcomes.
       - name: Draft release after publication failure
-        if: ${{ always() && (failure() || cancelled()) && steps.publish.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          TAG="$GITHUB_REF_NAME"
-          if gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft; then
-            echo "::error::Release $TAG was drafted after publication failed or was cancelled. Inspect the live appcast and Homebrew cask before retrying; drafting does not roll those back."
-          else
-            echo "::error::Could not draft $TAG after publication failed. Manually draft the release immediately: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
-          fi
-          exit 1
+        if: ${{ always() && (failure() || cancelled()) && steps.publication_attempt.outputs.started == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { draftAttemptedRelease } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-draft-release.mjs`);
+            const result = await draftAttemptedRelease({ github, ...context.repo, tag: process.env.GITHUB_REF_NAME });
+            core.error(`Release publication failed or was cancelled; cleanup: ${result}. Inspect the live appcast and Homebrew cask before retrying; drafting does not roll those back.`);
 
   # ============================================================================
   # POST-PUBLISH VERIFICATION — the "certainty" gate for auto-update users.
@@ -739,15 +739,15 @@ jobs:
         run: scripts/ci-verify-release.sh "${GITHUB_REF_NAME#v}"
 
       - name: Pull the release back to draft
-        if: failure() && steps.verify.outcome == 'failure'
+        if: ${{ always() && (failure() || cancelled()) }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
           TAG="${GITHUB_REF_NAME}"
-          echo "==> Post-publish verification FAILED for $TAG; converting the GitHub release to a draft so Sparkle clients cannot download it."
+          echo "==> Post-publish verification failed or was interrupted for $TAG; converting the GitHub release to a draft so Sparkle clients cannot download it."
           if gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft; then
-            echo "::error title=Release $TAG pulled::verify-release failed. The GitHub release $TAG has been converted to a DRAFT (its DMG is no longer downloadable, so auto-update cannot pick it up). The appcast at https://pasta-app.com/appcast.xml still advertises $TAG and the Homebrew cask was already bumped: re-deploy the previous landing-page/appcast.xml (or fix and re-tag) and revert crmitchelmore/homebrew-pasta if the build is bad. See the 'Verify live appcast, DMG, Gatekeeper, signature and launch' step for what failed."
+            echo "::error title=Release $TAG pulled::verify-release failed. The GitHub release $TAG has been converted to a DRAFT (its DMG is no longer downloadable, so auto-update cannot pick it up). Inspect the currently advertised appcast version and Homebrew cask before any rollback. Restore their previous verified versions only if they still advertise this failed $TAG; do not overwrite a newer healthy release. Drafting cannot revoke existing downloads. See the 'Verify live appcast, DMG, Gatekeeper, signature and launch' step for what failed."
           else
             echo "::error title=Release $TAG NOT pulled::verify-release failed AND 'gh release edit --draft' also failed. Manually draft or delete the GitHub release $TAG NOW: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
           fi

@@ -190,12 +190,45 @@ test('release wires mandatory prepublish gates, shared publisher queue and failu
   assert.ok(job.indexOf('Launch readiness smoke test (notarized DMG contents)') < job.indexOf(gate));
   assert.ok(job.indexOf(gate) < job.indexOf(publish));
   assert.ok(job.indexOf(source) < job.indexOf(deploy));
-  for (const workflow of [job, landing]) {
-    assert.match(workflow, /concurrency:\n +group: landing-page-deploy\n +cancel-in-progress: false/);
+  for (const workflow of [release, landing]) {
+    assert.match(workflow.split('\njobs:')[0], /\nconcurrency:\n +group: landing-page-deploy\n +cancel-in-progress: false/);
   }
+  assert.doesNotMatch(job, /\n    concurrency:/);
   assert.match(publish, /\n        id: publish\n/);
+  const attempt = find('Mark publication attempt');
+  assert.match(attempt, /id: publication_attempt/);
+  assert.match(attempt, /started=true/);
+  assert.ok(job.indexOf(gate) < job.indexOf(attempt));
+  assert.ok(job.indexOf(attempt) < job.indexOf(publish));
   const cleanup = find('Draft release after publication failure');
-  assert.match(cleanup, /always\(\) && \(failure\(\) \|\| cancelled\(\)\) && steps.publish.outcome == 'success'/);
-  assert.match(cleanup, /gh release edit "\$TAG" --repo "\$GITHUB_REPOSITORY" --draft/);
+  assert.match(cleanup, /always\(\) && \(failure\(\) \|\| cancelled\(\)\) && steps.publication_attempt.outputs.started == 'true'/);
+  assert.match(cleanup, /await draftAttemptedRelease\(/);
   assert.ok(job.indexOf(deploy) < job.indexOf(cleanup));
+});
+
+test('TestFlight upload requires shared exact-commit evidence after native preflight; dry runs can export', async () => {
+  const workflow = await readFile(new URL('../../.github/workflows/release-ios.yml', import.meta.url), 'utf8');
+  const job = workflow.split('  testflight:')[1];
+  assert.match(job, /needs: preflight/);
+  assert.match(workflow.split('\njobs:')[0], /actions: read/);
+  const resolve = job.indexOf('name: Resolve the exact upload commit');
+  const gate = job.indexOf('name: Require every surface gate before TestFlight upload');
+  const upload = job.indexOf('name: Export IPA and upload to App Store Connect');
+  assert.ok(resolve > 0 && gate > resolve && upload > gate);
+  assert.match(job.slice(resolve, gate), /git rev-parse HEAD/);
+  assert.match(job.slice(gate, upload), /if: steps.upload.outputs.enabled == 'true'/);
+  assert.match(job.slice(gate, upload), /await verifyReleasePublication\(.*sha: process.env.RELEASE_SHA/);
+  assert.doesNotMatch(job.slice(gate, upload), /continue-on-error:/);
+  assert.match((await readFile(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8')),
+    /bash "\$GITHUB_WORKSPACE\/scripts\/ci-commit-homebrew.sh" "\$VERSION"/);
+});
+
+
+test('release rollback also covers verifier setup failure and cancellation', async () => {
+  const release = await readFile(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
+  const verification = release.split('  verify-release:')[1];
+  const rollback = verification.split('      - name: Pull the release back to draft')[1];
+  assert.match(rollback, /always\(\) && \(failure\(\) \|\| cancelled\(\)\)/);
+  assert.doesNotMatch(rollback, /steps\.verify\.outcome/);
+  assert.match(rollback, /gh release edit/);
 });
