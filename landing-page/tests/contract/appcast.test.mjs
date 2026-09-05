@@ -7,19 +7,23 @@
 // Note on freshness: .github/workflows/release.yml regenerates the appcast,
 // deploys it to Cloudflare Pages and then commits it back to main
 // (scripts/ci-commit-appcast.sh), so the copy in git is expected to name the
-// newest tag. CI runs with APPCAST_REQUIRE_LATEST=1, which turns a lag into a
-// failure: it means the commit-back did not land (check the release run for a
-// ::warning:: and a release/appcast-v* branch). Without the variable the lag
-// is only reported, for local runs on older checkouts.
+// newest PUBLISHED release. CI resolves that with `gh release list` into
+// APPCAST_LATEST_PUBLISHED and runs with APPCAST_REQUIRE_LATEST=1, which turns
+// a lag into a failure: it means the commit-back did not land (check the
+// release run for a ::warning:: and a release/appcast-v* branch). A tag whose
+// release failed or was drafted is NOT a reference (issue #113), and without
+// published-release information the lag is only reported.
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   DMG_URL,
   SEMVER,
+  assessFreshness,
   compareSemver,
   gitTagExists,
   latestGitTagVersion,
+  latestPublishedReleaseVersion,
   parseAppcast,
   readRepoAppcast,
 } from '../support/appcast.mjs';
@@ -92,31 +96,37 @@ test('items are in descending version order with unique versions', () => {
   }
 });
 
-test('top item points at a real release tag and is never ahead of the newest tag', (t) => {
+test('top item points at a real release tag and tracks the newest PUBLISHED release', (t) => {
   const { items } = parseAppcast(xml);
   const top = items[0].shortVersion;
-  const latest = latestGitTagVersion();
+  const latestTag = latestGitTagVersion();
+  const latestPublished = latestPublishedReleaseVersion();
 
-  if (!latest) {
-    t.diagnostic('no v* tags in this checkout (shallow clone?) - skipping tag comparison');
-    t.skip('no git tags available');
+  if (!latestTag && !latestPublished) {
+    t.diagnostic('no v* tags in this checkout (shallow clone?) and no APPCAST_LATEST_PUBLISHED - skipping freshness');
+    t.skip('no release reference available');
     return;
   }
 
-  assert.ok(gitTagExists(top), `appcast top version ${top} has no matching git tag v${top}`);
-  assert.ok(
-    compareSemver(top, latest) <= 0,
-    `appcast top version ${top} is AHEAD of the newest tag v${latest}; the appcast points at a release that does not exist`,
-  );
+  if (latestTag) {
+    assert.ok(gitTagExists(top), `appcast top version ${top} has no matching git tag v${top}`);
+  }
 
-  if (compareSemver(top, latest) < 0) {
-    const message =
-      `landing-page/appcast.xml top item is ${top} but the newest tag is v${latest}. ` +
-      'release.yml should have committed the regenerated appcast back (scripts/ci-commit-appcast.sh); ' +
-      'check that release run for a ::warning:: and merge its release/appcast-v* branch, or copy the live feed in.';
-    if (process.env.APPCAST_REQUIRE_LATEST === '1') {
-      assert.fail(message);
-    }
-    t.diagnostic(`WARNING: ${message}`);
+  // A tag is created before its release is built and published, so the
+  // reference for freshness is the newest PUBLISHED release (CI passes it in
+  // as APPCAST_LATEST_PUBLISHED); see assessFreshness and issue #113.
+  const verdict = assessFreshness({
+    top,
+    latestTag,
+    latestPublished,
+    requireLatest: process.env.APPCAST_REQUIRE_LATEST === '1',
+  });
+  if (verdict.level === 'fail') {
+    assert.fail(verdict.message);
+  }
+  if (verdict.level === 'warn') {
+    t.diagnostic(`WARNING: ${verdict.message}`);
+  } else {
+    t.diagnostic(verdict.message);
   }
 });

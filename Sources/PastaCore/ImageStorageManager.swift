@@ -51,6 +51,16 @@ public final class ImageStorageManager {
         return url.path
     }
 
+    /// Move inline image bytes to file storage only after the write succeeds.
+    /// On failure the unchanged entry can still persist its bytes in SQLite
+    /// and upload them later, rather than becoming an asset-less image row.
+    public func persistImageData(in entry: inout ClipboardEntry) throws {
+        guard let data = entry.rawData else { return }
+        let path = try saveImage(data)
+        entry.imagePath = path
+        entry.rawData = nil
+    }
+
     #if canImport(AppKit)
     public func loadImage(path: String) -> NSImage? {
         if let image = NSImage(contentsOfFile: path) {

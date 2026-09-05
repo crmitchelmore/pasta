@@ -44,12 +44,37 @@ jobs:
         # blocked a release (scripts/ci-npm-ci.sh).
         run: ../scripts/ci-npm-ci.sh
 
+      - name: Verify SwiftPM and Xcode dependency locks
+        run: python3 scripts/ci-verify-dependency-locks.py
+
+      - name: Test CI and release gate failure handling
+        run: |
+          python3 -B -m unittest discover -s scripts/tests -p 'test_*.py' -v
+          node --test scripts/tests/*.test.mjs
+
+      # A tag is created before its release is built and published, so the
+      # freshness reference is the newest PUBLISHED release, not the newest
+      # tag; otherwise a failed release would block every later CI run (#113).
+      # Tolerant on purpose: without this value the contract test only warns.
+      - name: Resolve the newest published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          LATEST=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // empty' 2>/dev/null || true)
+          if [ -n "$LATEST" ]; then
+            echo "APPCAST_LATEST_PUBLISHED=${LATEST#v}" >> "$GITHUB_ENV"
+            echo "Newest published release: $LATEST"
+          else
+            echo "::warning::Could not resolve the newest published release from GitHub; the appcast freshness check will only warn on lag."
+          fi
+
       - name: Contract checks (appcast.xml, _redirects, _headers)
         working-directory: landing-page
         env:
           # release.yml commits the regenerated appcast back to main
           # (scripts/ci-commit-appcast.sh), so the git copy must name the
-          # newest tag; a lag now means that commit-back failed.
+          # newest published release; a lag now means that commit-back failed.
           APPCAST_REQUIRE_LATEST: '1'
         run: npm run test:contract
 
@@ -77,6 +102,9 @@ jobs:
               - 'landing-page/**'
               - 'scripts/generate-appcast.sh'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/deploy-landing-page.yml'
+              - '.github/workflows/release.yml'
+              - 'scripts/ci-verify-landing-deploy.mjs'
 
   landing-e2e:
     name: Landing page e2e (Playwright)
@@ -169,13 +197,15 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Resolve Swift dependencies
-        run: swift package resolve
+        run: |
+          python3 scripts/ci-verify-dependency-locks.py
+          swift package resolve --force-resolved-versions
       
       - name: Build
-        run: swift build -c debug
+        run: swift build --force-resolved-versions -c debug
       
       - name: Run tests
-        run: swift test --parallel
+        run: swift test --force-resolved-versions --parallel
 
       - name: Test release-notes generator
         run: node --test Tests/ReleaseNotesTests/*.test.mjs
@@ -184,7 +214,7 @@ jobs:
         run: scripts/tests/ci-verify-eddsa.test.sh
       
       - name: Build release
-        run: swift build -c release
+        run: swift build --force-resolved-versions -c release
       
       - name: Create test app bundle (mirrors release workflow)
         id: bundle
@@ -386,7 +416,7 @@ jobs:
           path: |
             .build/ios-derived/SourcePackages
             .build/ios-derived/Build/Intermediates.noindex
-          key: ios-e2e-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift', 'PastaIOS/PastaIOS.xcodeproj/project.pbxproj') }}
+          key: ios-e2e-${{ runner.os }}-${{ hashFiles('Package.resolved', 'PastaIOS/PastaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'Package.swift', 'PastaIOS/PastaIOS.xcodeproj/project.pbxproj') }}
           restore-keys: |
             ios-e2e-${{ runner.os }}-
 
@@ -425,18 +455,68 @@ jobs:
         if: always()
         run: scripts/ci-ios-e2e.sh cleanup
 
-  # RELEASE GATE. Tagging a release must wait for EVERY suite on every surface:
-  # macOS build+tests+launch smoke, iOS XCUITests, the appcast/Cloudflare
-  # contract, and the landing-page Playwright suite when it ran (it is
-  # path-filtered, so "skipped" is the only other acceptable result). A red,
-  # cancelled or missing result on any of them means no tag, hence no
-  # release.yml / release-ios.yml run. `always()` is needed so this job is
-  # evaluated when landing-e2e was skipped; the explicit result checks below
-  # then decide.
+  # ============================================================================
+  # CI GATE: one always-reported check that is green only when EVERY suite on
+  # every surface is green: macOS build+tests+launch smoke, iOS XCUITests, the
+  # appcast/Cloudflare contract, path detection, and the landing-page Playwright
+  # suite whenever it was relevant. A path-filtered "skipped" Playwright result
+  # is accepted only when path detection proved the landing page untouched.
+  # Because this job always runs, it can be a REQUIRED status check on main
+  # (a skipped check never reports and would block or be ignored); the ruleset
+  # installed by scripts/owner-require-status-checks.sh requires it. It is also
+  # the single condition auto-release depends on (#108).
+  # ============================================================================
+  ci-gate:
+    name: CI gate
+    needs: [test, ios-e2e, appcast-contract, landing-changes, landing-e2e]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Evaluate every gate
+        env:
+          TEST: ${{ needs.test.result }}
+          IOS: ${{ needs.ios-e2e.result }}
+          APPCAST: ${{ needs.appcast-contract.result }}
+          LANDING_CHANGES: ${{ needs.landing-changes.result }}
+          LANDING_TOUCHED: ${{ needs.landing-changes.outputs.landing }}
+          LANDING_E2E: ${{ needs.landing-e2e.result }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -u
+          ok=true
+          row() { printf '| %s | %s | %s |\n' "$1" "$2" "$3" >> "$GITHUB_STEP_SUMMARY"; }
+          { echo "## CI gate"; echo; echo "| Gate | Result | Verdict |"; echo "|---|---|---|"; } >> "$GITHUB_STEP_SUMMARY"
+          for pair in "Build & Test:$TEST" "iOS E2E (XCUITest):$IOS" "Appcast & Cloudflare config contract:$APPCAST" "Detect landing page changes:$LANDING_CHANGES"; do
+            name="${pair%%:*}"; result="${pair##*:}"
+            if [ "$result" = "success" ]; then row "$name" "$result" "✅"; else row "$name" "$result" "❌"; ok=false; fi
+          done
+          case "$LANDING_E2E" in
+            success) row "Landing page e2e (Playwright)" "success" "✅" ;;
+            skipped)
+              if [ "$LANDING_TOUCHED" != "true" ] && [ "$EVENT" != "workflow_dispatch" ]; then
+                row "Landing page e2e (Playwright)" "skipped (landing page untouched)" "✅"
+              else
+                row "Landing page e2e (Playwright)" "skipped although it was relevant" "❌"; ok=false
+              fi ;;
+            *) row "Landing page e2e (Playwright)" "$LANDING_E2E" "❌"; ok=false ;;
+          esac
+          if [ "$ok" = "true" ]; then
+            echo "All gates green."
+          else
+            echo "::error::CI gate: at least one release gate is not green (see the job summary). Fix the red suite; never bypass it."
+            exit 1
+          fi
+
+  # RELEASE GATE. Tagging a release must wait for the CI gate above, i.e. for
+  # EVERY suite on every surface. A red, cancelled or missing result on any of
+  # them fails `ci-gate`, so this job never runs and no release.yml /
+  # release-ios.yml run is triggered.
   auto-release:
     name: Auto Version & Release
-    needs: [test, ios-e2e, appcast-contract, landing-changes, landing-e2e]
-    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.result == 'success' && needs.ios-e2e.result == 'success' && needs.appcast-contract.result == 'success' && (needs.landing-e2e.result == 'success' || needs.landing-e2e.result == 'skipped') }}
+    needs: [ci-gate]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     # Pure git + shell (version bump from conventional commits, tag push): no
     # Xcode needed. Keeping this off macOS spares every release a second wait in
     # the account-wide macOS runner queue, which can run to an hour or more.

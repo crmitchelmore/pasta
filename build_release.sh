@@ -21,7 +21,8 @@ POSTHOG_PROJECT_KEY="${POSTHOG_PROJECT_KEY:-}"
 POSTHOG_HOST="${POSTHOG_HOST:-https://eu.i.posthog.com}"
 
 echo "==> Building release binary (version=$PASTA_VERSION build=$PASTA_BUILD)"
-swift build -c release
+python3 scripts/ci-verify-dependency-locks.py
+swift build --force-resolved-versions -c release
 
 echo "==> Staging app bundle"
 rm -rf "$APP_DIR"

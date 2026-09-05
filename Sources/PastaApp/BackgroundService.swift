@@ -348,9 +348,7 @@ final class BackgroundService: ObservableObject {
                 guard retentionDays > 0 else { return false }
                 do {
                     let result = try db.pruneOlderThan(days: retentionDays)
-                    for path in result.imagePaths {
-                        try? storage.deleteImage(path: path)
-                    }
+                    try? db.deleteUnreferencedImages(paths: result.imagePaths, using: storage)
                     if !result.imagePaths.isEmpty {
                         PastaLogger.database.debug("Pruned \(result.imagePaths.count) images due to retention policy")
                     }
@@ -446,6 +444,7 @@ final class BackgroundService: ObservableObject {
 
                     // Insert all entries
                     var insertedEntries: [ClipboardEntry] = []
+                    var firstInsertionError: PastaError?
                     for e in result.allEntries {
                         // Skip API keys if setting is enabled
                         if skipAPIKeys && e.contentType == .apiKey {
@@ -459,6 +458,9 @@ final class BackgroundService: ObservableObject {
                             PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)\(e.isExtracted ? " (extracted)" : "")")
                         } catch {
                             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert entry")
+                            if firstInsertionError == nil {
+                                firstInsertionError = (error as? PastaError) ?? .unknown(underlying: error)
+                            }
                         }
                     }
 
@@ -480,10 +482,18 @@ final class BackgroundService: ObservableObject {
                         }
                     }
 
+                    let captureError = firstInsertionError ?? result.storageError
+                    let feedbackEntry = insertedEntries.first
                     await self.enforceMaxEntriesLimit()
                     await self.refreshAfterInsert(insertedCount: insertedEntries.count)
                     await MainActor.run {
-                        self.provideFeedback(for: result.primaryEntry)
+                        if let captureError {
+                            self.lastError = captureError
+                        } else {
+                            // No success sound/notification for failed or fully
+                            // excluded captures. Partial failures surface the error.
+                            self.provideFeedback(for: feedbackEntry)
+                        }
                     }
                 }
             }
@@ -533,6 +543,7 @@ final class BackgroundService: ObservableObject {
                     }
 
                     var insertedScreenshots: [ClipboardEntry] = []
+                    var firstInsertionError: PastaError?
                     for e in result.allEntries {
                         do {
                             try db.insert(e, deduplicate: deduplicate)
@@ -540,6 +551,9 @@ final class BackgroundService: ObservableObject {
                             PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)")
                         } catch {
                             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert screenshot entry")
+                            if firstInsertionError == nil {
+                                firstInsertionError = (error as? PastaError) ?? .unknown(underlying: error)
+                            }
                         }
                     }
 
@@ -561,10 +575,16 @@ final class BackgroundService: ObservableObject {
                         }
                     }
 
+                    let captureError = firstInsertionError ?? result.storageError
+                    let feedbackEntry = insertedScreenshots.first
                     await self.enforceMaxEntriesLimit()
                     await self.refreshAfterInsert(insertedCount: insertedScreenshots.count)
                     await MainActor.run {
-                        self.provideFeedback(for: result.primaryEntry)
+                        if let captureError {
+                            self.lastError = captureError
+                        } else {
+                            self.provideFeedback(for: feedbackEntry)
+                        }
                     }
                 }
             }
@@ -617,9 +637,7 @@ final class BackgroundService: ObservableObject {
             if !result.imagePaths.isEmpty {
                 PastaLogger.database.debug("Pruned \(result.imagePaths.count) images due to max entries limit")
             }
-            for path in result.imagePaths {
-                try? storage.deleteImage(path: path)
-            }
+            try? db.deleteUnreferencedImages(paths: result.imagePaths, using: storage)
             return result.didPrune
         }.value
     }
@@ -632,6 +650,8 @@ final class BackgroundService: ObservableObject {
         var extractedEntries: [ClipboardEntry]
         /// Whether this was an env var block that should be split (legacy behavior).
         var envVarSplitEntries: [ClipboardEntry]
+        /// Non-fatal file-storage failure; inline image bytes remain available.
+        var storageError: PastaError? = nil
 
         /// All entries to insert: either the split entries OR (primary + extracted).
         var allEntries: [ClipboardEntry] {
@@ -652,21 +672,21 @@ final class BackgroundService: ObservableObject {
     ) throws -> EnrichResult {
         var entry = entry
 
-        if entry.contentType == .image || entry.contentType == .screenshot, let data = entry.rawData {
+        if entry.contentType == .image || entry.contentType == .screenshot, entry.rawData != nil {
+            var storageError: PastaError?
             if storeImages {
                 do {
-                    entry.imagePath = try imageStorage.saveImage(data)
-                    entry.rawData = nil
+                    try imageStorage.persistImageData(in: &entry)
                 } catch {
-                    PastaLogger.logError(error, logger: PastaLogger.storage, context: "Failed to save image, continuing without it")
-                    entry.rawData = nil
+                    PastaLogger.logError(error, logger: PastaLogger.storage, context: "Failed to save image file, retaining image bytes in database")
+                    storageError = (error as? PastaError) ?? .imageSaveFailed(underlying: error)
                 }
             } else {
                 // Don't store image data, just record that an image was copied
                 entry.rawData = nil
                 PastaLogger.clipboard.debug("Skipped storing image data - disabled in settings")
             }
-            return EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: [])
+            return EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: [], storageError: storageError)
         }
 
         let output = detector.detect(in: entry.content, configuration: detectorConfiguration)
