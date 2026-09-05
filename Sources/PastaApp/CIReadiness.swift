@@ -43,6 +43,20 @@ enum CIReadiness {
         PastaLogger.app.info("CI readiness signalled (\(entryCount) entries loaded)")
     }
 
+    /// Prefix of the stderr line the harness treats as an immediate failure.
+    static let degradedLine = "PASTA_CI_DEGRADED"
+
+    /// Reports that readiness will never be signalled because a persistent
+    /// service fell back to volatile storage (in-memory database, temporary
+    /// image directory). Without this line the smoke test could only time out
+    /// with a generic message; with it, scripts/ci-launch-smoke.sh fails fast
+    /// and names the reason. Stderr is the only channel the harness captures.
+    static func reportDegraded(reason: String) {
+        guard isEnabled else { return }
+        FileHandle.standardError.write(Data("\(degradedLine) reason=\(reason)\n".utf8))
+        PastaLogger.app.error("CI readiness refused: \(reason)")
+    }
+
     /// Routes SIGTERM through `NSApplication.terminate` so the harness's
     /// `kill -TERM` exercises the normal quit path (and gets exit code 0)
     /// instead of the default signal death (exit 143) that would hide a

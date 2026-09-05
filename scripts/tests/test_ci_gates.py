@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -183,3 +184,75 @@ else:
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class LaunchSmokeTests(unittest.TestCase):
+    """scripts/ci-launch-smoke.sh against a stand-in app bundle.
+
+    The stand-in is a Python script in Contents/MacOS that behaves like the
+    real app's PASTA_CI contract: it prints PASTA_CI_READY, or PASTA_CI_DEGRADED,
+    and exits 0 on SIGTERM. PlistBuddy/codesign/log are absent on Linux; the
+    script tolerates that, so these run in the ubuntu contract job too.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="pasta-smoke-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def make_app(self, body):
+        app = self.root / "Pasta.app"
+        (app / "Contents" / "MacOS").mkdir(parents=True)
+        (app / "Contents" / "Info.plist").write_text(
+            '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>'
+            '<key>CFBundleExecutable</key><string>PastaApp</string>'
+            '<key>CFBundleShortVersionString</key><string>0.0.0</string>'
+            '<key>CFBundleVersion</key><string>1</string></dict></plist>'
+        )
+        binary = app / "Contents" / "MacOS" / "PastaApp"
+        binary.write_text("#!/usr/bin/env python3\nimport os, signal, sys, time\n" + body)
+        binary.chmod(0o755)
+        return app
+
+    def run_smoke(self, app, **environment):
+        result = subprocess.run(
+            ['bash', str(ROOT / 'scripts' / 'ci-launch-smoke.sh'), str(app)],
+            cwd=self.root,
+            env={**os.environ, "SMOKE_TMP": str(self.root / "smoke"), "READY_TIMEOUT": "8", "QUIT_TIMEOUT": "5", **environment},
+            capture_output=True, text=True, timeout=60,
+        )
+        return result.returncode, result.stdout + result.stderr
+
+    def test_ready_then_clean_sigterm_exit_passes(self):
+        app = self.make_app("""
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+assert os.environ.get('PASTA_CI') == '1', 'harness must set PASTA_CI'
+sys.stderr.write('PASTA_CI_READY entries=0\\n'); sys.stderr.flush()
+while True: time.sleep(0.2)
+""")
+        code, output = self.run_smoke(app)
+        self.assertEqual(code, 0, output)
+        self.assertIn("Smoke test PASSED", output)
+
+    def test_degraded_readiness_fails_fast_with_the_reason(self):
+        app = self.make_app("""
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+sys.stderr.write('PASTA_CI_DEGRADED reason=in-memory-database\\n'); sys.stderr.flush()
+while True: time.sleep(0.2)
+""")
+        started = time.monotonic()
+        code, output = self.run_smoke(app, READY_TIMEOUT="30")
+        elapsed = time.monotonic() - started
+        self.assertNotEqual(code, 0, output)
+        self.assertIn("PASTA_CI_DEGRADED reason=in-memory-database", output)
+        self.assertIn("refused readiness", output)
+        self.assertLess(elapsed, 20, f"degraded state must fail fast, not wait out READY_TIMEOUT ({elapsed:.1f}s)")
+
+    def test_never_ready_still_times_out_with_the_generic_message(self):
+        app = self.make_app("""
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+while True: time.sleep(0.2)
+""")
+        code, output = self.run_smoke(app, READY_TIMEOUT="3")
+        self.assertNotEqual(code, 0, output)
+        self.assertIn("never reported PASTA_CI_READY", output)

@@ -115,6 +115,11 @@ final class BackgroundService: ObservableObject {
         }()
         self.imageStorage = storage
         self.hasDurableStorage = dbError == nil && storageError == nil
+        if dbError != nil || storageError != nil {
+            // Readiness will be refused (see signalCIReadinessIfReady); tell the
+            // CI harness why instead of letting it time out.
+            CIReadiness.reportDegraded(reason: dbError != nil ? "in-memory-database" : "temporary-image-storage")
+        }
         self.syncManager = SyncManager(containerIdentifier: "iCloud.com.pasta.ios")
         
         self.clipboardMonitor = ClipboardMonitor()
