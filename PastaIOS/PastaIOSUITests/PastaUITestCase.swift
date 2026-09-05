@@ -37,14 +37,13 @@ class PastaUITestCase: XCTestCase {
     ///     the first-run onboarding screen.
     ///   - pasteboard: string the app writes to `UIPasteboard.general` before
     ///     its activation-time clipboard capture runs.
+    ///   - resetState: erase storage (default), or preserve it for relaunch assertions.
     @discardableResult
-    func launchApp(skipOnboarding: Bool = true, pasteboard: String? = nil) -> XCUIApplication {
-        app.launchArguments += ["-uiTesting"]
-        app.launchEnvironment["PASTA_UI_TEST_RESET"] = "1"
+    func launchApp(skipOnboarding: Bool = true, pasteboard: String? = nil, resetState: Bool = true) -> XCUIApplication {
+        app.launchArguments = ["-uiTesting"]
+        app.launchEnvironment["PASTA_UI_TEST_RESET"] = resetState ? "1" : "0"
         app.launchEnvironment["PASTA_UI_TEST_SKIP_ONBOARDING"] = skipOnboarding ? "1" : "0"
-        if let pasteboard {
-            app.launchEnvironment["PASTA_UI_TEST_PASTEBOARD"] = pasteboard
-        }
+        app.launchEnvironment["PASTA_UI_TEST_PASTEBOARD"] = pasteboard
         app.launch()
         return app
     }

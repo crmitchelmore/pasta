@@ -7,7 +7,7 @@
 #
 #   VALID            -> exit 0 (the build is available in TestFlight)
 #   INVALID / FAILED -> exit 1 with the build attributes (::error::)
-#   timeout          -> exit 0 with a ::warning:: (Apple is slow, not broken)
+#   timeout          -> exit 1: acceptance remains unverified (do not re-upload)
 #
 # Usage: scripts/ci-asc-wait-for-build.sh <marketing-version> <build-number>
 #
@@ -142,8 +142,8 @@ else:
   fi
 
   if [ "$(date +%s)" -ge "$DEADLINE" ]; then
-    echo "::warning::Build $VERSION ($BUILD_NUMBER) was still processing after ${ASC_TIMEOUT_MINUTES} min (last state: ${STATE:-unknown}). Apple is slow, not necessarily broken - check the TestFlight tab before relying on this build."
-    exit 0
+    echo "::error::Could not verify App Store Connect acceptance of build $VERSION ($BUILD_NUMBER) after ${ASC_TIMEOUT_MINUTES} min (last state: ${STATE:-unknown}). The upload may still finish; check this existing build in TestFlight or rerun this polling script. Do not re-upload the same build number."
+    exit 1
   fi
   sleep "$ASC_POLL_SECONDS"
 done

@@ -55,12 +55,16 @@ Nothing else is needed. The workflow never reads Apple ID passwords.
 4. `testflight` then sets `MARKETING_VERSION` to the tag (`v1.5.0` → `1.5.0`)
    and `CURRENT_PROJECT_VERSION` to the build number described below, archives,
    verifies the archive's bundle id / version / build / iCloud container, then
-   exports and uploads.
+   independently requires successful main CI for that exact commit across every
+   surface, then exports and uploads. Main must still match the commit or be an
+   appcast-only descendant. This applies to automatic and manual tags/uploads.
 5. After the upload, `scripts/ci-asc-wait-for-build.sh` polls the App Store
    Connect API (a JWT minted from the same `APP_STORE_CONNECT_*` secrets) every
    60 s for up to 20 minutes until the build's `processingState` is `VALID`.
    `INVALID`/`FAILED` fails the job and prints the build's attributes; a
-   timeout is only a warning (Apple can be slow — check the TestFlight tab).
+   timeout also fails because acceptance remains unverified. The upload may
+   still complete: inspect the existing build or rerun only the polling script,
+   rather than re-uploading the same build number.
    Once `VALID`, the build is under the app's TestFlight tab; internal testers
    get it automatically, external groups need the usual review.
 
@@ -80,6 +84,11 @@ together cannot race App Store Connect.
   attaches the IPA plus dSYMs as a workflow artifact, but does not talk to App
   Store Connect (no upload, no processing poll), so no build number is
   consumed. **Do this first** after adding the secrets.
+
+Manual uploads need successful main CI on the selected source commit; a feature
+branch or superseded commit cannot be published by passing a version override.
+Run CI on current main first (manual CI includes Playwright). Dry-run export
+remains available after native preflight without the shared upload gate.
 
 ## Build numbers
 

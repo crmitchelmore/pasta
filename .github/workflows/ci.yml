@@ -44,6 +44,11 @@ jobs:
         # blocked a release (scripts/ci-npm-ci.sh).
         run: ../scripts/ci-npm-ci.sh
 
+      - name: Test CI and release gate failure handling
+        run: |
+          python3 -B -m unittest discover -s scripts/tests -p 'test_*.py' -v
+          node --test scripts/tests/*.test.mjs
+
       - name: Contract checks (appcast.xml, _redirects, _headers)
         working-directory: landing-page
         env:
@@ -77,6 +82,9 @@ jobs:
               - 'landing-page/**'
               - 'scripts/generate-appcast.sh'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/deploy-landing-page.yml'
+              - '.github/workflows/release.yml'
+              - 'scripts/ci-verify-landing-deploy.mjs'
 
   landing-e2e:
     name: Landing page e2e (Playwright)
@@ -436,7 +444,7 @@ jobs:
   auto-release:
     name: Auto Version & Release
     needs: [test, ios-e2e, appcast-contract, landing-changes, landing-e2e]
-    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.result == 'success' && needs.ios-e2e.result == 'success' && needs.appcast-contract.result == 'success' && (needs.landing-e2e.result == 'success' || needs.landing-e2e.result == 'skipped') }}
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.landing-changes.result == 'success' && needs.test.result == 'success' && needs.ios-e2e.result == 'success' && needs.appcast-contract.result == 'success' && (needs.landing-e2e.result == 'success' || needs.landing-e2e.result == 'skipped') }}
     # Pure git + shell (version bump from conventional commits, tag push): no
     # Xcode needed. Keeping this off macOS spares every release a second wait in
     # the account-wide macOS runner queue, which can run to an hour or more.
