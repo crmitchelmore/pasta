@@ -17,7 +17,8 @@ struct QuickSearchPreviewPanel: View {
     @State private var isContentTruncated: Bool = false
 
     var body: some View {
-        let isImageEntry = (entry.contentType == .image || entry.contentType == .screenshot) && entry.imagePath != nil
+        let imageSource = ClipboardImageSource(entry: entry)
+        let isImageEntry = imageSource != nil
 
         VStack(alignment: .leading, spacing: 0) {
             // Header with metadata
@@ -65,8 +66,8 @@ struct QuickSearchPreviewPanel: View {
 
             // Scrollable content
             ScrollView {
-                if let imagePath = entry.imagePath, isImageEntry {
-                    ImagePreview(path: imagePath)
+                if let imageSource {
+                    ImagePreview(source: imageSource)
                         .padding(16)
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
@@ -101,7 +102,7 @@ struct QuickSearchPreviewPanel: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
         }
-        .onChange(of: entry.id, initial: true) { _, _ in
+        .onChange(of: entry.content, initial: true) { _, _ in
             refreshDisplayedContent()
         }
     }

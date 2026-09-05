@@ -9,12 +9,10 @@ import UniformTypeIdentifiers
 
 struct iCloudSettingsTab: View {
     @ObservedObject var syncManager: SyncManager
-    /// Fetches the entries still awaiting an iCloud push, straight from the
-    /// database — not from the app's in-memory display window, which both
-    /// re-uploads everything already synced and misses entries beyond the
-    /// window.
-    let unsyncedEntries: @Sendable () -> [ClipboardEntry]
-    let markSynced: (([UUID]) -> Void)?
+    let syncNow: (@MainActor () async throws -> Void)?
+    let resetSync: (@MainActor () throws -> Void)?
+    @State private var isSyncing = false
+    @State private var syncError: String?
     let syncedCount: () -> Int
     @State private var iCloudAvailable: Bool? = nil
     @State private var isResetting = false
@@ -74,7 +72,7 @@ struct iCloudSettingsTab: View {
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 4)
-                } else if syncManager.syncState == .syncing {
+                } else if isSyncing || syncManager.syncState == .syncing {
                     HStack {
                         ProgressView()
                             .controlSize(.small)
@@ -86,25 +84,32 @@ struct iCloudSettingsTab: View {
                         Text("Sync Now")
                         Spacer()
                         Button("Sync") {
-                            let markCallback = markSynced
-                            let fetchUnsynced = unsyncedEntries
-                            Task {
-                                try? await syncManager.setupZone()
-                                let entries = await Task.detached(priority: .userInitiated) {
-                                    fetchUnsynced()
-                                }.value
-                                if !entries.isEmpty {
-                                    _ = try? await syncManager.pushEntries(entries, onBatchSynced: markCallback)
+                            guard let syncNow, !isSyncing else { return }
+                            isSyncing = true
+                            syncError = nil
+                            Task { @MainActor in
+                                defer {
+                                    isSyncing = false
+                                    displayedSyncedCount = syncedCount()
                                 }
-                                _ = try? await syncManager.fetchChanges()
+                                do {
+                                    try await syncNow()
+                                } catch {
+                                    syncError = error.localizedDescription
+                                }
                             }
                         }
+                        .disabled(syncNow == nil || iCloudAvailable != true)
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                     }
                 }
 
-                if case .error(let message) = syncManager.syncState {
+                if let syncError {
+                    Text(syncError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else if case .error(let message) = syncManager.syncState {
                     Text(message)
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -125,6 +130,7 @@ struct iCloudSettingsTab: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .disabled(resetSync == nil || isSyncing || syncManager.syncState == .syncing)
                     Spacer()
                 }
 
@@ -154,7 +160,12 @@ struct iCloudSettingsTab: View {
             titleVisibility: .visible
         ) {
             Button("Reset Sync", role: .destructive) {
-                syncManager.resetSync()
+                do {
+                    try resetSync?()
+                    syncError = nil
+                } catch {
+                    syncError = error.localizedDescription
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {

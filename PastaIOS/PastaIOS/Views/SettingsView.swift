@@ -106,13 +106,13 @@ struct SettingsView: View {
     private var dangerSection: some View {
         Section {
             Button(role: .destructive) {
-                syncManager.resetSync()
                 Task {
-                    await appState.performSync(syncManager: syncManager)
+                    await appState.resetSync(syncManager: syncManager)
                 }
             } label: {
                 Label("Reset Sync", systemImage: "arrow.counterclockwise")
             }
+            .disabled(syncManager.syncState == .syncing)
         } footer: {
             Text("Clears the sync token and forces a full re-sync from iCloud.")
         }

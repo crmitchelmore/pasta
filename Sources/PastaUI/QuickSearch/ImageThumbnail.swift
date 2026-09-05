@@ -4,10 +4,10 @@ import SwiftUI
 // MARK: - Image Thumbnail
 
 struct ImageThumbnail: View {
-    let path: String
+    let source: ClipboardImageSource
     let size: CGFloat
     @State private var image: NSImage?
-    @State private var loadedPath: String = ""
+    @State private var loadedSource: ClipboardImageSource?
 
     var body: some View {
         Group {
@@ -26,30 +26,30 @@ struct ImageThumbnail: View {
         .onAppear {
             loadImageIfNeeded()
         }
-        .onChange(of: path) { _, newPath in
-            loadImage(from: newPath)
+        .onChange(of: source) { _, newSource in
+            loadImage(from: newSource)
         }
     }
 
     private func loadImageIfNeeded() {
-        guard loadedPath != path else { return }
-        loadImage(from: path)
+        guard loadedSource != source else { return }
+        loadImage(from: source)
     }
 
-    private func loadImage(from imagePath: String) {
-        loadedPath = imagePath
+    private func loadImage(from source: ClipboardImageSource) {
+        loadedSource = source
         let pixelSize = size * 2 // retina
 
-        if let cached = ImageDownsampler.cached(path: imagePath, maxPixelSize: pixelSize) {
+        if let cached = ImageDownsampler.cached(source: source, maxPixelSize: pixelSize) {
             image = cached
             return
         }
 
         image = nil
         Task.detached(priority: .userInitiated) {
-            let thumbnail = ImageDownsampler.cachedLoad(path: imagePath, maxPixelSize: pixelSize)
+            let thumbnail = ImageDownsampler.cachedLoad(source: source, maxPixelSize: pixelSize)
             await MainActor.run {
-                if loadedPath == imagePath {
+                if loadedSource == source {
                     image = thumbnail
                 }
             }

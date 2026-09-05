@@ -60,6 +60,87 @@ final class RecordMapperTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: secondURL.path))
     }
 
+    func testPersistedDiskOnlyImagesRoundTripThroughAsset() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storage = try ImageStorageManager(imagesDirectoryURL: directory.appendingPathComponent("Images"))
+        let database = try DatabaseManager(databaseURL: directory.appendingPathComponent("history.sqlite"))
+        let bytes = try XCTUnwrap(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a4X8AAAAASUVORK5CYII="
+        ))
+        let imagePath = try storage.saveImage(bytes)
+        let mapper = RecordMapper()
+
+        for contentType in [ContentType.image, .screenshot] {
+            let original = ClipboardEntry(content: "", contentType: contentType, imagePath: imagePath)
+            try database.insert(original, deduplicate: false)
+            let persisted = try XCTUnwrap(database.fetch(id: original.id))
+            XCTAssertNil(persisted.rawData)
+
+            let prepared = try mapper.preparedRecord(from: persisted, zoneID: zoneID)
+            defer { prepared.cleanupTemporaryAsset() }
+            let asset = try XCTUnwrap(prepared.record["imageAsset"] as? CKAsset)
+            let assetURL = try XCTUnwrap(asset.fileURL)
+            XCTAssertNotEqual(assetURL.path, imagePath, "cleanup must never remove the original image")
+            XCTAssertEqual(try Data(contentsOf: assetURL), bytes)
+            XCTAssertEqual(mapper.contentSize(from: prepared.record), bytes.count)
+
+            let decoded = try XCTUnwrap(mapper.entry(from: prepared.record))
+            XCTAssertEqual(decoded.rawData, bytes)
+            XCTAssertEqual(decoded.contentType, contentType)
+            XCTAssertNil(decoded.imagePath, "another device must receive bytes, not a device-local path")
+            prepared.cleanupTemporaryAsset()
+            XCTAssertFalse(FileManager.default.fileExists(atPath: assetURL.path))
+            XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: imagePath)), bytes)
+        }
+    }
+
+    func testMissingPersistedImageFailsPreparation() {
+        let mapper = RecordMapper()
+        let missingPath = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        for contentType in [ContentType.image, .screenshot] {
+            let entry = ClipboardEntry(content: "", contentType: contentType, imagePath: missingPath)
+            XCTAssertThrowsError(try mapper.preparedRecord(from: entry, zoneID: zoneID))
+        }
+    }
+
+    func testInlineDataTakesPrecedenceOverImagePath() throws {
+        let mapper = RecordMapper()
+        let bytes = Data([1, 2, 3, 4])
+        let entry = ClipboardEntry(
+            content: "", contentType: .image, rawData: bytes,
+            imagePath: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        )
+        let prepared = try mapper.preparedRecord(from: entry, zoneID: zoneID)
+        defer { prepared.cleanupTemporaryAsset() }
+
+        let decoded = try XCTUnwrap(mapper.entry(from: prepared.record))
+        XCTAssertEqual(decoded.rawData, bytes)
+        XCTAssertEqual(mapper.contentSize(from: prepared.record), bytes.count)
+    }
+
+    func testImagesWithStorageDisabledRemainAssetless() throws {
+        let mapper = RecordMapper()
+        for contentType in [ContentType.image, .screenshot] {
+            let entry = ClipboardEntry(content: "image copied", contentType: contentType)
+            let prepared = try mapper.preparedRecord(from: entry, zoneID: zoneID)
+            XCTAssertNil(prepared.temporaryAssetURL)
+            XCTAssertNil(prepared.record["imageAsset"])
+            XCTAssertEqual(mapper.contentSize(from: prepared.record), entry.content.utf8.count)
+        }
+    }
+
+    func testNonImageDoesNotReadImagePath() throws {
+        let mapper = RecordMapper()
+        let entry = ClipboardEntry(
+            content: "plain text", contentType: .text,
+            imagePath: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        )
+        let prepared = try mapper.preparedRecord(from: entry, zoneID: zoneID)
+        XCTAssertNil(prepared.record["imageAsset"])
+        XCTAssertNil(prepared.temporaryAssetURL)
+    }
+
     func testEntryRoundTripPreservesCoreFields() throws {
         let mapper = RecordMapper()
         let original = ClipboardEntry(

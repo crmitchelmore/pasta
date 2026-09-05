@@ -27,6 +27,8 @@ public final class SyncManager: ObservableObject {
     
     private var container: CKContainer?
     private var database: CKDatabase?
+    private var pullService: SyncPullService?
+    @MainActor private var isPullInProgress = false
     private let recordMapper: RecordMapper
     private let logger = Logger(subsystem: "com.pasta.sync", category: "SyncManager")
     private let containerIdentifier: String?
@@ -36,7 +38,6 @@ public final class SyncManager: ObservableObject {
     public static let zoneID = CKRecordZone.ID(zoneName: zoneName, ownerName: CKCurrentUserDefaultName)
     
     // UserDefaults keys for sync tokens
-    private let changeTokenKey = "com.pasta.sync.changeToken"
     private let lastSyncDateKey = "com.pasta.sync.lastSyncDate"
     
     /// Whether sync is enabled. Disabled when CloudKit entitlement is missing.
@@ -45,7 +46,8 @@ public final class SyncManager: ObservableObject {
     /// - Parameters:
     ///   - containerIdentifier: Explicit CloudKit container ID, or nil to use the default container.
     ///   - syncEnabled: Set false to disable all CloudKit operations.
-    public init(containerIdentifier: String? = nil, syncEnabled: Bool = true) {
+    public init(containerIdentifier: String? = nil, syncEnabled: Bool = true, pullService: SyncPullService? = nil) {
+        self.pullService = pullService
         self.containerIdentifier = containerIdentifier
         self.syncEnabled = syncEnabled
         self.recordMapper = RecordMapper()
@@ -158,83 +160,89 @@ public final class SyncManager: ObservableObject {
             syncedEntryCount = 0
             totalEntriesToSync = entries.count
         }
-        defer {
-            Task { @MainActor in
+        do {
+
+            let batches = stride(from: 0, to: entries.count, by: batchSize).map {
+                Array(entries[$0..<min($0 + batchSize, entries.count)])
+            }
+        
+            var totalPushed = 0
+            for (index, batch) in batches.enumerated() {
+                if syncCancelled {
+                    let cancelledAt = totalPushed
+                    logger.info("Sync cancelled by user after \(cancelledAt)/\(entries.count) entries")
+                    break
+                }
+            
+                // An entry whose temp asset can't be written is EXCLUDED from the
+                // batch (and from onBatchSynced below), so it stays unsynced and
+                // is retried later, rather than being pushed asset-less and then
+                // marked synced — that would silently lose the image bytes on
+                // every other device.
+                var includedEntries: [ClipboardEntry] = []
+                var prepared: [RecordMapper.PreparedRecord] = []
+                includedEntries.reserveCapacity(batch.count)
+                prepared.reserveCapacity(batch.count)
+                for entry in batch {
+                    do {
+                        prepared.append(try recordMapper.preparedRecord(from: entry, zoneID: Self.zoneID))
+                        includedEntries.append(entry)
+                    } catch {
+                        logger.error("Failed to stage asset for entry \(entry.id.uuidString): \(error.localizedDescription) — leaving unsynced for retry")
+                    }
+                }
+                // The temp asset files must survive until CloudKit has finished
+                // uploading this batch; remove them when the iteration ends
+                // (normal completion, throw, or cancellation break).
+                defer {
+                    for record in prepared { record.cleanupTemporaryAsset() }
+                }
+                if includedEntries.isEmpty {
+                    totalPushed = min((index + 1) * batchSize, entries.count)
+                    continue
+                }
+                let operation = CKModifyRecordsOperation(recordsToSave: prepared.map(\.record))
+                operation.savePolicy = .changedKeys
+                operation.qualityOfService = .utility
+            
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    operation.modifyRecordsResultBlock = { result in
+                        switch result {
+                        case .success:
+                            continuation.resume()
+                        case .failure(let error):
+                            continuation.resume(throwing: error)
+                        }
+                    }
+                    database.add(operation)
+                }
+            
+                totalPushed = min((index + 1) * batchSize, entries.count)
+                let pushed = totalPushed
+                let batchIDs = includedEntries.map { $0.id }
+                onBatchSynced?(batchIDs)
+                await MainActor.run {
+                    syncedEntryCount = pushed
+                }
+                logger.info("Pushed batch of \(batch.count) entries (\(pushed)/\(entries.count))")
+            }
+        
+            await MainActor.run {
+                lastSyncDate = Date()
+                UserDefaults.standard.set(lastSyncDate, forKey: lastSyncDateKey)
+            }
+            await MainActor.run {
                 syncState = .idle
                 totalEntriesToSync = 0
             }
-        }
-        
-        let batches = stride(from: 0, to: entries.count, by: batchSize).map {
-            Array(entries[$0..<min($0 + batchSize, entries.count)])
-        }
-        
-        var totalPushed = 0
-        for (index, batch) in batches.enumerated() {
-            if syncCancelled {
-                let cancelledAt = totalPushed
-                logger.info("Sync cancelled by user after \(cancelledAt)/\(entries.count) entries")
-                break
-            }
-            
-            // An entry whose temp asset can't be written is EXCLUDED from the
-            // batch (and from onBatchSynced below), so it stays unsynced and
-            // is retried later, rather than being pushed asset-less and then
-            // marked synced — that would silently lose the image bytes on
-            // every other device.
-            var includedEntries: [ClipboardEntry] = []
-            var prepared: [RecordMapper.PreparedRecord] = []
-            includedEntries.reserveCapacity(batch.count)
-            prepared.reserveCapacity(batch.count)
-            for entry in batch {
-                do {
-                    prepared.append(try recordMapper.preparedRecord(from: entry, zoneID: Self.zoneID))
-                    includedEntries.append(entry)
-                } catch {
-                    logger.error("Failed to stage asset for entry \(entry.id.uuidString): \(error.localizedDescription) — leaving unsynced for retry")
-                }
-            }
-            // The temp asset files must survive until CloudKit has finished
-            // uploading this batch; remove them when the iteration ends
-            // (normal completion, throw, or cancellation break).
-            defer {
-                for record in prepared { record.cleanupTemporaryAsset() }
-            }
-            if includedEntries.isEmpty {
-                totalPushed = min((index + 1) * batchSize, entries.count)
-                continue
-            }
-            let operation = CKModifyRecordsOperation(recordsToSave: prepared.map(\.record))
-            operation.savePolicy = .changedKeys
-            operation.qualityOfService = .utility
-            
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                operation.modifyRecordsResultBlock = { result in
-                    switch result {
-                    case .success:
-                        continuation.resume()
-                    case .failure(let error):
-                        continuation.resume(throwing: error)
-                    }
-                }
-                database.add(operation)
-            }
-            
-            totalPushed = min((index + 1) * batchSize, entries.count)
-            let pushed = totalPushed
-            let batchIDs = includedEntries.map { $0.id }
-            onBatchSynced?(batchIDs)
+            return totalPushed
+        } catch {
             await MainActor.run {
-                syncedEntryCount = pushed
+                syncState = .error(error.localizedDescription)
+                totalEntriesToSync = 0
             }
-            logger.info("Pushed batch of \(batch.count) entries (\(pushed)/\(entries.count))")
+            throw error
         }
-        
-        await MainActor.run {
-            lastSyncDate = Date()
-            UserDefaults.standard.set(lastSyncDate, forKey: lastSyncDateKey)
-        }
-        return totalPushed
     }
     
     /// Deletes an entry from CloudKit.
@@ -247,86 +255,155 @@ public final class SyncManager: ObservableObject {
     
     // MARK: - Pull (CloudKit → local)
     
-    /// Fetches all changes since the last sync token.
-    /// Returns new/modified entries and deleted entry IDs.
-    public func fetchChanges() async throws -> (modified: [ClipboardEntry], deleted: [UUID]) {
-        guard resolveContainer(), let database else { return ([], []) }
-        await MainActor.run { syncState = .syncing }
-        defer { Task { @MainActor in syncState = .idle } }
-        
-        let savedToken = loadChangeToken()
-        
-        var modifiedEntries: [ClipboardEntry] = []
-        var deletedIDs: [UUID] = []
-        var newToken: CKServerChangeToken?
-        
+    /// Downloads and durably applies changes before advancing the token.
+    /// Both apps must use this operation; raw fetch results are never exposed
+    /// to callers that could accidentally discard them.
+    @MainActor
+    public func pullChanges(into localDatabase: DatabaseManager) async throws {
+        guard !isPullInProgress else { throw SyncPullService.PullError.alreadyInProgress }
+        isPullInProgress = true
+        defer { isPullInProgress = false }
+        syncState = .syncing
+        do {
+            if pullService == nil {
+                guard resolveContainer(), let database else {
+                    throw CKError(.notAuthenticated)
+                }
+                let mapper = recordMapper
+                pullService = SyncPullService(
+                    fetch: { tokenData in
+                        return try await Self.fetchUncommittedChanges(
+                            from: database, mapper: mapper, previousTokenData: tokenData
+                        )
+                    }
+                )
+            }
+            guard let pullService else { throw CKError(.internalError) }
+            let batch = try await pullService.pull(into: localDatabase)
+            lastSyncDate = Date()
+            UserDefaults.standard.set(lastSyncDate, forKey: lastSyncDateKey)
+            syncedEntryCount += batch.modified.count
+            syncState = .idle
+        } catch {
+            syncState = .error(error.localizedDescription)
+            throw error
+        }
+    }
+
+    private static func fetchUncommittedChanges(
+        from database: CKDatabase,
+        mapper: RecordMapper,
+        previousTokenData: Data?
+    ) async throws -> SyncChangeBatch {
+        let savedToken = try previousTokenData.flatMap {
+            try NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: $0)
+        }
+        let changes = PendingCloudChanges()
         let configuration = CKFetchRecordZoneChangesOperation.ZoneConfiguration()
         configuration.previousServerChangeToken = savedToken
-        
         let operation = CKFetchRecordZoneChangesOperation(
             recordZoneIDs: [Self.zoneID],
             configurationsByRecordZoneID: [Self.zoneID: configuration]
         )
-        
-        operation.recordWasChangedBlock = { [recordMapper] _, result in
+        operation.fetchAllChanges = true
+        operation.recordWasChangedBlock = { _, result in
             switch result {
             case .success(let record):
-                if let entry = recordMapper.entry(from: record) {
-                    modifiedEntries.append(entry)
+                switch Self.disposition(for: record, mapper: mapper) {
+                case .apply(let entry):
+                    changes.modify(entry)
+                case .assetUnavailable:
+                    // An unreadable asset must fail the batch. Otherwise the
+                    // token would skip image bytes that never reached SQLite.
+                    changes.fail(CKError(.assetFileNotFound))
+                case .unmappable(let reason):
+                    // Never fail the batch for a record this build cannot
+                    // represent (e.g. a contentType introduced by a newer app
+                    // on another device): it would be refetched and fail on
+                    // every later pull, freezing sync until the app updates.
+                    changes.skipUnmappable()
+                    Self.pullLogger.warning("Skipping remote record \(record.recordID.recordName): \(reason)")
                 }
             case .failure(let error):
-                self.logger.error("Failed to process changed record: \(error.localizedDescription)")
+                changes.fail(error)
             }
         }
-        
         operation.recordWithIDWasDeletedBlock = { recordID, _ in
-            if let uuid = UUID(uuidString: recordID.recordName) {
-                deletedIDs.append(uuid)
+            guard let id = UUID(uuidString: recordID.recordName) else {
+                changes.fail(CKError(.internalError))
+                return
             }
+            changes.delete(id)
         }
-        
-        operation.recordZoneChangeTokensUpdatedBlock = { _, token, _ in
-            newToken = token
-        }
-        
         operation.recordZoneFetchResultBlock = { _, result in
             switch result {
-            case .success(let (serverChangeToken, _, _)):
-                newToken = serverChangeToken
+            case .success(let (token, _, _)):
+                changes.setToken(token)
             case .failure(let error):
-                self.logger.error("Zone fetch failed: \(error.localizedDescription)")
+                changes.fail(error)
             }
         }
-        
-        operation.qualityOfService = .userInitiated
-        
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            operation.fetchRecordZoneChangesResultBlock = { result in
-                switch result {
-                case .success:
-                    continuation.resume()
-                case .failure(let error):
-                    continuation.resume(throwing: error)
+        operation.qualityOfService = .utility
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                operation.fetchRecordZoneChangesResultBlock = { result in
+                    continuation.resume(with: result)
                 }
+                database.add(operation)
+                if Task.isCancelled { operation.cancel() }
             }
-            database.add(operation)
+        } onCancel: {
+            operation.cancel()
         }
-        
-        if let token = newToken {
-            saveChangeToken(token)
+        let skipped = changes.skippedUnmappableCount
+        if skipped > 0 {
+            Self.pullLogger.warning("Pull skipped \(skipped) remote record(s) this app version cannot represent; update the app to receive them")
         }
-        
-        let modifiedCount = modifiedEntries.count
-        await MainActor.run {
-            lastSyncDate = Date()
-            UserDefaults.standard.set(lastSyncDate, forKey: lastSyncDateKey)
-            syncedEntryCount += modifiedCount
-        }
-        
-        logger.info("Fetched \(modifiedCount) modified, \(deletedIDs.count) deleted")
-        return (modifiedEntries, deletedIDs)
+        return try changes.batch()
     }
-    
+
+    /// The pull runs in a static context (no instance), so it logs through this.
+    private static let pullLogger = Logger(subsystem: "com.pasta.sync", category: "SyncPull")
+
+    /// How `pullChanges` treats one fetched record. A pure function so the
+    /// decision is unit-testable without CloudKit.
+    enum RemoteRecordDisposition: Equatable {
+        /// Persist this entry.
+        case apply(ClipboardEntry)
+        /// The record carries an image asset whose bytes could not be read.
+        /// Transient: the batch must fail so the token does not move past it.
+        case assetUnavailable
+        /// This build cannot represent the record (unknown `contentType`,
+        /// malformed id, missing required fields). Permanent for this build,
+        /// so it is skipped rather than allowed to poison every later pull.
+        case unmappable(reason: String)
+    }
+
+    static func disposition(for record: CKRecord, mapper: RecordMapper) -> RemoteRecordDisposition {
+        if let entry = mapper.entry(from: record) {
+            if record["imageAsset"] is CKAsset, entry.rawData == nil {
+                return .assetUnavailable
+            }
+            return .apply(entry)
+        }
+        if UUID(uuidString: record.recordID.recordName) == nil {
+            return .unmappable(reason: "record name is not a UUID")
+        }
+        guard let contentTypeRaw = record["contentType"] as? String else {
+            return .unmappable(reason: "missing contentType")
+        }
+        if ContentType(rawValue: contentTypeRaw) == nil {
+            return .unmappable(reason: "unknown contentType '\(contentTypeRaw)'")
+        }
+        if record["content"] as? String == nil {
+            return .unmappable(reason: "missing content")
+        }
+        if record["timestamp"] as? Date == nil {
+            return .unmappable(reason: "missing timestamp")
+        }
+        return .unmappable(reason: "record could not be mapped")
+    }
+
     // MARK: - Subscriptions
     
     /// Registers for push notifications on record changes.
@@ -358,28 +435,67 @@ public final class SyncManager: ObservableObject {
     
     // MARK: - Token Persistence
     
-    private func saveChangeToken(_ token: CKServerChangeToken) {
-        do {
-            let data = try NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true)
-            UserDefaults.standard.set(data, forKey: changeTokenKey)
-        } catch {
-            logger.error("Failed to save change token: \(error.localizedDescription)")
-        }
-    }
-    
-    private func loadChangeToken() -> CKServerChangeToken? {
-        guard let data = UserDefaults.standard.data(forKey: changeTokenKey) else { return nil }
-        return try? NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: data)
-    }
-    
     /// Resets the sync state (clears token, forces full re-sync).
-    public func resetSync() {
-        UserDefaults.standard.removeObject(forKey: changeTokenKey)
+    @MainActor
+    public func resetSync(in localDatabase: DatabaseManager) throws {
+        guard !isPullInProgress, syncState != .syncing else { return }
+        try SyncChangeTokenStore.reset(in: localDatabase)
         UserDefaults.standard.removeObject(forKey: lastSyncDateKey)
-        Task { @MainActor in
-            syncedEntryCount = 0
-            lastSyncDate = nil
-        }
+        syncedEntryCount = 0
+        lastSyncDate = nil
         logger.info("Sync state reset")
+    }
+}
+
+/// CloudKit callbacks may use different queues; keep the batch and first
+/// error together and never acknowledge a partially decoded response.
+private final class PendingCloudChanges: @unchecked Sendable {
+    private let lock = NSLock()
+    private var modified: [UUID: ClipboardEntry] = [:]
+    private var deleted: Set<UUID> = []
+    private var token: CKServerChangeToken?
+    private var error: Error?
+    private var skippedUnmappable = 0
+
+    /// Records this build cannot represent are counted and left out of the
+    /// batch; the token still advances past them (see `RemoteRecordDisposition`).
+    func skipUnmappable() {
+        lock.lock(); defer { lock.unlock() }
+        skippedUnmappable += 1
+    }
+
+    var skippedUnmappableCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return skippedUnmappable
+    }
+
+    func modify(_ entry: ClipboardEntry) {
+        lock.lock(); defer { lock.unlock() }
+        modified[entry.id] = entry
+        deleted.remove(entry.id)
+    }
+
+    func delete(_ id: UUID) {
+        lock.lock(); defer { lock.unlock() }
+        modified.removeValue(forKey: id)
+        deleted.insert(id)
+    }
+
+    func setToken(_ token: CKServerChangeToken) {
+        lock.lock(); defer { lock.unlock() }
+        self.token = token
+    }
+
+    func fail(_ error: Error) {
+        lock.lock(); defer { lock.unlock() }
+        if self.error == nil { self.error = error }
+    }
+
+    func batch() throws -> SyncChangeBatch {
+        lock.lock(); defer { lock.unlock() }
+        if let error { throw error }
+        guard let token else { throw CKError(.internalError) }
+        let data = try NSKeyedArchiver.archivedData(withRootObject: token, requiringSecureCoding: true)
+        return SyncChangeBatch(modified: Array(modified.values), deleted: Array(deleted), token: data)
     }
 }

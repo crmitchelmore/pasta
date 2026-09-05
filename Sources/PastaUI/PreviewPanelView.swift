@@ -68,8 +68,8 @@ public struct PreviewPanelView: View {
                                 }
                             }
 
-                            if (entry.contentType == .image || entry.contentType == .screenshot), let imagePath = entry.imagePath {
-                                ImagePreview(path: imagePath)
+                            if let source = ClipboardImageSource(entry: entry) {
+                                ImagePreview(source: source)
                             } else if entry.contentType == .filePath, let filePreview = filePathPreview(from: metadata, entry: entry) {
                                 FilePreview(preview: filePreview)
                             } else if entry.contentType == .color, let swatch = colorSwatchPreview(from: metadata, entry: entry) {
@@ -421,12 +421,7 @@ extension PreviewPanelView: Equatable {
     /// Lets `.equatable()` skip the body on unrelated parent re-renders (every
     /// keystroke): only the shown entry and the fields the panel displays matter.
     public static func == (lhs: PreviewPanelView, rhs: PreviewPanelView) -> Bool {
-        lhs.entry?.id == rhs.entry?.id
-            && lhs.entry?.timestamp == rhs.entry?.timestamp
-            && lhs.entry?.copyCount == rhs.entry?.copyCount
-            && lhs.entry?.isPinned == rhs.entry?.isPinned
-            && lhs.entry?.metadata == rhs.entry?.metadata
-            && lhs.entry?.content.utf8.count == rhs.entry?.content.utf8.count
+        lhs.entry == rhs.entry
             && lhs.isListEmpty == rhs.isListEmpty
             && (lhs.onCopy == nil) == (rhs.onCopy == nil)
     }

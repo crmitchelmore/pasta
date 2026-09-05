@@ -51,15 +51,11 @@ try await syncManager.deleteEntry(id: uuid)
 ### Pull from CloudKit (iOS or macOS)
 
 ```swift
-let (modified, deleted) = try await syncManager.fetchChanges()
+// Applies one transaction by record UUID, including its change token.
+// A failed transaction is replayed on the next attempt.
+try await syncManager.pullChanges(into: database)
 
-// Apply changes to local database
-for entry in modified {
-    database.upsert(entry)
-}
-for id in deleted {
-    database.delete(id)
-}
+// Reload the displayed history after the operation returns.
 ```
 
 ### Observing Sync State
@@ -153,7 +149,7 @@ CloudKit errors are propagated as-is. Common scenarios:
 
 ## Performance Considerations
 
-- **Change Tokens**: Stored in UserDefaults, persisted across launches
+- **Change Tokens**: Stored in SQLite in the same transaction as downloaded changes
 - **Assets**: Only large data (images) use CKAssets
 - **Batching**: Prevents CloudKit timeout on large syncs
 - **Quality of Service**: `.utility` for background, `.userInitiated` for pulls
@@ -162,7 +158,7 @@ CloudKit errors are propagated as-is. Common scenarios:
 
 ```swift
 // Reset sync state (useful for testing)
-syncManager.resetSync()
+try syncManager.resetSync(in: database)
 ```
 
 ## License
