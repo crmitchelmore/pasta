@@ -3,6 +3,31 @@ import XCTest
 @testable import PastaCore
 
 final class SearchServiceTests: XCTestCase {
+    func testSearchTreatsPunctuationAndOperatorsAsLiteralText() throws {
+        let db = try DatabaseManager.inMemory()
+        let entry = ClipboardEntry(
+            content: "price $50 is 100% ready AND OR NOT foo_bar github.com",
+            contentType: .text
+        )
+        try db.insert(entry)
+        let service = SearchService(database: db)
+
+        for query in ["$50", "100%", "AND", "OR", "NOT", "foo_ba", "github.co", "\"ready\"", "OR rea"] {
+            let results = try service.search(query: query)
+            XCTAssertEqual(results.map(\.entry.id), [entry.id], "Query: \(query)")
+        }
+    }
+
+    func testSearchWithOnlyPunctuationDoesNotThrowOrMatchEverything() throws {
+        let db = try DatabaseManager.inMemory()
+        try db.insert(ClipboardEntry(content: "hello world", contentType: .text))
+        let service = SearchService(database: db)
+
+        for query in ["$", "%", "\"", "*", "()", "😀"] {
+            XCTAssertTrue(try service.search(query: query).isEmpty, "Query: \(query)")
+        }
+    }
+
     func testSearchFindsExactMatches() throws {
         let db = try DatabaseManager.inMemory()
         try db.insert(ClipboardEntry(content: "hello world", contentType: .text, timestamp: Date(timeIntervalSince1970: 1)))
