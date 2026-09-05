@@ -1,3 +1,4 @@
+import CloudKit
 import Foundation
 import XCTest
 
@@ -289,9 +290,17 @@ final class CaptureToPasteFlowTests: XCTestCase {
         try pipeline.ingest(captured)
 
         let sync = SyncManager(containerIdentifier: "iCloud.com.pasta.e2e", syncEnabled: false)
-        try await sync.pushEntry(captured)
+        do {
+            // Mirror the capture path: acknowledge only a successful upload.
+            try await sync.pushEntry(captured)
+            try database.markSynced(ids: [captured.id])
+            XCTFail("Unavailable CloudKit must not acknowledge an upload")
+        } catch {
+            XCTAssertEqual((error as? CKError)?.code, .notAuthenticated)
+        }
 
         XCTAssertEqual(try database.unsyncedCount(), 1)
         XCTAssertEqual(try database.fetchUnsynced().map(\.id), [captured.id])
+        XCTAssertEqual(try database.syncedCount(), 0)
     }
 }
