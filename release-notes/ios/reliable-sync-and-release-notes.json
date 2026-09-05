@@ -1,0 +1,8 @@
+{
+  "summary": "Local clipboard history opens promptly, with clearer control over iCloud and release notes that match your update.",
+  "changes": [
+    "Open and search your saved clipboard history while iCloud is unavailable. Sync status explains account or connection problems and lets you retry.",
+    "Choose Enable iCloud Sync in Settings to share your clipboard history. Enabling sync uploads your local history to your private iCloud account; local-only use remains available.",
+    "What’s New opens after an update, including a new build of the same version, and remembers your dismissal. You can reopen it in Settings and browse earlier releases offline."
+  ]
+}

@@ -11,8 +11,8 @@ import UIKit
 @MainActor
 final class AppState: ObservableObject {
     private enum Defaults {
+        static let iCloudSyncConsent = "pasta.ios.iCloudSyncConsent.v1"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
-        static let lastSeenVersion = "pasta.ios.lastSeenVersion"
     }
 
     @Published var entries: [ClipboardEntry] = []
@@ -20,7 +20,8 @@ final class AppState: ObservableObject {
     @Published var hasCompletedOnboarding: Bool
     @Published var isShowingOnboarding = false
     @Published var isShowingWhatsNew = false
-    @Published var iCloudStatus: SyncAccountRecovery.Availability = .notChecked
+    @Published private(set) var isICloudSyncEnabled: Bool
+    @Published var iCloudStatus: SyncAccountRecovery.Availability = .disabled
     @Published private(set) var isCheckingSync = false
     @Published private(set) var syncErrorMessage: String?
     var iCloudAvailable: Bool { iCloudStatus == .available }
@@ -32,18 +33,23 @@ final class AppState: ObservableObject {
     private var lastObservedPasteboardChangeCount: Int?
     private var isSyncInProgress = false
     private var isClipboardCaptureInProgress = false
-    private var isActivationPipelineRunning = false
+    private let activationRequests = SyncRequestQueue()
+    private let syncRequests = SyncRequestQueue()
 
     init() {
         // No-op unless launched by the XCUITest suite with `-uiTesting`.
         UITestConfiguration.applyIfNeeded(
             databaseURL: Self.databaseURL(),
-            currentAppVersion: Self.currentAppVersion()
+            currentAppVersion: Self.currentAppVersion(),
+            currentAppBuild: Self.currentAppBuild()
         )
         self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: Defaults.hasCompletedOnboarding)
+        // Existing onboarding and old sync timestamps are not consent.
+        self.isICloudSyncEnabled = UserDefaults.standard.bool(forKey: Defaults.iCloudSyncConsent)
     }
 
     func initialise(syncManager: SyncManager) async {
+        syncManager.setSyncEnabled(isICloudSyncEnabled)
         do {
             database = try DatabaseManager(databaseURL: Self.databaseURL())
             try loadEntries()
@@ -52,22 +58,32 @@ final class AppState: ObservableObject {
             errorMessage = error.localizedDescription
         }
 
+        // Local history and offline release notes must not wait for CloudKit.
+        isLoading = false
+        evaluateWhatsNewIfNeeded()
         await performSync(syncManager: syncManager)
 
         await captureCurrentClipboardIfNeeded(syncManager: syncManager)
-        evaluateWhatsNewIfNeeded()
-
-        isLoading = false
     }
 
     func handleAppDidBecomeActive(syncManager: SyncManager) async {
-        guard !isActivationPipelineRunning else { return }
-        isActivationPipelineRunning = true
-        defer { isActivationPipelineRunning = false }
+        await activationRequests.run {
+            await self.performSync(syncManager: syncManager)
+            await self.captureCurrentClipboardIfNeeded(syncManager: syncManager)
+        }
+    }
 
-        await performSync(syncManager: syncManager)
-
-        await captureCurrentClipboardIfNeeded(syncManager: syncManager)
+    func setICloudSyncEnabled(_ enabled: Bool, syncManager: SyncManager) {
+        isICloudSyncEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Defaults.iCloudSyncConsent)
+        syncManager.setSyncEnabled(enabled)
+        if enabled {
+            Task { await self.performSync(syncManager: syncManager) }
+        } else {
+            syncRequests.cancelAll()
+            iCloudStatus = .disabled
+            syncErrorMessage = nil
+        }
     }
 
     func captureCurrentClipboardIfNeeded(syncManager: SyncManager) async {
@@ -105,7 +121,7 @@ final class AppState: ObservableObject {
 
             var persistedEntry = entry
 
-            if iCloudAvailable {
+            if isICloudSyncEnabled && iCloudAvailable {
                 do {
                     try await syncManager.pushEntry(entry)
                     try database.markSynced(ids: [entry.id])
@@ -136,7 +152,14 @@ final class AppState: ObservableObject {
     }
 
     func performSync(syncManager: SyncManager) async {
-        guard let database else { return }
+        guard isICloudSyncEnabled else { return }
+        await syncRequests.run {
+            await self.performSyncAttempt(syncManager: syncManager)
+        }
+    }
+
+    private func performSyncAttempt(syncManager: SyncManager) async {
+        guard isICloudSyncEnabled, !Task.isCancelled, let database else { return }
         guard !isSyncInProgress else { return }
         isSyncInProgress = true
         defer { isSyncInProgress = false }
@@ -145,7 +168,9 @@ final class AppState: ObservableObject {
         await accountRecovery.run(
             checkAccount: { try await syncManager.checkAccountStatus() },
             prepare: {
+                try Task.checkCancellation()
                 try await syncManager.setupZone()
+                try Task.checkCancellation()
                 try await syncManager.registerSubscription()
             },
             sync: {
@@ -155,12 +180,13 @@ final class AppState: ObservableObject {
                 if backfilled > 0 {
                     self.logger.info("Backfilled \(backfilled) local clipboard entries to CloudKit")
                 }
+                try Task.checkCancellation()
                 try await syncManager.pullChanges(into: database)
                 try self.loadEntries()
             }
         )
-        iCloudStatus = accountRecovery.availability
-        syncErrorMessage = accountRecovery.errorMessage
+        iCloudStatus = isICloudSyncEnabled ? accountRecovery.availability : .disabled
+        syncErrorMessage = isICloudSyncEnabled ? accountRecovery.errorMessage : nil
         if let syncErrorMessage {
             logger.warning("\(syncErrorMessage)")
         }
@@ -194,10 +220,11 @@ final class AppState: ObservableObject {
     }
 
     func completeOnboarding() {
+        let isFirstRun = !hasCompletedOnboarding
         hasCompletedOnboarding = true
         isShowingOnboarding = false
         UserDefaults.standard.set(true, forKey: Defaults.hasCompletedOnboarding)
-        UserDefaults.standard.set(Self.currentAppVersion(), forKey: Defaults.lastSeenVersion)
+        if isFirstRun { acknowledgeCurrentRelease() }
     }
 
     func replayOnboarding() {
@@ -213,6 +240,7 @@ final class AppState: ObservableObject {
     }
 
     func dismissWhatsNew() {
+        acknowledgeCurrentRelease()
         isShowingWhatsNew = false
     }
 
@@ -224,20 +252,28 @@ final class AppState: ObservableObject {
     }
 
     private func evaluateWhatsNewIfNeeded() {
-        guard hasCompletedOnboarding else { return }
-
-        let defaults = UserDefaults.standard
-        let currentVersion = Self.currentAppVersion()
-        let lastSeenVersion = defaults.string(forKey: Defaults.lastSeenVersion)
-
-        if let lastSeenVersion, lastSeenVersion != currentVersion {
-            isShowingWhatsNew = true
-        }
-
-        defaults.set(currentVersion, forKey: Defaults.lastSeenVersion)
+        guard !isShowingOnboarding else { return }
+        isShowingWhatsNew = ReleaseNotesPresentation.shouldPresent(
+            onboardingCompleted: hasCompletedOnboarding,
+            acknowledged: UserDefaults.standard.string(forKey: ReleaseNotesPresentation.acknowledgedKey),
+            version: Self.currentAppVersion(), build: Self.currentAppBuild()
+        )
     }
 
-    private static func currentAppVersion() -> String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    private func acknowledgeCurrentRelease() {
+        UserDefaults.standard.set(
+            ReleaseNotesPresentation.identity(version: Self.currentAppVersion(), build: Self.currentAppBuild()),
+            forKey: ReleaseNotesPresentation.acknowledgedKey
+        )
+    }
+
+    static func currentAppVersion() -> String {
+        if let version = UITestConfiguration.releaseVersion { return version }
+        return Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }
+
+    static func currentAppBuild() -> String {
+        if let build = UITestConfiguration.releaseBuild { return build }
+        return Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
     }
 }

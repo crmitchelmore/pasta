@@ -1,4 +1,5 @@
 import Foundation
+import PastaCore
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -43,13 +44,16 @@ enum UITestConfiguration {
         return value
     }
 
+    static var releaseVersion: String? { isActive ? environment["PASTA_UI_TEST_VERSION"] : nil }
+    static var releaseBuild: String? { isActive ? environment["PASTA_UI_TEST_BUILD"] : nil }
+
     private static var environment: [String: String] {
         ProcessInfo.processInfo.environment
     }
 
     /// Applies the state-affecting hooks. Must run before the database is
     /// opened and before `hasCompletedOnboarding` is read.
-    static func applyIfNeeded(databaseURL: URL, currentAppVersion: String) {
+    static func applyIfNeeded(databaseURL: URL, currentAppVersion: String, currentAppBuild: String) {
         guard isActive else { return }
 
         if shouldResetState {
@@ -66,6 +70,16 @@ enum UITestConfiguration {
         if shouldSkipOnboarding {
             UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
             UserDefaults.standard.set(currentAppVersion, forKey: "pasta.ios.lastSeenVersion")
+            UserDefaults.standard.set(
+                ReleaseNotesPresentation.identity(version: currentAppVersion, build: currentAppBuild),
+                forKey: ReleaseNotesPresentation.acknowledgedKey
+            )
+        }
+
+        if let previousVersion = environment["PASTA_UI_TEST_PREVIOUS_VERSION"] {
+            UserDefaults.standard.set(true, forKey: "hasCompletedOnboarding")
+            UserDefaults.standard.set(previousVersion, forKey: "pasta.ios.lastSeenVersion")
+            UserDefaults.standard.removeObject(forKey: ReleaseNotesPresentation.acknowledgedKey)
         }
 
         #if canImport(UIKit)

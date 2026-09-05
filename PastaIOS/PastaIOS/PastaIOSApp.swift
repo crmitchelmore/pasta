@@ -8,12 +8,11 @@ struct PastaIOSApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var syncManager = Self.makeSyncManager()
     @StateObject private var appState = AppState()
-    @State private var foregroundActivationTask: Task<Void, Never>?
 
     private static func makeSyncManager() -> SyncManager {
         let manager = SyncManager(
             containerIdentifier: "iCloud.com.pasta.ios",
-            syncEnabled: true,
+            syncEnabled: false,
             cloudKitProvisioned: Self.cloudKitProvisioned
         )
         if UITestConfiguration.isActive {
@@ -25,7 +24,7 @@ struct PastaIOSApp: App {
                          "PastaSync must deny an unprovisioned iOS host")
             precondition(!SyncManager(syncEnabled: false, cloudKitProvisioned: true).cloudKitAccessAllowed,
                          "Provisioning must not override disabled sync")
-            precondition(manager.cloudKitAccessAllowed == Self.cloudKitProvisioned,
+            precondition(manager.cloudKitAccessAllowed == (Self.cloudKitProvisioned && manager.syncEnabled),
                          "CloudKit provisioning approval did not reach PastaSync")
         }
         return manager
@@ -54,8 +53,7 @@ struct PastaIOSApp: App {
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     guard newPhase == .active else { return }
-                    foregroundActivationTask?.cancel()
-                    foregroundActivationTask = Task {
+                    Task {
                         await appState.handleAppDidBecomeActive(syncManager: syncManager)
                     }
                 }

@@ -126,3 +126,24 @@ Xcode or network access; they do not replace a simulator run:
 python3 -B -m unittest discover -s scripts/tests -p 'test_*.py' -v
 node --test scripts/tests/*.test.mjs
 ```
+
+Release-note regression journeys cover upgrading from the legacy version-only
+marker, terminating with the sheet still open, acknowledging and relaunching,
+a new build of the same marketing version, swipe dismissal, Settings replay,
+earlier-version navigation, and an explicit missing-notes state. They use the
+bundled 1.5.18/1.5.17 history, without a network service or release-number guess.
+
+Additional hooks, enabled only by `-uiTesting`:
+
+| Hook | Purpose |
+|---|---|
+| `PASTA_UI_TEST_VERSION` | Override the installed marketing version for release-note journeys. |
+| `PASTA_UI_TEST_BUILD` | Override the installed build number. |
+| `PASTA_UI_TEST_PREVIOUS_VERSION` | Seed an onboarded legacy install and clear the new acknowledgement marker. Remove this hook before relaunching to test persistence. |
+
+`PastaCoreTests/ReleaseNotesTests` verifies offline resource loading, numeric
+history ordering, exact-build selection, missing-version handling, and the
+onboarding/acknowledgement policy. `Tests/ReleaseNotesTests/ios-release-notes.test.mjs`
+executes the generator against a temporary Git repository and rejects version,
+build and source mismatches. Native unit tests and XCUITests run in the existing
+required macOS/iOS CI jobs; Node tests alone do not establish native success.

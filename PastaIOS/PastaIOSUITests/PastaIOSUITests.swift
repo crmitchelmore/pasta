@@ -158,6 +158,31 @@ final class PastaIOSUITests: PastaUITestCase {
 
     // MARK: - Settings
 
+    func testSyncConsentIsExplicitAndWithdrawalPersistsWithoutDeletingHistory() {
+        launchApp(pasteboard: "Private until consent")
+        waitForMainUI()
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertTrue(element("settings.iCloudStatus").label.contains("Off"))
+        XCTAssertFalse(element("settings.syncNow").isEnabled)
+        XCTAssertTrue(element("settings.iCloudConsentExplanation").exists)
+        XCTAssertEqual(element("settings.entryCount").label, "1")
+        element("settings.iCloudConsent").tap()
+        app.terminate()
+        launchApp(resetState: false)
+        waitForMainUI()
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertEqual(element("settings.iCloudConsent").value as? String, "1")
+        element("settings.iCloudConsent").tap()
+        XCTAssertTrue(element("settings.iCloudStatus").label.contains("Off"))
+        XCTAssertFalse(element("settings.syncNow").isEnabled)
+        app.terminate()
+        launchApp(resetState: false)
+        waitForMainUI()
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertEqual(element("settings.iCloudConsent").value as? String, "0")
+        XCTAssertEqual(element("settings.entryCount").label, "1")
+    }
+
     func testUnavailableSyncRetryPreservesOfflineHistory() {
         let token = "OfflineRecovery\(UUID().uuidString.prefix(8))"
         launchApp(pasteboard: token)
@@ -166,6 +191,8 @@ final class PastaIOSUITests: PastaUITestCase {
         XCTAssertTrue(element("settings.iCloudGuidance").waitForExistence(timeout: Self.uiTimeout),
                       "Unavailable iCloud must explain how to recover")
         XCTAssertEqual(element("settings.entryCount").label, "1")
+        XCTAssertFalse(element("settings.syncNow").isEnabled, "Sync requires explicit consent")
+        element("settings.iCloudConsent").tap()
         element("settings.syncNow").tap()
         let retryFinished = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "enabled == true"), object: element("settings.syncNow")
@@ -210,9 +237,9 @@ final class PastaIOSUITests: PastaUITestCase {
         XCTAssertFalse(version.label.isEmpty, "Version row is blank")
         XCTAssertTrue(app.buttons["Reset Sync"].exists, "Reset Sync button missing")
 
-        // Without an iCloud account the status must read Unavailable, never
-        // Connected, and the count must reflect the (empty or one-entry) DB.
-        XCTAssertTrue(element("settings.iCloudStatus").label.contains("Unavailable"))
+        // Completed onboarding is not permission to upload clipboard history.
+        app.swipeDown()
+        XCTAssertTrue(element("settings.iCloudStatus").label.contains("Off"))
         XCTAssertNotNil(Int(element("settings.entryCount").label))
     }
 
@@ -231,6 +258,7 @@ final class PastaIOSUITests: PastaUITestCase {
         let done = element("onboarding.primaryButton")
         XCTAssertTrue(done.waitForExistence(timeout: Self.uiTimeout))
         XCTAssertEqual(done.label, "Done")
+        if !done.isHittable { app.swipeUp() }
         done.tap()
 
         XCTAssertTrue(waitForDisappearance(of: title), "Walkthrough sheet did not dismiss")
@@ -256,6 +284,70 @@ final class PastaIOSUITests: PastaUITestCase {
         XCTAssertTrue(element("settings.list").exists)
     }
 
+    // Release-note journeys use real persisted defaults and bundled history.
+    // Version/build overrides avoid coupling tests to CI's archive numbering.
+    func testReleaseNotesUpgradeAcknowledgesOnlyAfterDismissalAndReplays() {
+        app.launchEnvironment["PASTA_UI_TEST_VERSION"] = "1.5.18"
+        app.launchEnvironment["PASTA_UI_TEST_BUILD"] = "140"
+        app.launchEnvironment["PASTA_UI_TEST_PREVIOUS_VERSION"] = "1.5.17"
+        launchApp(skipOnboarding: false)
+        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.launchTimeout))
+        XCTAssertEqual(element("whatsNew.installedVersion").label, "Version 1.5.18 (140)")
+        XCTAssertEqual(element("whatsNew.summary").label, "More reliable clipboard history shared from your Mac.")
+
+        // Killing the app with notes still open must not consume the update.
+        app.terminate()
+        app.launchEnvironment["PASTA_UI_TEST_PREVIOUS_VERSION"] = nil
+        launchApp(skipOnboarding: false, resetState: false)
+        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.launchTimeout))
+        app.buttons["whatsNew.done"].firstMatch.tap()
+        XCTAssertTrue(waitForDisappearance(of: element("whatsNew.list")))
+        app.terminate()
+        launchApp(skipOnboarding: false, resetState: false)
+        waitForMainUI()
+        XCTAssertFalse(element("whatsNew.list").exists)
+
+        openTab("Settings", expecting: "settings.list")
+        element("settings.whatsNew").tap()
+        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.uiTimeout))
+        let earlier = element("whatsNew.history.1.5.17:version")
+        if !earlier.isHittable { element("whatsNew.list").swipeUp() }
+        earlier.tap()
+        XCTAssertTrue(element("whatsNew.detail").waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertEqual(element("whatsNew.summary").label, "More private diagnostics.")
+    }
+
+    func testSameMarketingVersionNewBuildPresentsAndSwipeDismissalPersists() {
+        app.launchEnvironment["PASTA_UI_TEST_VERSION"] = "1.5.18"
+        app.launchEnvironment["PASTA_UI_TEST_BUILD"] = "140"
+        launchApp()
+        waitForMainUI()
+        app.terminate()
+        app.launchEnvironment["PASTA_UI_TEST_BUILD"] = "141"
+        launchApp(skipOnboarding: false, resetState: false)
+        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.launchTimeout))
+        XCTAssertEqual(element("whatsNew.installedVersion").label, "Version 1.5.18 (141)")
+        // Drag from the navigation bar so the sheet dismisses, not the list.
+        let bar = app.navigationBars["What’s New"].firstMatch
+        bar.swipeDown()
+        XCTAssertTrue(waitForDisappearance(of: element("whatsNew.list")))
+        app.terminate()
+        launchApp(skipOnboarding: false, resetState: false)
+        waitForMainUI()
+        XCTAssertFalse(element("whatsNew.list").exists)
+    }
+
+    func testMissingInstalledNotesAreExplicitAndNeverRelabelOlderCopy() {
+        app.launchEnvironment["PASTA_UI_TEST_VERSION"] = "9.0.0"
+        app.launchEnvironment["PASTA_UI_TEST_BUILD"] = "999"
+        app.launchEnvironment["PASTA_UI_TEST_PREVIOUS_VERSION"] = "1.5.18"
+        launchApp(skipOnboarding: false)
+        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.launchTimeout))
+        XCTAssertEqual(element("whatsNew.installedVersion").label, "Version 9.0.0 (999)")
+        XCTAssertTrue(element("whatsNew.unavailable").exists)
+        XCTAssertFalse(element("whatsNew.summary").exists)
+    }
+
     // MARK: - Onboarding
 
     func testFirstLaunchShowsOnboardingAndGetStartedReachesMainUI() {
@@ -268,7 +360,8 @@ final class PastaIOSUITests: PastaUITestCase {
 
         let getStarted = element("onboarding.primaryButton")
         XCTAssertTrue(getStarted.exists)
-        XCTAssertEqual(getStarted.label, "Get Started")
+        XCTAssertEqual(getStarted.label, "Continue on This iPhone")
+        if !getStarted.isHittable { app.swipeUp() }
         getStarted.tap()
 
         waitForMainUI()
@@ -279,6 +372,7 @@ final class PastaIOSUITests: PastaUITestCase {
         launchApp(skipOnboarding: false)
         let getStarted = element("onboarding.primaryButton")
         XCTAssertTrue(getStarted.waitForExistence(timeout: Self.launchTimeout))
+        if !getStarted.isHittable { app.swipeUp() }
         getStarted.tap()
         waitForMainUI()
 

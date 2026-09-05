@@ -8,10 +8,11 @@ import Foundation
 public final class SyncAccountRecovery {
     public enum Availability: Equatable {
         case notChecked, available, noAccount, restricted, temporarilyUnavailable, couldNotDetermine
-        case unavailableBuild
+        case unavailableBuild, disabled
 
         public var label: String {
             switch self {
+            case .disabled: return "Off"
             case .notChecked: return "Not Checked"
             case .available: return "Connected"
             case .noAccount: return "Not Signed In"
@@ -24,6 +25,7 @@ public final class SyncAccountRecovery {
 
         public var guidance: String? {
             switch self {
+            case .disabled: return "Clipboard history stays on this iPhone until you enable iCloud sync."
             case .notChecked, .available: return nil
             case .noAccount: return "Sign in to iCloud in iPhone Settings, then tap Sync Now."
             case .restricted: return "iCloud access is restricted. Check the account restrictions in iPhone Settings."
@@ -72,7 +74,10 @@ public final class SyncAccountRecovery {
             // A later activation performs a new lookup; cancellation is not a
             // successful sync and must never update the persisted checkpoint.
         } catch let error as SyncManager.AccountError {
-            availability = .unavailableBuild
+            switch error {
+            case .syncDisabled: availability = .disabled
+            case .missingEntitlement: availability = .unavailableBuild
+            }
             errorMessage = error.localizedDescription
         } catch {
             if let cloudError = error as? CKError, cloudError.code == .notAuthenticated {

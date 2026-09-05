@@ -44,7 +44,8 @@ let package = Package(
             name: "PastaCore",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift")
-            ]
+            ],
+            resources: [.process("Resources")]
         ),
         
         // SwiftUI views and view models

@@ -177,3 +177,35 @@ xcodebuild -exportArchive -archivePath /tmp/PastaIOS.xcarchive \
   the base64 secret was pasted with line breaks.
 - Failed runs upload `build/archive.log`, `build/export.log` and the resolved
   `ExportOptions.plist` as the `release-ios-logs` artifact.
+
+### Bundled iOS release notes
+
+The TestFlight workflow runs `scripts/prepare-ios-release-notes.mjs` before
+archiving, stamps the selected marketing version, build number and source SHA,
+and verifies the actual archived resource before any upload. Dry-run exported
+IPAs are checked as well. The SwiftPM resource
+`Sources/PastaCore/Resources/IOSReleaseNotes.json` is available offline; the app
+selects an exact build entry before a version-level entry and never labels a
+newer or unrelated release as the installed version.
+
+For detailed, reviewed user-facing changes, add a uniquely named JSON file to
+`release-notes/ios/`, containing `summary` (a sentence) and `changes` (an array of
+sentences). No next-version number is needed. The generator consumes fragments
+added since the preceding release tag, so their highlights do not repeat in
+later releases. Keep Mac-only work out of iOS fragments unless its effect on
+shared history is explained explicitly.
+
+Without fragments, the generator asks the existing release-note model to
+summarise only iPhone/shared-library source changes. If the model is unavailable,
+it reports only source-verified change areas, with the full changelog link;
+it does not repeat stale highlights or invent fixes. Published GitHub releases
+are backfilled as history (drafts, prereleases and failed/unpublished tags are
+excluded), preserving reviewed historical prose. A missing preceding tag or an
+invalid/empty catalogue fails preparation. Archive verification rejects wrong
+version/build/source metadata and stale resource bytes from build caches.
+
+An existing install sees the new sheet until it dismisses it with Done or a
+swipe. First-run onboarding acknowledges the starting build. Completing the
+walkthrough later must not consume pending update notes. Settings always offers
+replay. The old version-only seen marker is not trusted because older builds
+wrote it before their hardcoded notes were actually displayed.

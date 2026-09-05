@@ -21,10 +21,20 @@ struct SettingsView: View {
 
     private var syncSection: some View {
         Section("Sync") {
+            Toggle("Enable iCloud Sync", isOn: Binding(
+                get: { appState.isICloudSyncEnabled },
+                set: { appState.setICloudSyncEnabled($0, syncManager: syncManager) }
+            ))
+            .accessibilityIdentifier("settings.iCloudConsent")
+            Text("Enabling sync uploads your existing and future clipboard history to your private iCloud account and downloads history from your Mac. Turning it off keeps local history and stops further transfers; data already uploaded stays in iCloud.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("settings.iCloudConsentExplanation")
+
             HStack {
                 Label("iCloud Status", systemImage: "icloud")
                 Spacer()
-                Text(appState.isCheckingSync ? "Checking…" : appState.iCloudStatus.label)
+                Text(!appState.isICloudSyncEnabled ? "Off" : (appState.isCheckingSync ? "Checking…" : appState.iCloudStatus.label))
                     .foregroundStyle(appState.iCloudAvailable ? Color.green : Color.secondary)
             }
             .accessibilityElement(children: .combine)
@@ -45,7 +55,7 @@ struct SettingsView: View {
 
             if let lastSync = syncManager.lastSyncDate {
                 HStack {
-                    Label("Last Successful Sync", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Last Synced", systemImage: "arrow.triangle.2.circlepath")
                     Spacer()
                     Text(lastSync, style: .relative)
                         .foregroundStyle(.secondary)
@@ -67,7 +77,7 @@ struct SettingsView: View {
             } label: {
                 Label("Sync Now", systemImage: "arrow.clockwise")
             }
-            .disabled(appState.isCheckingSync || syncManager.syncState == .syncing)
+            .disabled(!appState.isICloudSyncEnabled || appState.isCheckingSync || syncManager.syncState == .syncing)
             .accessibilityIdentifier("settings.syncNow")
         }
     }
