@@ -12,8 +12,10 @@ extension DatabaseManager {
     /// content hashes match. Missing image bytes cannot prove that match, so an
     /// incompatible or unverifiable cache is cleared instead of showing stale
     /// pixels. Raw data and all other remote fields replace their local values.
-    public func applySyncChanges(modified: [ClipboardEntry], deleted: [UUID]) throws {
-        guard !modified.isEmpty || !deleted.isEmpty else { return }
+    /// A supplied checkpoint commits in the same transaction, including for
+    /// empty batches. A nil checkpoint leaves the previous cursor unchanged.
+    public func applySyncChanges(modified: [ClipboardEntry], deleted: [UUID], checkpoint: Data? = nil) throws {
+        guard !modified.isEmpty || !deleted.isEmpty || checkpoint != nil else { return }
         let deletedIDs = Set(deleted)
 
         try dbWriter.write { db in
@@ -73,6 +75,28 @@ extension DatabaseManager {
                     arguments: StatementArguments(chunk.map { $0.uuidString })
                 )
             }
+
+            if let checkpoint {
+                try db.execute(
+                    sql: """
+                    INSERT INTO sync_checkpoints (name, token) VALUES ('cloudkit', ?)
+                    ON CONFLICT(name) DO UPDATE SET token = excluded.token
+                    """,
+                    arguments: [checkpoint]
+                )
+            }
+        }
+    }
+
+    public func loadSyncChangeToken() throws -> Data? {
+        try dbWriter.read { db in
+            try Data.fetchOne(db, sql: "SELECT token FROM sync_checkpoints WHERE name = 'cloudkit'")
+        }
+    }
+
+    public func resetSyncChangeToken() throws {
+        try dbWriter.write { db in
+            try db.execute(sql: "DELETE FROM sync_checkpoints WHERE name = 'cloudkit'")
         }
     }
 

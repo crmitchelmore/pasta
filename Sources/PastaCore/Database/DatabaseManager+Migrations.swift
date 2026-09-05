@@ -218,6 +218,15 @@ extension DatabaseManager {
             }
         }
 
+        migrator.registerMigration("createSyncCheckpoints") { db in
+            // Checkpoints share the lifetime and transaction of the rows they
+            // describe. A recovered/new/in-memory database must start fresh.
+            try db.create(table: "sync_checkpoints") { t in
+                t.column("name", .text).primaryKey().notNull()
+                t.column("token", .blob).notNull()
+            }
+        }
+
         return migrator
     }
 }

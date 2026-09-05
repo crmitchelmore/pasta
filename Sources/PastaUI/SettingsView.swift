@@ -53,12 +53,14 @@ public struct SettingsView: View {
     private let automaticallyChecksForUpdates: Binding<Bool>?
     private let openWalkthrough: (() -> Void)?
     private let syncManager: SyncManager?
+    private let resetSync: (@MainActor () throws -> Void)?
     private let syncNow: (@MainActor () async throws -> Void)?
     private let syncedCount: (() -> Int)?
 
     public init(
         syncManager: SyncManager? = nil,
         syncNow: (@MainActor () async throws -> Void)? = nil,
+        resetSync: (@MainActor () throws -> Void)? = nil,
         syncedCount: (() -> Int)? = nil,
         openWalkthrough: (() -> Void)? = nil,
         checkForUpdates: (() -> Void)? = nil,
@@ -66,6 +68,7 @@ public struct SettingsView: View {
     ) {
         self.syncManager = syncManager
         self.syncNow = syncNow
+        self.resetSync = resetSync
         self.syncedCount = syncedCount
         self.openWalkthrough = openWalkthrough
         self.checkForUpdates = checkForUpdates
@@ -122,6 +125,7 @@ public struct SettingsView: View {
                 iCloudSettingsTab(
                     syncManager: syncManager,
                     syncNow: syncNow,
+                    resetSync: resetSync,
                     syncedCount: syncedCount ?? { 0 }
                 )
                     .tabItem {

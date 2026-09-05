@@ -247,6 +247,30 @@ final class SyncApplyTests: XCTestCase {
         XCTAssertEqual(uploaded, 0)
     }
 
+    func testCheckpointWriteFailureRollsBackRowsDeletionsAndFTS() throws {
+        let db = try DatabaseManager.inMemory()
+        let original = ClipboardEntry(content: "aardvark original", contentType: .text)
+        let deleted = ClipboardEntry(content: "keep this deletion", contentType: .text)
+        try db.applySyncChanges(modified: [original, deleted], deleted: [], checkpoint: Data([1]))
+        try db.dbWriter.write { connection in
+            try connection.execute(sql: """
+                CREATE TRIGGER reject_checkpoint BEFORE UPDATE ON sync_checkpoints
+                BEGIN SELECT RAISE(ABORT, 'injected checkpoint write failure'); END;
+                """)
+        }
+        let updated = ClipboardEntry(id: original.id, content: "pangolin replacement", contentType: .text)
+        let added = ClipboardEntry(content: "new entry", contentType: .text)
+        XCTAssertThrowsError(try db.applySyncChanges(
+            modified: [updated, added], deleted: [deleted.id], checkpoint: Data([2])
+        ))
+        XCTAssertEqual(try db.loadSyncChangeToken(), Data([1]))
+        XCTAssertEqual(try db.fetch(id: original.id)?.content, original.content)
+        XCTAssertNotNil(try db.fetch(id: deleted.id))
+        XCTAssertNil(try db.fetch(id: added.id))
+        XCTAssertEqual(try db.searchFTS(query: "aardvark", contentType: nil).map(\.id), [original.id])
+        XCTAssertTrue(try db.searchFTS(query: "pangolin", contentType: nil).isEmpty)
+    }
+
     private func makeDatabase(onDisk: Bool) throws -> DatabaseManager {
         guard onDisk else { return try DatabaseManager.inMemory() }
         let directory = FileManager.default.temporaryDirectory

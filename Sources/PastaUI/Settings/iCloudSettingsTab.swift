@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 struct iCloudSettingsTab: View {
     @ObservedObject var syncManager: SyncManager
     let syncNow: (@MainActor () async throws -> Void)?
+    let resetSync: (@MainActor () throws -> Void)?
     @State private var isSyncing = false
     @State private var syncError: String?
     let syncedCount: () -> Int
@@ -129,7 +130,7 @@ struct iCloudSettingsTab: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .disabled(isSyncing || syncManager.syncState == .syncing)
+                    .disabled(resetSync == nil || isSyncing || syncManager.syncState == .syncing)
                     Spacer()
                 }
 
@@ -159,7 +160,12 @@ struct iCloudSettingsTab: View {
             titleVisibility: .visible
         ) {
             Button("Reset Sync", role: .destructive) {
-                syncManager.resetSync()
+                do {
+                    try resetSync?()
+                    syncError = nil
+                } catch {
+                    syncError = error.localizedDescription
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {

@@ -137,6 +137,16 @@ final class AppState: ObservableObject {
         #endif
     }
 
+    func resetSync(syncManager: SyncManager) async {
+        guard let database, !isSyncInProgress else { return }
+        do {
+            try syncManager.resetSync(in: database)
+            await performSync(syncManager: syncManager)
+        } catch {
+            errorMessage = "Sync reset failed: \(error.localizedDescription)"
+        }
+    }
+
     func performSync(syncManager: SyncManager) async {
         guard let database else { return }
         guard !isSyncInProgress else { return }

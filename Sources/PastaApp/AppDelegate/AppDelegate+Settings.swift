@@ -23,6 +23,10 @@ extension AppDelegate {
                 syncNow: {
                     try await BackgroundService.shared.syncNow()
                 },
+                resetSync: {
+                    let service = BackgroundService.shared
+                    try service.syncManager.resetSync(in: service.database)
+                },
                 syncedCount: {
                     (try? BackgroundService.shared.database.syncedCount()) ?? 0
                 },

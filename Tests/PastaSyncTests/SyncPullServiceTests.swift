@@ -23,6 +23,7 @@ final class SyncPullServiceTests: XCTestCase {
             modified: [updated, added], deleted: [deleted.id], token: Data([1])
         )])
         let service = makeService(remote)
+        try database.applySyncChanges(modified: [], deleted: [], checkpoint: Data([0]))
         try await database.dbWriter.write { connection in
             try connection.execute(sql: """
                 CREATE TRIGGER reject_sync_delete BEFORE DELETE ON clipboard_entries
@@ -40,6 +41,7 @@ final class SyncPullServiceTests: XCTestCase {
         let failedState = await remote.snapshot()
         XCTAssertEqual(failedState.token, Data([0]))
         XCTAssertEqual(failedState.acknowledgements, [])
+        XCTAssertEqual(try database.loadSyncChangeToken(), Data([0]))
         XCTAssertEqual(try database.fetch(id: original.id), original)
         XCTAssertEqual(try database.fetch(id: deleted.id), deleted)
         XCTAssertNil(try database.fetch(id: added.id))
@@ -52,6 +54,7 @@ final class SyncPullServiceTests: XCTestCase {
         let retriedState = await remote.snapshot()
         XCTAssertEqual(retriedState.fetchTokens, [Data([0]), Data([0])])
         XCTAssertEqual(retriedState.token, Data([1]))
+        XCTAssertEqual(try database.loadSyncChangeToken(), Data([1]))
         XCTAssertEqual(try database.countEntries(), 2)
         XCTAssertEqual(try database.fetch(id: original.id)?.content, updated.content)
         XCTAssertNotNil(try database.fetch(id: added.id))
@@ -82,6 +85,8 @@ final class SyncPullServiceTests: XCTestCase {
         XCTAssertEqual(failedState.token, Data([0]))
         XCTAssertEqual(try database.fetch(id: downloaded.id)?.copyCount, 4)
         XCTAssertEqual(try database.countEntries(), 2, "The database commits before acknowledgement")
+        XCTAssertEqual(try database.loadSyncChangeToken(), Data([1]),
+                       "The committed cursor belongs to the same transaction as its rows")
 
         try await service.pull(into: database)
 
@@ -128,7 +133,7 @@ final class SyncPullServiceTests: XCTestCase {
         ])
         let enteredFetch = expectation(description: "first pull entered fetch")
         let gate = PullTestGate()
-        let service = SyncPullService(fetch: {
+        let service = SyncPullService(fetch: { _ in
             await gate.wait { enteredFetch.fulfill() }
             return try await remote.fetch()
         }, acknowledge: { try await remote.acknowledge($0) })
@@ -164,7 +169,7 @@ final class SyncPullServiceTests: XCTestCase {
         )])
         let enteredFetch = expectation(description: "pull entered fetch")
         let gate = PullTestGate()
-        let service = SyncPullService(fetch: {
+        let service = SyncPullService(fetch: { _ in
             await gate.wait { enteredFetch.fulfill() }
             return try await remote.fetch()
         }, acknowledge: { try await remote.acknowledge($0) })
@@ -187,6 +192,31 @@ final class SyncPullServiceTests: XCTestCase {
         let retriedState = await remote.snapshot()
         XCTAssertEqual(retriedState.token, Data([1]))
         XCTAssertEqual(try database.fetch(id: downloaded.id)?.content, downloaded.content)
+    }
+
+    @MainActor
+    func testResetCannotClearDatabaseCheckpointDuringPull() async throws {
+        let database = try DatabaseManager.inMemory()
+        try database.applySyncChanges(modified: [], deleted: [], checkpoint: Data([1]))
+        let enteredFetch = expectation(description: "manager pull entered fetch")
+        let gate = PullTestGate()
+        let service = SyncPullService(fetch: { checkpoint in
+            XCTAssertEqual(checkpoint, Data([1]))
+            await gate.wait { enteredFetch.fulfill() }
+            return SyncChangeBatch(modified: [], deleted: [], token: Data([2]))
+        })
+        let manager = SyncManager(pullService: service)
+        let pull = Task { try await manager.pullChanges(into: database) }
+        await fulfillment(of: [enteredFetch], timeout: 2)
+
+        try manager.resetSync(in: database)
+        XCTAssertEqual(try database.loadSyncChangeToken(), Data([1]))
+        await gate.open()
+        try await pull.value
+        XCTAssertEqual(try database.loadSyncChangeToken(), Data([2]))
+
+        try manager.resetSync(in: database)
+        XCTAssertNil(try database.loadSyncChangeToken())
     }
 
     @MainActor
@@ -236,7 +266,7 @@ final class SyncPullServiceTests: XCTestCase {
     }
 
     private func makeService(_ remote: PullTestRemote) -> SyncPullService {
-        SyncPullService(fetch: { try await remote.fetch() }, acknowledge: { try await remote.acknowledge($0) })
+        SyncPullService(fetch: { _ in try await remote.fetch() }, acknowledge: { try await remote.acknowledge($0) })
     }
 }
 

@@ -269,14 +269,10 @@ public final class SyncManager: ObservableObject {
                 }
                 let mapper = recordMapper
                 pullService = SyncPullService(
-                    fetch: {
-                        let tokenData = SyncChangeTokenStore.load()
+                    fetch: { tokenData in
                         return try await Self.fetchUncommittedChanges(
                             from: database, mapper: mapper, previousTokenData: tokenData
                         )
-                    },
-                    acknowledge: { data in
-                        SyncChangeTokenStore.save(data)
                     }
                 )
             }
@@ -389,9 +385,9 @@ public final class SyncManager: ObservableObject {
     
     /// Resets the sync state (clears token, forces full re-sync).
     @MainActor
-    public func resetSync() {
+    public func resetSync(in localDatabase: DatabaseManager) throws {
         guard !isPullInProgress, syncState != .syncing else { return }
-        SyncChangeTokenStore.reset()
+        try SyncChangeTokenStore.reset(in: localDatabase)
         UserDefaults.standard.removeObject(forKey: lastSyncDateKey)
         syncedEntryCount = 0
         lastSyncDate = nil

@@ -27,7 +27,7 @@ final class SyncToPasteFlowTests: XCTestCase {
             SyncChangeBatch(modified: [], deleted: [downloaded.id], token: Data([3]))
         ])
         let manager = SyncManager(pullService: SyncPullService(
-            fetch: { try await remote.fetch() }, acknowledge: { try await remote.acknowledge($0) }
+            fetch: { _ in try await remote.fetch() }, acknowledge: { try await remote.acknowledge($0) }
         ))
         let writer = E2EPasteboardWriter()
         let paste = PasteService(pasteboard: writer, simulator: E2EPasteSimulator())
@@ -96,7 +96,7 @@ final class SyncToPasteFlowTests: XCTestCase {
             modified: [downloaded], deleted: [], token: Data([1])
         )])
         let manager = SyncManager(pullService: SyncPullService(
-            fetch: { try await remote.fetch() }, acknowledge: { try await remote.acknowledge($0) }
+            fetch: { _ in try await remote.fetch() }, acknowledge: { try await remote.acknowledge($0) }
         ))
 
         try await manager.pullChanges(into: database)
