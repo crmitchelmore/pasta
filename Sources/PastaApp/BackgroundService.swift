@@ -471,9 +471,13 @@ final class BackgroundService: ObservableObject {
                         }
                         
                         do {
-                            try db.insert(e, deduplicate: deduplicate)
-                            insertedEntries.append(e)
-                            PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)\(e.isExtracted ? " (extracted)" : "")")
+                            // Use the PERSISTED row from here on: with dedup on,
+                            // `e` may have folded into an existing row and its
+                            // own UUID never reached the database. Uploading `e`
+                            // created phantom remote records (pasta-109).
+                            let outcome = try db.insert(e, deduplicate: deduplicate)
+                            insertedEntries.append(outcome.entry)
+                            PastaLogger.clipboard.debug("\(outcome.isNewRow ? "Inserted" : "Deduplicated") entry: \(e.contentType.rawValue)\(e.isExtracted ? " (extracted)" : "")")
                         } catch {
                             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert entry")
                             if firstInsertionError == nil {
@@ -564,9 +568,10 @@ final class BackgroundService: ObservableObject {
                     var firstInsertionError: PastaError?
                     for e in result.allEntries {
                         do {
-                            try db.insert(e, deduplicate: deduplicate)
-                            insertedScreenshots.append(e)
-                            PastaLogger.clipboard.debug("Inserted entry: \(e.contentType.rawValue)")
+                            // Persisted row, not `e`: see the clipboard path above.
+                            let outcome = try db.insert(e, deduplicate: deduplicate)
+                            insertedScreenshots.append(outcome.entry)
+                            PastaLogger.clipboard.debug("\(outcome.isNewRow ? "Inserted" : "Deduplicated") entry: \(e.contentType.rawValue)")
                         } catch {
                             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert screenshot entry")
                             if firstInsertionError == nil {
