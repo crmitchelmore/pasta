@@ -40,6 +40,12 @@ struct SearchView: View {
         .onChange(of: selectedFilter) { _, _ in
             performSearch(query: searchText)
         }
+        .onAppear {
+            performSearch(query: searchText)
+        }
+        .onDisappear {
+            searchTask?.cancel()
+        }
     }
 
     // MARK: - Filter Chips
@@ -129,18 +135,14 @@ struct SearchView: View {
             return
         }
 
-        searchTask = Task {
+        let filter = selectedFilter
+        searchTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 100_000_000) // 100ms debounce
             guard !Task.isCancelled else { return }
 
-            let searchResults = await Task.detached(priority: .userInitiated) {
-                appState.searchEntries(query: trimmed, contentType: selectedFilter)
-            }.value
-
-            await MainActor.run {
-                guard !Task.isCancelled else { return }
-                results = searchResults
-            }
+            let searchResults = await appState.searchEntries(query: trimmed, contentType: filter)
+            guard !Task.isCancelled else { return }
+            results = searchResults
         }
     }
 }
