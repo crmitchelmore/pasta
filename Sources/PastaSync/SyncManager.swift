@@ -38,7 +38,6 @@ public final class SyncManager: ObservableObject {
     public static let zoneID = CKRecordZone.ID(zoneName: zoneName, ownerName: CKCurrentUserDefaultName)
     
     // UserDefaults keys for sync tokens
-    private let changeTokenKey = "com.pasta.sync.changeToken"
     private let lastSyncDateKey = "com.pasta.sync.lastSyncDate"
     
     /// Whether sync is enabled. Disabled when CloudKit entitlement is missing.
@@ -269,16 +268,15 @@ public final class SyncManager: ObservableObject {
                     throw CKError(.notAuthenticated)
                 }
                 let mapper = recordMapper
-                let tokenKey = changeTokenKey
                 pullService = SyncPullService(
                     fetch: {
-                        let tokenData = UserDefaults.standard.data(forKey: tokenKey)
+                        let tokenData = SyncChangeTokenStore.load()
                         return try await Self.fetchUncommittedChanges(
                             from: database, mapper: mapper, previousTokenData: tokenData
                         )
                     },
                     acknowledge: { data in
-                        UserDefaults.standard.set(data, forKey: tokenKey)
+                        SyncChangeTokenStore.save(data)
                     }
                 )
             }
@@ -393,7 +391,7 @@ public final class SyncManager: ObservableObject {
     @MainActor
     public func resetSync() {
         guard !isPullInProgress, syncState != .syncing else { return }
-        UserDefaults.standard.removeObject(forKey: changeTokenKey)
+        SyncChangeTokenStore.reset()
         UserDefaults.standard.removeObject(forKey: lastSyncDateKey)
         syncedEntryCount = 0
         lastSyncDate = nil

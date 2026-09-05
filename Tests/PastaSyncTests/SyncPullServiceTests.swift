@@ -23,7 +23,7 @@ final class SyncPullServiceTests: XCTestCase {
             modified: [updated, added], deleted: [deleted.id], token: Data([1])
         )])
         let service = makeService(remote)
-        try database.dbWriter.write { connection in
+        try await database.dbWriter.write { connection in
             try connection.execute(sql: """
                 CREATE TRIGGER reject_sync_delete BEFORE DELETE ON clipboard_entries
                 WHEN old.id = '\(deleted.id.uuidString)'
@@ -46,7 +46,7 @@ final class SyncPullServiceTests: XCTestCase {
         XCTAssertEqual(try database.searchFTS(query: "aardvark", contentType: nil).map(\.id), [original.id])
         XCTAssertTrue(try database.searchFTS(query: "pangolin", contentType: nil).isEmpty)
 
-        try database.dbWriter.write { try $0.execute(sql: "DROP TRIGGER reject_sync_delete") }
+        try await database.dbWriter.write { try $0.execute(sql: "DROP TRIGGER reject_sync_delete") }
         try await service.pull(into: database)
 
         let retriedState = await remote.snapshot()
