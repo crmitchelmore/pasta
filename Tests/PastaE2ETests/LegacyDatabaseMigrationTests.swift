@@ -256,7 +256,12 @@ final class LegacyDatabaseMigrationTests: XCTestCase {
         let fetched = try db.fetchAll().filter { legacyIDs.contains($0.id) }
         XCTAssertEqual(fetched.count, rows.count)
         XCTAssertTrue(fetched.allSatisfy { $0.parentEntryId == nil && !$0.isPinned })
-        XCTAssertTrue(fetched.allSatisfy(\.isSynced), "backfillIsSynced marks pre-sync rows as synced")
+        // assertUpgradedDatabaseWorks re-copied rows[0]: its copyCount changed,
+        // so that one row is pending upload again (the canonical record must
+        // carry the new count, pasta-109). Every other legacy row keeps the
+        // synced state the backfill gave it.
+        XCTAssertTrue(fetched.filter { $0.id != rows[0].id }.allSatisfy(\.isSynced), "backfillIsSynced marks pre-sync rows as synced")
+        XCTAssertEqual(fetched.first { $0.id == rows[0].id }?.isSynced, false, "a re-copied legacy row must upload again with its new copyCount")
     }
 
     func testReopeningAnUpgradedDatabaseIsIdempotent() throws {
