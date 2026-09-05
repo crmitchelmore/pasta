@@ -42,8 +42,8 @@ struct QuickSearchRow: View {
     private var standardBody: some View {
         HStack(spacing: 12) {
             // Type icon or image thumbnail
-            if row.prefersImageThumbnail, let imagePath = row.imagePath {
-                ImageThumbnail(path: imagePath, size: 36)
+            if let source = row.imageSource {
+                ImageThumbnail(source: source, size: 36)
             } else {
                 Image(systemName: row.contentType.systemImageName)
                     .font(.title3)
@@ -109,8 +109,8 @@ struct QuickSearchRow: View {
     private var microBody: some View {
         VStack(spacing: 4) {
             // Content type icon or image thumbnail
-            if row.prefersImageThumbnail, let imagePath = row.imagePath {
-                ImageThumbnail(path: imagePath, size: 32)
+            if let source = row.imageSource {
+                ImageThumbnail(source: source, size: 32)
             } else {
                 Image(systemName: row.contentType.systemImageName)
                     .font(.title3)

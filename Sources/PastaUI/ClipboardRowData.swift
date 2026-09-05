@@ -34,6 +34,7 @@ public struct ClipboardRowData: Equatable {
     /// that render thumbnails (QuickSearch). The main-panel cell does not
     /// currently render thumbnails but the data lives here for parity.
     public let imagePath: String?
+    let imageSource: ClipboardImageSource?
     /// UTF-8 byte length of the underlying content (O(1) for native strings,
     /// unlike grapheme counting). QuickSearch renders it as a byte-size in
     /// its metadata line.
@@ -78,6 +79,7 @@ public struct ClipboardRowData: Equatable {
         self.swatchColor = Self.parseSwatch(from: entry)
         self.isPinned = entry.isPinned
         self.imagePath = entry.imagePath
+        self.imageSource = ClipboardImageSource(entry: entry)
         // utf8.count is O(1) for native strings; `count` walks every grapheme,
         // which is milliseconds per row for multi-MB entries.
         self.contentLength = entry.content.utf8.count
@@ -153,6 +155,7 @@ public struct ClipboardRowData: Equatable {
         self.swatchColor = nil
         self.isPinned = false
         self.imagePath = nil
+        self.imageSource = nil
         self.contentLength = 0
         self.sectionHeader = headerTitle
     }
@@ -206,7 +209,7 @@ public struct ClipboardRowData: Equatable {
 
     /// True if this row should render an image thumbnail rather than an icon.
     public var prefersImageThumbnail: Bool {
-        (contentType == .image || contentType == .screenshot) && imagePath != nil
+        imageSource != nil
     }
 }
 

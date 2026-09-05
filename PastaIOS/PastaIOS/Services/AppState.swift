@@ -150,17 +150,10 @@ final class AppState: ObservableObject {
                 logger.info("Backfilled \(backfilled) local clipboard entries to CloudKit")
             }
 
-            let changes = try await syncManager.fetchChanges()
-
-            for entry in changes.modified {
-                try database.insert(entry, deduplicate: true)
-            }
-
-            for id in changes.deleted {
-                try database.delete(id: id)
-            }
+            try await syncManager.pullChanges(into: database)
 
             try loadEntries()
+            errorMessage = nil
         } catch {
             logger.error("Sync failed: \(error.localizedDescription)")
             errorMessage = "Sync failed: \(error.localizedDescription)"

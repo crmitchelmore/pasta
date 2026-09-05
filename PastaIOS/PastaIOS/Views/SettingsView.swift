@@ -113,6 +113,7 @@ struct SettingsView: View {
             } label: {
                 Label("Reset Sync", systemImage: "arrow.counterclockwise")
             }
+            .disabled(syncManager.syncState == .syncing)
         } footer: {
             Text("Clears the sync token and forces a full re-sync from iCloud.")
         }

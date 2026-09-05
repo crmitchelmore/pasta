@@ -51,15 +51,11 @@ try await syncManager.deleteEntry(id: uuid)
 ### Pull from CloudKit (iOS or macOS)
 
 ```swift
-let (modified, deleted) = try await syncManager.fetchChanges()
+// Applies one transaction by record UUID, then acknowledges its change token.
+// A failed transaction is replayed on the next attempt.
+try await syncManager.pullChanges(into: database)
 
-// Apply changes to local database
-for entry in modified {
-    database.upsert(entry)
-}
-for id in deleted {
-    database.delete(id)
-}
+// Reload the displayed history after the operation returns.
 ```
 
 ### Observing Sync State

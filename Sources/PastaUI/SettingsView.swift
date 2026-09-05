@@ -53,22 +53,19 @@ public struct SettingsView: View {
     private let automaticallyChecksForUpdates: Binding<Bool>?
     private let openWalkthrough: (() -> Void)?
     private let syncManager: SyncManager?
-    private let unsyncedEntries: (@Sendable () -> [ClipboardEntry])?
-    private let markSynced: (([UUID]) -> Void)?
+    private let syncNow: (@MainActor () async throws -> Void)?
     private let syncedCount: (() -> Int)?
 
     public init(
         syncManager: SyncManager? = nil,
-        unsyncedEntries: (@Sendable () -> [ClipboardEntry])? = nil,
-        markSynced: (([UUID]) -> Void)? = nil,
+        syncNow: (@MainActor () async throws -> Void)? = nil,
         syncedCount: (() -> Int)? = nil,
         openWalkthrough: (() -> Void)? = nil,
         checkForUpdates: (() -> Void)? = nil,
         automaticallyChecksForUpdates: Binding<Bool>? = nil
     ) {
         self.syncManager = syncManager
-        self.unsyncedEntries = unsyncedEntries
-        self.markSynced = markSynced
+        self.syncNow = syncNow
         self.syncedCount = syncedCount
         self.openWalkthrough = openWalkthrough
         self.checkForUpdates = checkForUpdates
@@ -124,8 +121,7 @@ public struct SettingsView: View {
             if let syncManager {
                 iCloudSettingsTab(
                     syncManager: syncManager,
-                    unsyncedEntries: unsyncedEntries ?? { [] },
-                    markSynced: markSynced,
+                    syncNow: syncNow,
                     syncedCount: syncedCount ?? { 0 }
                 )
                     .tabItem {

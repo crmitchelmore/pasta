@@ -159,6 +159,24 @@ final class BackgroundService: ObservableObject {
         CIReadiness.signal(entryCount: entries.count)
     }
     
+    private var isSyncInProgress = false
+
+    /// Settings uses this single operation in both window entry points.
+    /// Publish a fresh history window only after downloaded changes commit.
+    func syncNow() async throws {
+        guard !isSyncInProgress else { throw SyncPullService.PullError.alreadyInProgress }
+        isSyncInProgress = true
+        defer { isSyncInProgress = false }
+        try await syncManager.setupZone()
+        let database = database
+        let syncManager = syncManager
+        _ = try await database.backfillUnsynced { entries, onBatchSynced in
+            try await syncManager.pushEntries(entries, onBatchSynced: onBatchSynced)
+        }
+        try await syncManager.pullChanges(into: database)
+        refresh()
+    }
+
     private func setupSync() {
         Task {
             do {

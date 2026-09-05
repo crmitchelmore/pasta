@@ -32,12 +32,10 @@ struct PastaApp: App {
 
     var body: some Scene {
         Settings {
-            let database = BackgroundService.shared.database
             SettingsView(
                 syncManager: BackgroundService.shared.syncManager,
-                unsyncedEntries: { (try? database.fetchUnsynced()) ?? [] },
-                markSynced: { ids in
-                    try? BackgroundService.shared.database.markSynced(ids: ids)
+                syncNow: {
+                    try await BackgroundService.shared.syncNow()
                 },
                 syncedCount: {
                     (try? BackgroundService.shared.database.syncedCount()) ?? 0
