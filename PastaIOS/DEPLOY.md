@@ -137,6 +137,7 @@ checked on any Mac with Xcode:
 
 ```bash
 xcodebuild -project PastaIOS/PastaIOS.xcodeproj -scheme PastaIOS \
+  -onlyUsePackageVersionsFromResolvedFile \
   -destination 'generic/platform=iOS' -configuration Release \
   -archivePath /tmp/PastaIOS.xcarchive archive \
   CODE_SIGNING_ALLOWED=NO \

@@ -82,7 +82,9 @@ print(types[0]["identifier"])')
 }
 
 cmd_resolve() {
+  python3 scripts/ci-verify-dependency-locks.py
   xcodebuild -resolvePackageDependencies \
+    -onlyUsePackageVersionsFromResolvedFile \
     -project "$PROJECT" -scheme "$SCHEME" \
     -derivedDataPath "$DERIVED_DATA"
 }
@@ -98,6 +100,7 @@ cmd_verify_release_settings() {
   echo "==> Verifying Release build settings for $SCHEME"
   local settings conds
   if ! settings="$(xcodebuild -showBuildSettings \
+      -onlyUsePackageVersionsFromResolvedFile \
       -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
       -destination 'generic/platform=iOS' 2>&1)"; then
     echo "::error::xcodebuild -showBuildSettings failed for $SCHEME (Release); cannot prove the CloudKit compile flag is set."
@@ -137,6 +140,7 @@ cmd_build_for_testing() {
   cmd_verify_release_settings || return 1
   echo "==> Destination: $(destination)"
   run_xcodebuild_logged "$BUILD_LOG" "^(=== |\\*\\* |error:|.*error:|.*warning: .*PastaIOS)" build-for-testing \
+    -onlyUsePackageVersionsFromResolvedFile \
     -project "$PROJECT" -scheme "$SCHEME" \
     -destination "$(destination)" \
     -derivedDataPath "$DERIVED_DATA" \
@@ -154,6 +158,7 @@ cmd_test() {
   mkdir -p "$(dirname "$RESULT_BUNDLE")"
   rm -rf "$RESULT_BUNDLE"
   run_xcodebuild_logged "$TEST_LOG" "Test Case|Test Suite|passed|failed|error|Executed|Restarting|crash" test-without-building \
+    -onlyUsePackageVersionsFromResolvedFile \
     -project "$PROJECT" -scheme "$SCHEME" \
     -destination "$(destination)" \
     -derivedDataPath "$DERIVED_DATA" \

@@ -39,6 +39,8 @@ class CIGateTests(unittest.TestCase):
         self.executable("xcodebuild", """
 import os, sys
 from pathlib import Path
+if '-onlyUsePackageVersionsFromResolvedFile' not in sys.argv:
+    sys.exit('The native gate must preserve strict dependency resolution')
 if '-showBuildSettings' in sys.argv:
     print('    SWIFT_ACTIVE_COMPILATION_CONDITIONS = PASTA_IOS_CLOUDKIT_PROVISIONED')
     sys.exit(0)
