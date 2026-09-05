@@ -20,11 +20,12 @@ function jobBlock(name) {
   return next >= 0 ? rest.slice(0, next + 1) : rest;
 }
 
-test('auto-release depends only on ci-gate and survives skipped upstream jobs', () => {
+test('auto-release depends only on ci-gate, survives skipped upstream jobs, and stops on cancellation', () => {
   const block = jobBlock('auto-release');
   assert.match(block, /needs:\s*\[ci-gate\]/, 'auto-release must depend on the aggregate gate only');
   const iff = block.match(/^\s+if:\s*(.+)$/m)?.[1] ?? '';
   assert.match(iff, /always\(\)/, "auto-release `if` must use always() or a skipped landing-e2e skips the tag");
+  assert.match(iff, /!cancelled\(\)/, "auto-release must stop when an operator cancels the workflow");
   assert.match(iff, /needs\.ci-gate\.result == 'success'/, 'auto-release must require ci-gate success explicitly');
   assert.match(iff, /github\.event_name == 'push'/);
   assert.match(iff, /refs\/heads\/main/);
