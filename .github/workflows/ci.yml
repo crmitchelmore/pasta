@@ -516,7 +516,13 @@ jobs:
   auto-release:
     name: Auto Version & Release
     needs: [ci-gate]
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # `always()` is REQUIRED here: without it GitHub skips this job whenever any
+    # transitive dependency was skipped (landing-e2e is path-filtered and skips
+    # on most pushes), even though ci-gate itself ran and succeeded. That
+    # silently stopped tagging on 2026-09-05. `!cancelled()` prevents a tag from
+    # being pushed after an operator cancels the workflow; the explicit result
+    # check keeps the aggregate gate authoritative.
+    if: ${{ always() && !cancelled() && needs.ci-gate.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     # Pure git + shell (version bump from conventional commits, tag push): no
     # Xcode needed. Keeping this off macOS spares every release a second wait in
     # the account-wide macOS runner queue, which can run to an hour or more.
