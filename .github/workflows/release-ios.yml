@@ -37,6 +37,7 @@ on:
 
 permissions:
   contents: read
+  actions: read  # Verify the exact upload commit passed every main CI surface
 
 # Never let two releases race App Store Connect; queue instead of cancelling.
 concurrency:
@@ -440,6 +441,20 @@ jobs:
           echo "==> ExportOptions.plist:"
           plutil -p "$OPTIONS"
 
+      - name: Resolve the exact upload commit
+        if: steps.upload.outputs.enabled == 'true'
+        run: echo "RELEASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      # Manual uploads and manually pushed tags do not inherit auto-release's
+      # needs: gates. Require successful main CI for these exact source bytes.
+      - name: Require every surface gate before TestFlight upload
+        if: steps.upload.outputs.enabled == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { verifyReleasePublication } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
+            await verifyReleasePublication({ github, ...context.repo, sha: process.env.RELEASE_SHA });
+
       - name: Export IPA and upload to App Store Connect
         env:
           UPLOAD: ${{ steps.upload.outputs.enabled }}
@@ -471,8 +486,8 @@ jobs:
       # The upload returning is not the same as Apple accepting the build:
       # processing can still end INVALID/FAILED. Poll the App Store Connect API
       # (JWT minted from the same APP_STORE_CONNECT_* secrets) until the build
-      # is VALID; a rejection fails the job with the build's attributes, a
-      # 20-minute timeout is only a warning. See scripts/ci-asc-wait-for-build.sh.
+      # is VALID; rejection or an unverified 20-minute timeout fails the job.
+      # A timeout does not undo the upload. See scripts/ci-asc-wait-for-build.sh.
       - name: Wait for App Store Connect processing
         if: steps.upload.outputs.enabled == 'true'
         env:

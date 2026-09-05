@@ -2,11 +2,12 @@
 
 The iOS companion app has an end-to-end XCUITest suite, `PastaIOSUITests`, that
 drives the real app on an iPhone simulator. It runs in CI on every push and pull
-request (`ios-e2e` job in `.github/workflows/ci.yml`) so a launch crash or a
-broken tab can never ship silently again.
+request (`ios-e2e` job in `.github/workflows/ci.yml`) to detect launch, navigation, capture, persistence, and search regressions.
+Passing these tests supports those paths; it does not prove every production
+journey. See [the cross-surface coverage map](../TESTING.md).
 
 The suite needs **no iCloud account** and starts every test from an **empty
-database**, so it behaves the same on a fresh CI runner and on your Mac.
+database and pasteboard**, so it behaves the same on a fresh CI runner and on your Mac.
 
 ## Running locally
 
@@ -65,17 +66,18 @@ crash report whose `exception`/`termination` fields name the trap.
 | --- | --- |
 | `testLaunchesWithoutCrashing` | App reaches the tab bar within 15 s, loading view goes away, process stays in the foreground. **This is the launch-crash guard.** |
 | `testSurvivesBackgroundAndForeground` | Home, then re-activate: the activation pipeline (sync + clipboard capture) does not crash. |
-| `testHistoryTabShowsListAndEmptyState` | History tab renders its list and either the empty state or rows. |
+| `testHistoryTabShowsListAndEmptyState` | Fresh History shows the empty state, no rows, and an exact Settings count of zero. |
 | `testSearchTabIsReachable`, `testSettingsTabIsReachable`, `testCanCycleThroughAllTabs` | Each tab is selectable and shows its top-level element. |
 | `testSearchFieldIsVisibleImmediatelyWithoutScrolling` | Regression for #74: the search field is hittable in the top part of the screen as soon as the tab opens. |
-| `testTypingASearchQueryShowsResultsOrEmptyState` | Typing a query does not crash and shows results or the no-results state; clearing returns to the prompt. |
+| `testSearchExcludesNonmatchingEntriesAndClearsToPrompt` | Find a seeded entry, append an unmatched term, require that result to disappear, then clear to the prompt. |
 | `testSearchFindsACapturedClipboardEntry` | FTS search finds an entry captured from the pasteboard. |
 | `testSettingsRendersItsSections` | Sync/Help/About/Reset sections render; iCloud reads "Unavailable" with no account. |
 | `testReplayWalkthroughRoundTrips`, `testWhatsNewSheetRoundTrips` | Settings actions present a sheet and dismissing it returns to Settings. |
 | `testFirstLaunchShowsOnboardingAndGetStartedReachesMainUI` | First launch shows onboarding; Get Started reaches the main UI. |
 | `testOnboardingCompletionPersistsAcrossRelaunch` | Completed onboarding survives a relaunch. |
 | `testSkipOnboardingHookLandsOnMainUI` | The skip hook lands on the main UI with no What's New sheet. |
-| `testCapturesPasteboardIntoHistoryOnActivation` | Text on the pasteboard at activation becomes the newest History entry; Settings count agrees. |
+| `testCapturesPasteboardIntoHistoryOnActivation` | Text on the pasteboard at activation appears in History; Settings count is exactly one. |
+| `testCapturedHistoryPersistsAndRemainsSearchableAfterRelaunch` | Capture, terminate, relaunch with unrelated clipboard text, then search and open the original persisted entry; exactly two entries exist. |
 | `testOpeningACapturedEntryShowsDetail` | Row -> detail -> back navigation. |
 
 ## Launch hooks
@@ -89,7 +91,7 @@ so a stray environment variable on a real device has no effect.
 | Hook | Effect |
 | --- | --- |
 | `-uiTesting` (launch argument) | Enables the hooks below. |
-| `PASTA_UI_TEST_RESET=1` | Deletes `pasta.sqlite` (+ `-wal`/`-shm`) and removes the app's UserDefaults domain, so the run starts from a fresh install. Every test sets this. |
+| `PASTA_UI_TEST_RESET=1` | Deletes `pasta.sqlite` (+ `-wal`/`-shm`) and removes the app's UserDefaults domain, and clears the pasteboard when no text fixture is supplied. First launches reset state; persistence checks preserve it on relaunch. |
 | `PASTA_UI_TEST_SKIP_ONBOARDING=1` | Marks onboarding complete and the current version as seen, so the app opens on the main tab UI without the onboarding or What's New sheets. |
 | `PASTA_UI_TEST_PASTEBOARD=<text>` | Writes `<text>` to `UIPasteboard.general` before the activation-time clipboard capture runs, making the capture path deterministic. |
 
@@ -107,3 +109,20 @@ ones are: `loading.view`, `history.list`, `history.row`, `history.emptyState`,
 `onboarding.title`, `onboarding.primaryButton`, `onboarding.toolbarDone`,
 `whatsNew.list`, `whatsNew.done`. Tab bar buttons are matched by their titles
 (`History`, `Search`, `Settings`) and the search field via `app.searchFields`.
+
+## Trusting the CI result
+
+The shared `scripts/ci-ios-e2e.sh` driver requires actual `xcodebuild` and
+log-writer success plus the expected completion banner. It independently
+reads the `.xcresult` summary and rejects zero tests, skips, failures, malformed
+or unreadable results. Automatic test retries are disabled: a first failure
+must not silently become a green release. The `summarise` command remains
+best-effort diagnostics only.
+
+Portable failure-injection checks exercise the real shell driver without
+Xcode or network access; they do not replace a simulator run:
+
+```bash
+python3 -B -m unittest discover -s scripts/tests -p 'test_*.py' -v
+node --test scripts/tests/*.test.mjs
+```
