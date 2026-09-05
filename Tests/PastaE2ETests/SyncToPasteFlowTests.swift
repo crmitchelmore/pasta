@@ -116,12 +116,7 @@ final class SyncToPasteFlowTests: XCTestCase {
         let pastedBytes = try XCTUnwrap(pasteboard.data(forType: .tiff))
         XCTAssertEqual(pastedBytes, newBytes)
         XCTAssertTrue(try XCTUnwrap(NSImage(data: pastedBytes)).isValid)
-        let decoded = try XCTUnwrap(NSBitmapImageRep(data: pastedBytes))
-        XCTAssertEqual(decoded.pixelsWide, 2)
-        XCTAssertEqual(decoded.pixelsHigh, 2)
-        let pixel = try XCTUnwrap(decoded.colorAt(x: 0, y: 0)?.usingColorSpace(.deviceRGB))
-        XCTAssertEqual(pixel.redComponent, 0, accuracy: 0.01)
-        XCTAssertEqual(pixel.blueComponent, 1, accuracy: 0.01)
+        try assertTIFFSamples(pastedBytes, red: 0, green: 0, blue: 255)
         XCTAssertEqual(try database.countEntries(), 1)
         XCTAssertEqual(try database.unsyncedCount(), 0)
     }
@@ -147,19 +142,28 @@ final class SyncToPasteFlowTests: XCTestCase {
             }
         }
         let data = try XCTUnwrap(bitmap.representation(using: .tiff, properties: [:]))
+        try assertTIFFSamples(data, red: red, green: green, blue: blue)
+        return data
+    }
+
+    @MainActor
+    private func assertTIFFSamples(_ data: Data, red: UInt8, green: UInt8, blue: UInt8) throws {
         let decoded = try XCTUnwrap(NSBitmapImageRep(data: data))
         XCTAssertEqual(decoded.pixelsWide, 2)
         XCTAssertEqual(decoded.pixelsHigh, 2)
+        XCTAssertEqual(decoded.bitsPerSample, 8)
+        XCTAssertEqual(decoded.samplesPerPixel, 4)
+        XCTAssertTrue(decoded.hasAlpha)
+        XCTAssertFalse(decoded.bitmapFormat.contains(.alphaFirst))
+        // Compare decoded sample values, not display-colour conversions: TIFF
+        // profiles and a runner's deviceRGB profile need not be the same space.
         for y in 0..<2 {
             for x in 0..<2 {
-                let pixel = try XCTUnwrap(decoded.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
-                XCTAssertEqual(pixel.redComponent, CGFloat(red) / 255, accuracy: 0.01)
-                XCTAssertEqual(pixel.greenComponent, CGFloat(green) / 255, accuracy: 0.01)
-                XCTAssertEqual(pixel.blueComponent, CGFloat(blue) / 255, accuracy: 0.01)
-                XCTAssertEqual(pixel.alphaComponent, 1, accuracy: 0.01)
+                var samples = [Int](repeating: 0, count: decoded.samplesPerPixel)
+                decoded.getPixel(&samples, atX: x, y: y)
+                XCTAssertEqual(samples, [Int(red), Int(green), Int(blue), 255])
             }
         }
-        return data
     }
 }
 
