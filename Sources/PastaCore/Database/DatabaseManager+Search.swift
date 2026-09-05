@@ -109,6 +109,10 @@ extension DatabaseManager {
             .filter { !$0.isEmpty }
 
         guard !words.isEmpty else { return "" }
-        return words.map { "\($0)*" }.joined(separator: " ")
+        // User input is literal text, never FTS syntax. Quoting also handles
+        // punctuation outside the splitter list (such as $ and %) and words
+        // like AND/OR/NOT. Keep * outside the quotes to retain prefix matching.
+        return words.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"*" }
+            .joined(separator: " ")
     }
 }
