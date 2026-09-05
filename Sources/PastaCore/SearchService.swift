@@ -38,7 +38,7 @@ public final class SearchService: @unchecked Sendable {
             return []
         }
 
-        PastaLogger.search.debug("FTS5 search for '\(trimmed)' contentType=\(String(describing: contentType)) limit=\(limit) pinnedOnly=\(pinnedOnly)")
+        PastaLogger.search.debug("FTS5 search contentType=\(String(describing: contentType)) limit=\(limit) pinnedOnly=\(pinnedOnly)")
         let startTime = CFAbsoluteTimeGetCurrent()
 
         // Use FTS5 for blazing fast search

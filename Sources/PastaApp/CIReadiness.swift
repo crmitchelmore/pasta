@@ -10,8 +10,9 @@ import PastaCore
 /// The smoke test used to check only that the PID was still alive five
 /// seconds after launch, which passes for a process wedged before its
 /// database opened. Now `BackgroundService` calls `signal` once the initial
-/// history load has come back from the database AND clipboard monitoring is
-/// running; CI waits for that, then sends SIGTERM and asserts exit code 0.
+/// history load has come back from durable storage AND clipboard monitoring is
+/// running, without an in-memory database or temporary image-storage fallback;
+/// CI waits for that, then sends SIGTERM and asserts exit code 0.
 enum CIReadiness {
     /// Reuses the process-wide `PASTA_CI` check so there is one definition.
     static var isEnabled: Bool { AnalyticsEnvironment.isSuppressedByEnvironment }

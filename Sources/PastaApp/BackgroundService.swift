@@ -24,6 +24,9 @@ final class BackgroundService: ObservableObject {
     let syncManager: SyncManager
     
     private let imageStorage: ImageStorageManager
+    /// A dismissed error must not turn temporary fallback storage into healthy
+    /// persistence for the release smoke test.
+    private let hasDurableStorage: Bool
     private let clipboardMonitor: ClipboardMonitor
     private let contentTypeDetector: ContentTypeDetector
     private let screenshotMonitor: ScreenshotMonitor
@@ -111,6 +114,7 @@ final class BackgroundService: ObservableObject {
             }
         }()
         self.imageStorage = storage
+        self.hasDurableStorage = dbError == nil && storageError == nil
         self.syncManager = SyncManager(containerIdentifier: "iCloud.com.pasta.ios")
         
         self.clipboardMonitor = ClipboardMonitor()
@@ -148,10 +152,11 @@ final class BackgroundService: ObservableObject {
 
     /// Under `PASTA_CI` the launch smoke test waits for this marker instead of
     /// merely checking the process is alive. It fires exactly once, when the
-    /// database has answered the initial history load AND the clipboard
-    /// monitor is running — the two things "the app started" actually means.
+    /// database has answered the initial history load, the clipboard monitor
+    /// is running, and neither persistent service fell back to volatile storage.
     private func signalCIReadinessIfReady() {
         guard CIReadiness.isEnabled,
+              hasDurableStorage,
               !hasSignalledCIReadiness,
               isMonitoringStarted,
               isHistoryPagingComplete else { return }
@@ -528,7 +533,7 @@ final class BackgroundService: ObservableObject {
                     return
                 }
                 
-                PastaLogger.clipboard.debug("New screenshot entry received: \(entry.content)")
+                PastaLogger.clipboard.debug("New screenshot entry received")
                 
                 let db = self.database
                 let storage = self.imageStorage
