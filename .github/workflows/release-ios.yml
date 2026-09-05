@@ -89,7 +89,7 @@ jobs:
           path: |
             .build/ios-derived/SourcePackages
             .build/ios-derived/Build/Intermediates.noindex
-          key: ios-e2e-${{ runner.os }}-${{ hashFiles('Package.resolved', 'Package.swift', 'PastaIOS/PastaIOS.xcodeproj/project.pbxproj') }}
+          key: ios-e2e-${{ runner.os }}-${{ hashFiles('Package.resolved', 'PastaIOS/PastaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved', 'Package.swift', 'PastaIOS/PastaIOS.xcodeproj/project.pbxproj') }}
           restore-keys: |
             ios-e2e-${{ runner.os }}-
 
@@ -354,7 +354,9 @@ jobs:
       - name: Resolve Swift packages
         run: |
           set -euo pipefail
+          python3 scripts/ci-verify-dependency-locks.py
           xcodebuild -resolvePackageDependencies \
+            -onlyUsePackageVersionsFromResolvedFile \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -derivedDataPath "$BUILD_DIR/DerivedData"
@@ -380,6 +382,7 @@ jobs:
           # PASTA_IOS_CLOUDKIT_PROVISIONED compile flag on the app target only;
           # scripts/ci-ios-e2e.sh asserts the flag is present before any upload.
           xcodebuild archive \
+            -onlyUsePackageVersionsFromResolvedFile \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -configuration Release \

@@ -41,13 +41,15 @@ jobs:
       # ============================================================================
       
       - name: Resolve Swift dependencies
-        run: swift package resolve
+        run: |
+          python3 scripts/ci-verify-dependency-locks.py
+          swift package resolve --force-resolved-versions
       
       - name: Build release binary (arm64)
-        run: swift build -c release --arch arm64
+        run: swift build --force-resolved-versions -c release --arch arm64
       
       - name: Build release binary (x86_64)
-        run: swift build -c release --arch x86_64
+        run: swift build --force-resolved-versions -c release --arch x86_64
       
       - name: Create universal binary
         run: |

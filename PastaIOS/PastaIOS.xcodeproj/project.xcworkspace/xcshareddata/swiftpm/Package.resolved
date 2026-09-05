@@ -1,0 +1,32 @@
+{
+  "pins": [
+    {
+      "identity": "grdb.swift",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/groue/GRDB.swift.git",
+      "state": {
+        "revision": "2cf6c756e1e5ef6901ebae16576a7e4e4b834622",
+        "version": "6.29.3"
+      }
+    },
+    {
+      "identity": "sentry-cocoa",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/getsentry/sentry-cocoa.git",
+      "state": {
+        "revision": "f196cbb98e0388381d57908f2f5a9bdc385cde68",
+        "version": "8.58.4"
+      }
+    },
+    {
+      "identity": "sparkle",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/sparkle-project/Sparkle.git",
+      "state": {
+        "revision": "ac2def288cbff5cfc7df3ffef6abdf45b72bcb0a",
+        "version": "2.9.6"
+      }
+    }
+  ],
+  "version": 2
+}

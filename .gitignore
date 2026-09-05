@@ -11,7 +11,7 @@ DerivedData/
 *.dSYM.zip
 *.dSYM
 Packages/
-Package.resolved
+# Commit both application dependency locks (SwiftPM and Xcode workspace).
 
 # Copilot CLI prompt/context artifacts
 .ralph-*
