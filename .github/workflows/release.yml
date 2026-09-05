@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write  # Required to create releases
+  actions: read  # Independently verify CI evidence for manually or automatically created tags
 
 env:
   APP_NAME: PastaApp
@@ -17,7 +18,11 @@ jobs:
   build-and-release:
     name: Build, Sign, Notarize & Release
     runs-on: macos-15
-    
+    # Same group as deploy-landing-page.yml: both write the whole Pages site.
+    concurrency:
+      group: landing-page-deploy
+      cancel-in-progress: false
+
     steps:
       # ============================================================================
       # CHECKOUT & SETUP
@@ -35,6 +40,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Version: $VERSION"
+          echo "RELEASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
       
       # ============================================================================
       # BUILD
@@ -557,7 +563,18 @@ jobs:
           echo "Generated appcast.xml:"
           cat "$RUNNER_TEMP/appcast.xml"
       
+      # Manual tags must satisfy the same surface gates as auto-release.
+      # CI may still be running its tag-push job; the shared gate requires
+      # completed successful surface jobs without waiting on that parent run.
+      - name: Require every surface gate before publishing the release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { verifyReleasePublication } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
+            await verifyReleasePublication({ github, ...context.repo, sha: process.env.RELEASE_SHA });
+
       - name: Create GitHub Release
+        id: publish
         uses: softprops/action-gh-release@v1
         with:
           name: Pasta ${{ steps.version.outputs.version }}
@@ -576,6 +593,13 @@ jobs:
           cp "$APPCAST_PATH" landing-page/appcast.xml
           echo "Appcast copied to landing-page/appcast.xml"
       
+      - name: Refuse superseded release landing source
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { verifyCurrentLandingSource } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
+            await verifyCurrentLandingSource({ github, ...context.repo, sha: process.env.RELEASE_SHA });
+
       - name: Deploy landing page with updated appcast
         uses: cloudflare/wrangler-action@v3
         with:
@@ -672,6 +696,22 @@ jobs:
             entitlements.plist
             release_notes.md
           retention-days: 7
+
+      # A later deploy/source-check/tap failure skips verify-release entirely.
+      # Pull any release we created back to draft even when this job is cancelled.
+      - name: Draft release after publication failure
+        if: ${{ always() && (failure() || cancelled()) && steps.publish.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          if gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft; then
+            echo "::error::Release $TAG was drafted after publication failed or was cancelled. Inspect the live appcast and Homebrew cask before retrying; drafting does not roll those back."
+          else
+            echo "::error::Could not draft $TAG after publication failed. Manually draft the release immediately: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
+          fi
+          exit 1
 
   # ============================================================================
   # POST-PUBLISH VERIFICATION — the "certainty" gate for auto-update users.

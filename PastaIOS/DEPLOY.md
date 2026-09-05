@@ -60,7 +60,9 @@ Nothing else is needed. The workflow never reads Apple ID passwords.
    Connect API (a JWT minted from the same `APP_STORE_CONNECT_*` secrets) every
    60 s for up to 20 minutes until the build's `processingState` is `VALID`.
    `INVALID`/`FAILED` fails the job and prints the build's attributes; a
-   timeout is only a warning (Apple can be slow — check the TestFlight tab).
+   timeout also fails because acceptance remains unverified. The upload may
+   still complete: inspect the existing build or rerun only the polling script,
+   rather than re-uploading the same build number.
    Once `VALID`, the build is under the app's TestFlight tab; internal testers
    get it automatically, external groups need the usual review.
 

@@ -1,38 +1,70 @@
 name: Deploy Landing Page
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'landing-page/**'
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
   workflow_dispatch:
+
+# Queue deployments so an older run cannot finish over a newer deployment.
+concurrency:
+  group: landing-page-deploy
+  cancel-in-progress: false
 
 jobs:
   deploy:
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
       deployments: write
+    env:
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
 
     steps:
-      - name: Checkout
+      - name: Checkout the exact CI commit
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+
+      - name: Require every surface gate for the deployment commit
+        id: gate
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { verifyLandingDeploy } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
+            const deploy = await verifyLandingDeploy({
+              github, ...context.repo, sha: process.env.DEPLOY_SHA,
+              runId: context.payload.workflow_run?.id,
+              allowIrrelevantSkip: context.eventName === 'workflow_run',
+            });
+            core.setOutput('deploy', String(deploy));
+            if (!deploy) core.info('CI verified no landing changes; no deployment is needed.');
 
       - name: Preserve the live Sparkle appcast
-        # release.yml regenerates appcast.xml at release time, deploys it and
-        # commits it back to main (scripts/ci-commit-appcast.sh), so the copy in
-        # git should already match. Belt and braces: if that commit-back ever
-        # fails, deploying the repo directory verbatim would overwrite the live
-        # feed and break auto-update for every installed Mac, so always publish
-        # the current live feed and fail loudly rather than ship a broken one.
+        if: steps.gate.outputs.deploy == 'true'
+        # Release publishes and commits this feed separately. Do not roll it
+        # back while deploying a previously tested landing-page commit.
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 https://pasta-app.com/appcast.xml -o landing-page/appcast.xml
           grep -q "<item>" landing-page/appcast.xml || { echo "::error::Fetched appcast has no <item>; refusing to deploy"; exit 1; }
           echo "Preserving live appcast: $(grep -oE '<title>Version [0-9.]+</title>' landing-page/appcast.xml | head -1)"
 
+      - name: Refuse a superseded deployment
+        if: steps.gate.outputs.deploy == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { verifyCurrentLandingSource } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
+            await verifyCurrentLandingSource({ github, ...context.repo, sha: process.env.DEPLOY_SHA });
+
       - name: Deploy to Cloudflare Pages
+        if: steps.gate.outputs.deploy == 'true'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

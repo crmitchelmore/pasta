@@ -117,19 +117,32 @@ cmd_verify_release_settings() {
   esac
 }
 
-cmd_build_for_testing() {
-  cmd_verify_release_settings
-  echo "==> Destination: $(destination)"
+# Preserve the tool and log-writer statuses: success text is not proof that
+# xcodebuild exited successfully (it can fail during result finalisation).
+run_xcodebuild_logged() {
+  local log_file="$1" pattern="$2"
+  shift 2
+  local statuses
   set +e
-  xcodebuild build-for-testing \
+  xcodebuild "$@" 2>&1 | tee "$log_file" | grep -E "$pattern"
+  statuses=("${PIPESTATUS[@]}")
+  set -e
+  if [ "${statuses[0]}" != "0" ] || [ "${statuses[1]}" != "0" ]; then
+    echo "::error::xcodebuild exited ${statuses[0]}; log writer exited ${statuses[1]}. See $log_file."
+    return 1
+  fi
+}
+
+cmd_build_for_testing() {
+  cmd_verify_release_settings || return 1
+  echo "==> Destination: $(destination)"
+  run_xcodebuild_logged "$BUILD_LOG" "^(=== |\\*\\* |error:|.*error:|.*warning: .*PastaIOS)" build-for-testing \
     -project "$PROJECT" -scheme "$SCHEME" \
     -destination "$(destination)" \
     -derivedDataPath "$DERIVED_DATA" \
     CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-    COMPILER_INDEX_STORE_ENABLE=NO \
-    | tee "$BUILD_LOG" | grep -E "^(=== |\*\* |error:|.*error:|.*warning: .*PastaIOS)"
-  set -e
-  # tee swallows the exit status through grep; re-check the summary line.
+    COMPILER_INDEX_STORE_ENABLE=NO || return 1
+  # Require the expected operation to finish as well as a zero exit status.
   grep -q "\*\* TEST BUILD SUCCEEDED \*\*" "$BUILD_LOG"
 }
 
@@ -140,18 +153,36 @@ cmd_test() {
   fi
   mkdir -p "$(dirname "$RESULT_BUNDLE")"
   rm -rf "$RESULT_BUNDLE"
-  set +e
-  xcodebuild test-without-building \
+  run_xcodebuild_logged "$TEST_LOG" "Test Case|Test Suite|passed|failed|error|Executed|Restarting|crash" test-without-building \
     -project "$PROJECT" -scheme "$SCHEME" \
     -destination "$(destination)" \
     -derivedDataPath "$DERIVED_DATA" \
     -resultBundlePath "$RESULT_BUNDLE" \
-    -test-timeouts-enabled YES -default-test-execution-time-allowance 180 \
-    -retry-tests-on-failure -test-iterations 2 \
-    2>&1 | tee "$TEST_LOG" \
-    | grep -E "Test Case|Test Suite|passed|failed|error|Executed|Restarting|crash"
-  set -e
-  grep -q "\*\* TEST EXECUTE SUCCEEDED \*\*" "$TEST_LOG"
+    -test-timeouts-enabled YES -default-test-execution-time-allowance 180 || return 1
+  grep -q "\*\* TEST EXECUTE SUCCEEDED \*\*" "$TEST_LOG" || return 1
+
+  # A successful xcodebuild invocation can execute zero tests. The result
+  # bundle must independently prove a nonempty, entirely passing run. Do not
+  # retry failures into a green release gate; diagnose flakes from artifacts.
+  mkdir -p "$DIAG_DIR"
+  local summary="$DIAG_DIR/xcresult-summary.json"
+  if ! xcrun xcresulttool get test-results summary --path "$RESULT_BUNDLE" > "$summary"; then
+    echo "::error::Cannot read the XCUITest result bundle; coverage is unverified."
+    return 1
+  fi
+  python3 - "$summary" <<'PYRESULT'
+import json, sys
+with open(sys.argv[1]) as handle:
+    result = json.load(handle)
+counts = [result.get(key) for key in ("totalTestCount", "passedTests", "failedTests", "skippedTests")]
+if (not all(type(value) is int for value in counts)
+        or result.get("result") != "Passed"
+        or counts[0] <= 0 or counts[1] != counts[0]
+        or counts[2:] != [0, 0] or result.get("testFailures")):
+    print(f"::error::XCUITest coverage gate requires a nonempty run with every test passing: {result}", file=sys.stderr)
+    sys.exit(1)
+print(f"Verified {counts[1]} passing XCUITests; none failed or skipped.")
+PYRESULT
 }
 
 cmd_summarise() {

@@ -468,8 +468,8 @@ jobs:
       # The upload returning is not the same as Apple accepting the build:
       # processing can still end INVALID/FAILED. Poll the App Store Connect API
       # (JWT minted from the same APP_STORE_CONNECT_* secrets) until the build
-      # is VALID; a rejection fails the job with the build's attributes, a
-      # 20-minute timeout is only a warning. See scripts/ci-asc-wait-for-build.sh.
+      # is VALID; rejection or an unverified 20-minute timeout fails the job.
+      # A timeout does not undo the upload. See scripts/ci-asc-wait-for-build.sh.
       - name: Wait for App Store Connect processing
         if: steps.upload.outputs.enabled == 'true'
         env:
