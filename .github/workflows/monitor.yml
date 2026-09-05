@@ -1,0 +1,60 @@
+name: Production monitor
+
+# Recurring, delivery-independent check that what users actually reach is
+# healthy (issue #110): the landing page and its security headers, the
+# /download redirect, the live Sparkle appcast (parses, signed, DMG reachable)
+# and that the feed advertises the newest PUBLISHED GitHub release. The
+# release-time checks in release.yml only run when we ship; this catches a
+# CDN, DNS, GitHub-asset or stray-deploy regression in between.
+#
+# A red run is the alert: GitHub notifies the workflow's owner on scheduled
+# failures. Re-run manually with workflow_dispatch after fixing.
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'   # every 6 hours
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-monitor
+  cancel-in-progress: true
+
+jobs:
+  live-probe:
+    name: Probe pasta-app.com, appcast and latest release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code (with tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: landing-page/package-lock.json
+
+      - name: Install dependencies
+        working-directory: landing-page
+        run: ../scripts/ci-npm-ci.sh
+
+      - name: Probe the live site, appcast and download
+        working-directory: landing-page
+        run: npm run test:live
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "## Production monitor — $(date -u +'%Y-%m-%d %H:%MZ')"
+            echo
+            echo "- Result: **${{ job.status }}**"
+            echo "- Live appcast top item: $(curl -fsSL https://pasta-app.com/appcast.xml | grep -oE '<title>Version [0-9.]+</title>' | head -1 | sed -E 's/<[^>]+>//g')"
+            echo "- Newest published release: $(curl -fsSL -H 'accept: application/vnd.github+json' https://api.github.com/repos/${{ github.repository }}/releases/latest | grep -oE '"tag_name": *"[^"]+"' | head -1 | cut -d'"' -f4)"
+          } >> "$GITHUB_STEP_SUMMARY"

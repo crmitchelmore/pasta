@@ -7,10 +7,12 @@
 # straight to main. This script creates (or updates) a repository ruleset
 # named "Release gates" that requires:
 #   - a pull request (no review count; reviews are not part of the gate)
-#   - the status checks ci.yml runs on every PR: "Build & Test",
-#     "iOS E2E (XCUITest)", "Appcast & Cloudflare config contract"
-#     (the path-filtered Playwright job is deliberately NOT required: a skipped
-#     check never reports, and would block every non-landing-page PR)
+#   - the status checks ci.yml runs on every PR: "CI gate" (the always-running
+#     aggregate that is green only when every suite is green and accepts a
+#     skipped Playwright run only when path detection proved the landing page
+#     untouched), plus "Build & Test", "iOS E2E (XCUITest)" and "Appcast &
+#     Cloudflare config contract" individually. The path-filtered Playwright
+#     job itself is deliberately NOT required: a skipped check never reports.
 # with a bypass for repository admins so release.yml's appcast commit-back
 # (scripts/ci-commit-appcast.sh, pushed with the owner's AUTO_RELEASE_TOKEN)
 # can still land on main directly. Tag pushes are unaffected (branch ruleset).
@@ -48,6 +50,7 @@ PAYLOAD=$(cat <<'JSON'
         "strict_required_status_checks_policy": false,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
+          { "context": "CI gate" },
           { "context": "Build & Test" },
           { "context": "iOS E2E (XCUITest)" },
           { "context": "Appcast & Cloudflare config contract" }
