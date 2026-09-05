@@ -40,10 +40,11 @@ final class SyncApplyTests: XCTestCase {
             timestamp: Date(timeIntervalSince1970: 1_000),
             copyCount: 8,
             sourceApp: "old app",
-            metadata: #"{"emails":["old@example.com"]}"#,
+            metadata: #"{"emails":[{"email":"old@example.com"}]}"#,
             isPinned: true
         )
         try db.insert(local)
+        XCTAssertEqual(try db.fetch(id: local.id)?.contentTypeMask, .email)
         let remote = ClipboardEntry(
             id: local.id,
             content: "updated image caption",
@@ -53,9 +54,10 @@ final class SyncApplyTests: XCTestCase {
             timestamp: Date(timeIntervalSince1970: 2_000),
             copyCount: 3,
             sourceApp: "remote app",
-            metadata: #"{"urls":["https://example.com"]}"#,
+            metadata: #"{"urls":[{"url":"https://example.com"}]}"#,
             parentEntryId: UUID()
         )
+        XCTAssertEqual(remote.contentTypeMask, .url)
 
         try db.applySyncChanges(modified: [remote], deleted: [])
 
@@ -80,6 +82,7 @@ final class SyncApplyTests: XCTestCase {
         expectedCleared.isPinned = true
         expectedCleared.isSynced = true
         XCTAssertEqual(try db.fetch(id: local.id), expectedCleared)
+        XCTAssertEqual(try db.fetch(id: local.id)?.contentTypeMask, [])
     }
 
     func testPreservesImagePathOnlyForMatchingImageContent() throws {

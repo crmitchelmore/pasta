@@ -81,8 +81,8 @@ final class SyncToPasteFlowTests: XCTestCase {
         let env = try E2ETempEnvironment(name: "sync-image")
         defer { env.destroy() }
         let database = try env.openDatabase()
-        let oldBytes = try tiffFixture(color: .red)
-        let newBytes = try tiffFixture(color: .blue)
+        let oldBytes = try tiffFixture(red: 255, green: 0, blue: 0)
+        let newBytes = try tiffFixture(red: 0, green: 0, blue: 255)
         XCTAssertNotEqual(oldBytes, newBytes)
         XCTAssertTrue(try XCTUnwrap(NSImage(data: oldBytes)).isValid)
         XCTAssertTrue(try XCTUnwrap(NSImage(data: newBytes)).isValid)
@@ -127,18 +127,39 @@ final class SyncToPasteFlowTests: XCTestCase {
     }
 
     @MainActor
-    private func tiffFixture(color: NSColor) throws -> Data {
+    private func tiffFixture(red: UInt8, green: UInt8, blue: UInt8) throws -> Data {
         let bitmap = try XCTUnwrap(NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2,
             bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+            colorSpaceName: .deviceRGB, bitmapFormat: .alphaNonpremultiplied,
+            bytesPerRow: 8, bitsPerPixel: 32
         ))
-        for x in 0..<2 {
-            for y in 0..<2 {
-                bitmap.setColor(color, atX: x, y: y)
+        // Write explicit RGBA samples: setColor left both fixtures with identical
+        // empty pixels on the headless CI runner, so no image update was tested.
+        let pixels = try XCTUnwrap(bitmap.bitmapData)
+        for y in 0..<2 {
+            for x in 0..<2 {
+                let offset = y * bitmap.bytesPerRow + x * 4
+                pixels[offset] = red
+                pixels[offset + 1] = green
+                pixels[offset + 2] = blue
+                pixels[offset + 3] = 255
             }
         }
-        return try XCTUnwrap(bitmap.representation(using: .tiff, properties: [:]))
+        let data = try XCTUnwrap(bitmap.representation(using: .tiff, properties: [:]))
+        let decoded = try XCTUnwrap(NSBitmapImageRep(data: data))
+        XCTAssertEqual(decoded.pixelsWide, 2)
+        XCTAssertEqual(decoded.pixelsHigh, 2)
+        for y in 0..<2 {
+            for x in 0..<2 {
+                let pixel = try XCTUnwrap(decoded.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                XCTAssertEqual(pixel.redComponent, CGFloat(red) / 255, accuracy: 0.01)
+                XCTAssertEqual(pixel.greenComponent, CGFloat(green) / 255, accuracy: 0.01)
+                XCTAssertEqual(pixel.blueComponent, CGFloat(blue) / 255, accuracy: 0.01)
+                XCTAssertEqual(pixel.alphaComponent, 1, accuracy: 0.01)
+            }
+        }
+        return data
     }
 }
 
