@@ -20,7 +20,11 @@ final class AppState: ObservableObject {
     @Published var hasCompletedOnboarding: Bool
     @Published var isShowingOnboarding = false
     @Published var isShowingWhatsNew = false
-    @Published var iCloudAvailable = false
+    @Published var iCloudStatus: SyncAccountRecovery.Availability = .notChecked
+    @Published private(set) var isCheckingSync = false
+    @Published private(set) var syncErrorMessage: String?
+    var iCloudAvailable: Bool { iCloudStatus == .available }
+    private let accountRecovery = SyncAccountRecovery()
     @Published var errorMessage: String?
 
     private var database: DatabaseManager?
@@ -48,21 +52,7 @@ final class AppState: ObservableObject {
             errorMessage = error.localizedDescription
         }
 
-        // Attempt sync separately — CloudKit may be unavailable
-        do {
-            let status = try await syncManager.checkAccountStatus()
-            iCloudAvailable = (status == .available)
-
-            if iCloudAvailable {
-                try await syncManager.setupZone()
-                try await syncManager.registerSubscription()
-                await performSync(syncManager: syncManager)
-                try loadEntries()
-            }
-        } catch {
-            logger.warning("CloudKit sync unavailable: \(error.localizedDescription)")
-            // Non-fatal — app works offline without sync
-        }
+        await performSync(syncManager: syncManager)
 
         await captureCurrentClipboardIfNeeded(syncManager: syncManager)
         evaluateWhatsNewIfNeeded()
@@ -75,9 +65,7 @@ final class AppState: ObservableObject {
         isActivationPipelineRunning = true
         defer { isActivationPipelineRunning = false }
 
-        if iCloudAvailable {
-            await performSync(syncManager: syncManager)
-        }
+        await performSync(syncManager: syncManager)
 
         await captureCurrentClipboardIfNeeded(syncManager: syncManager)
     }
@@ -152,21 +140,29 @@ final class AppState: ObservableObject {
         guard !isSyncInProgress else { return }
         isSyncInProgress = true
         defer { isSyncInProgress = false }
-        do {
-            let backfilled = try await database.backfillUnsynced { entries, onBatchSynced in
-                try await syncManager.pushEntries(entries, onBatchSynced: onBatchSynced)
+        isCheckingSync = true
+        defer { isCheckingSync = false }
+        await accountRecovery.run(
+            checkAccount: { try await syncManager.checkAccountStatus() },
+            prepare: {
+                try await syncManager.setupZone()
+                try await syncManager.registerSubscription()
+            },
+            sync: {
+                let backfilled = try await database.backfillUnsynced { entries, onBatchSynced in
+                    try await syncManager.pushEntries(entries, onBatchSynced: onBatchSynced)
+                }
+                if backfilled > 0 {
+                    self.logger.info("Backfilled \(backfilled) local clipboard entries to CloudKit")
+                }
+                try await syncManager.pullChanges(into: database)
+                try self.loadEntries()
             }
-            if backfilled > 0 {
-                logger.info("Backfilled \(backfilled) local clipboard entries to CloudKit")
-            }
-
-            try await syncManager.pullChanges(into: database)
-
-            try loadEntries()
-            errorMessage = nil
-        } catch {
-            logger.error("Sync failed: \(error.localizedDescription)")
-            errorMessage = "Sync failed: \(error.localizedDescription)"
+        )
+        iCloudStatus = accountRecovery.availability
+        syncErrorMessage = accountRecovery.errorMessage
+        if let syncErrorMessage {
+            logger.warning("\(syncErrorMessage)")
         }
     }
 

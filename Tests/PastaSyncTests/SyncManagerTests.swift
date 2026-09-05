@@ -45,8 +45,23 @@ final class SyncManagerTests: XCTestCase {
     func testMissingCloudKitEntitlementDisablesAccountLookup() async throws {
         let manager = SyncManager(containerIdentifier: "iCloud.com.pasta.ios")
 
-        let status = try await manager.checkAccountStatus()
+        XCTAssertFalse(manager.cloudKitAccessAllowed)
+        do {
+            _ = try await manager.checkAccountStatus()
+            XCTFail("An unentitled build must report the build problem, not an account outage")
+        } catch SyncManager.AccountError.missingEntitlement {
+            // No CloudKit container was constructed.
+        }
+    }
 
-        XCTAssertEqual(status, CKAccountStatus.couldNotDetermine)
+    func testDisabledAccountLookupReportsDisabledWithoutResolvingContainer() async throws {
+        let manager = SyncManager(syncEnabled: false, cloudKitProvisioned: true)
+        XCTAssertFalse(manager.cloudKitAccessAllowed)
+        do {
+            _ = try await manager.checkAccountStatus()
+            XCTFail("Explicitly disabled sync must remain closed even for a provisioned host")
+        } catch SyncManager.AccountError.syncDisabled {
+            // An explicit privacy/transport gate always takes precedence.
+        }
     }
 }

@@ -24,20 +24,28 @@ struct SettingsView: View {
             HStack {
                 Label("iCloud Status", systemImage: "icloud")
                 Spacer()
-                if appState.iCloudAvailable {
-                    Text("Connected")
-                        .foregroundStyle(.green)
-                } else {
-                    Text("Unavailable")
-                        .foregroundStyle(.red)
-                }
+                Text(appState.isCheckingSync ? "Checking…" : appState.iCloudStatus.label)
+                    .foregroundStyle(appState.iCloudAvailable ? Color.green : Color.secondary)
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("settings.iCloudStatus")
 
+            if let guidance = appState.iCloudStatus.guidance {
+                Text(guidance)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("settings.iCloudGuidance")
+            }
+            if let error = appState.syncErrorMessage {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("settings.syncError")
+            }
+
             if let lastSync = syncManager.lastSyncDate {
                 HStack {
-                    Label("Last Synced", systemImage: "arrow.triangle.2.circlepath")
+                    Label("Last Successful Sync", systemImage: "arrow.triangle.2.circlepath")
                     Spacer()
                     Text(lastSync, style: .relative)
                         .foregroundStyle(.secondary)
@@ -59,7 +67,8 @@ struct SettingsView: View {
             } label: {
                 Label("Sync Now", systemImage: "arrow.clockwise")
             }
-            .disabled(syncManager.syncState == .syncing)
+            .disabled(appState.isCheckingSync || syncManager.syncState == .syncing)
+            .accessibilityIdentifier("settings.syncNow")
         }
     }
 
@@ -112,7 +121,7 @@ struct SettingsView: View {
             } label: {
                 Label("Reset Sync", systemImage: "arrow.counterclockwise")
             }
-            .disabled(syncManager.syncState == .syncing)
+            .disabled(appState.isCheckingSync || syncManager.syncState == .syncing)
         } footer: {
             Text("Clears the sync token and forces a full re-sync from iCloud.")
         }

@@ -381,7 +381,9 @@ jobs:
           # The project's Release configuration owns Manual / Apple Distribution,
           # the "PastaIOS AppStore CI" profile name and the
           # PASTA_IOS_CLOUDKIT_PROVISIONED compile flag on the app target only;
-          # scripts/ci-ios-e2e.sh asserts the flag is present before any upload.
+          # The host passes this approval explicitly into the shared SyncManager;
+          # SwiftPM targets do not inherit app compilation conditions.
+          # scripts/ci-ios-e2e.sh asserts the app flag is present before upload.
           xcodebuild archive \
             -onlyUsePackageVersionsFromResolvedFile \
             -project "$PROJECT" \

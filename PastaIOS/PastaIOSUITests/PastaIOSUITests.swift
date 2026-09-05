@@ -158,6 +158,37 @@ final class PastaIOSUITests: PastaUITestCase {
 
     // MARK: - Settings
 
+    func testUnavailableSyncRetryPreservesOfflineHistory() {
+        let token = "OfflineRecovery\(UUID().uuidString.prefix(8))"
+        launchApp(pasteboard: token)
+        waitForMainUI()
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertTrue(element("settings.iCloudGuidance").waitForExistence(timeout: Self.uiTimeout),
+                      "Unavailable iCloud must explain how to recover")
+        XCTAssertEqual(element("settings.entryCount").label, "1")
+        element("settings.syncNow").tap()
+        let retryFinished = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "enabled == true"), object: element("settings.syncNow")
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [retryFinished], timeout: Self.uiTimeout), .completed)
+        XCTAssertTrue(element("settings.iCloudGuidance").exists)
+        XCTAssertEqual(element("settings.entryCount").label, "1", "Retry must retain offline clipboard history")
+
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: Self.uiTimeout))
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: Self.uiTimeout))
+        openTab("History", expecting: "history.list")
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", token))
+            .firstMatch.waitForExistence(timeout: Self.uiTimeout))
+
+        app.terminate()
+        launchApp(resetState: false)
+        waitForMainUI()
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertEqual(element("settings.entryCount").label, "1", "Offline history must survive relaunch after retries")
+    }
+
     func testSettingsRendersItsSections() {
         launchApp()
         waitForMainUI()
