@@ -4,6 +4,44 @@ import XCTest
 @testable import PastaCore
 
 final class DatabaseManagerTests: XCTestCase {
+    func testInsertPreservesSyncState() throws {
+        for deduplicate in [true, false] {
+            let db = try DatabaseManager.inMemory()
+            let remote = ClipboardEntry(content: "downloaded", contentType: .text, isSynced: true)
+            let local = ClipboardEntry(content: "captured locally", contentType: .text)
+
+            try db.insert(remote, deduplicate: deduplicate)
+            try db.insert(local, deduplicate: deduplicate)
+
+            XCTAssertEqual(try db.fetch(id: remote.id)?.isSynced, true)
+            XCTAssertEqual(try db.fetchUnsynced().map(\.id), [local.id])
+            XCTAssertEqual(try db.syncedCount(), 1)
+        }
+    }
+
+    func testBatchInsertPreservesMixedSyncStates() throws {
+        let db = try DatabaseManager.inMemory()
+        let entries = (0..<1_001).map { index in
+            ClipboardEntry(content: "entry \(index)", contentType: .text, isSynced: index.isMultiple(of: 2))
+        }
+        try db.insertBatch(entries)
+
+        XCTAssertEqual(try db.syncedCount(), 501)
+        XCTAssertEqual(try db.unsyncedCount(), 500)
+        XCTAssertEqual(Set(try db.fetchUnsynced().map(\.id)), Set(entries.filter { !$0.isSynced }.map(\.id)))
+    }
+
+    func testBackfillDoesNotUploadNewlyDownloadedEntries() async throws {
+        let db = try DatabaseManager.inMemory()
+        try db.insert(ClipboardEntry(content: "downloaded", contentType: .text, isSynced: true))
+
+        let uploaded = try await db.backfillUnsynced { _, _ in
+            XCTFail("Downloaded entries must not enter the upload queue")
+            return 0
+        }
+        XCTAssertEqual(uploaded, 0)
+    }
+
     func testOnDiskDatabaseUsesPoolAndAllowsReadDuringWrite() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("PastaDatabasePoolTests-\(UUID().uuidString)", isDirectory: true)
