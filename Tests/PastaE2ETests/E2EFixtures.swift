@@ -91,6 +91,8 @@ struct E2ECapturePipeline {
         var primary: ClipboardEntry
         var extracted: [ClipboardEntry]
         var envVarSplit: [ClipboardEntry]
+        /// Rows as the database reports them after `ingest` (empty before persisting).
+        var persisted: [ClipboardEntry] = []
 
         var allEntries: [ClipboardEntry] {
             envVarSplit.isEmpty ? [primary] + extracted : envVarSplit
@@ -157,12 +159,15 @@ struct E2ECapturePipeline {
         return Result(primary: entry, extracted: extracted, envVarSplit: [])
     }
 
-    /// Enrich + persist, returning what was written.
+    /// Enrich + persist, returning what was written. `persisted` mirrors what
+    /// `BackgroundService` goes on to refresh, upload and mark synced: the rows
+    /// the database reports, which after a dedup hit are the EXISTING rows, not
+    /// the entries that were passed in (pasta-109).
     @discardableResult
     func ingest(_ captured: ClipboardEntry) throws -> Result {
-        let result = try enrich(captured)
+        var result = try enrich(captured)
         for entry in result.allEntries {
-            try database.insert(entry, deduplicate: deduplicate)
+            result.persisted.append(try database.insert(entry, deduplicate: deduplicate).entry)
         }
         return result
     }

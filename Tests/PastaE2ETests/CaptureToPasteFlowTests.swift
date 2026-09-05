@@ -124,7 +124,10 @@ final class CaptureToPasteFlowTests: XCTestCase {
 
     func testRecopyingIdenticalTextBumpsCopyCountInsteadOfAddingARow() throws {
         let first = try XCTUnwrap(harness.capture(.text("same thing"), in: self))
-        try pipeline.ingest(first)
+        let firstResult = try pipeline.ingest(first)
+        XCTAssertEqual(firstResult.persisted.map(\.id), [first.id])
+        // Pretend the first copy was uploaded, as BackgroundService would.
+        try database.markSynced(ids: [first.id])
 
         // The monitor dedups consecutive identical contents by fingerprint, so
         // copy something else in between (as a user would).
@@ -133,13 +136,22 @@ final class CaptureToPasteFlowTests: XCTestCase {
 
         let again = try XCTUnwrap(harness.capture(.text("same thing"), in: self))
         XCTAssertNotEqual(again.id, first.id)
-        try pipeline.ingest(again)
+        let againResult = try pipeline.ingest(again)
 
         XCTAssertEqual(try database.countEntries(), 2)
         let stored = try XCTUnwrap(database.fetch(id: first.id))
         XCTAssertEqual(stored.copyCount, 2)
         XCTAssertNil(try database.fetch(id: again.id), "the duplicate must fold into the existing row")
         XCTAssertEqual(try database.fetchRecent(limit: 1).first?.id, first.id, "a re-copy moves the row back to the head")
+
+        // Capture identity (pasta-109): what gets refreshed/uploaded/marked
+        // synced is the CANONICAL row, and it is pending upload again because
+        // its copyCount changed. `again.id` never existed remotely or locally.
+        XCTAssertEqual(againResult.persisted.map(\.id), [first.id], "the persisted row is the existing one, not the discarded capture")
+        XCTAssertFalse(stored.isSynced, "the canonical row must be re-uploaded with its new copyCount")
+        let pending = try database.fetchUnsynced().map(\.id)
+        XCTAssertTrue(pending.contains(first.id))
+        XCTAssertFalse(pending.contains(again.id))
     }
 
     // MARK: - File paths

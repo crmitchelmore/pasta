@@ -2,32 +2,69 @@ import Foundation
 import GRDB
 
 extension DatabaseManager {
-    public func insert(_ entry: ClipboardEntry) throws {
+    /// Which row holds the content after an insert. Callers that refresh
+    /// history, upload to CloudKit or mark rows synced must use `entry` (the
+    /// persisted row), never the entry they passed in: with deduplication on,
+    /// the passed-in entry's UUID may never have reached the database.
+    public enum InsertOutcome: Equatable, Sendable {
+        /// A new row, carrying the passed-in entry's id.
+        case inserted(ClipboardEntry)
+        /// Folded into an existing row with the same content hash: its
+        /// `copyCount` was bumped, its `timestamp` moved to now, and it was
+        /// marked pending for upload again so the canonical record carries the
+        /// new count. The associated value is that existing row.
+        case deduplicated(ClipboardEntry)
+
+        /// The row that actually holds the content.
+        public var entry: ClipboardEntry {
+            switch self {
+            case .inserted(let entry), .deduplicated(let entry): return entry
+            }
+        }
+
+        public var isNewRow: Bool {
+            if case .inserted = self { return true }
+            return false
+        }
+    }
+
+    @discardableResult
+    public func insert(_ entry: ClipboardEntry) throws -> InsertOutcome {
         try insert(entry, deduplicate: true)
     }
 
-    /// Inserts an entry, optionally deduplicating by content hash.
-    public func insert(_ entry: ClipboardEntry, deduplicate: Bool) throws {
+    /// Inserts an entry, optionally deduplicating by content hash. Returns the
+    /// persisted row (see `InsertOutcome`): after a dedup hit the existing
+    /// row's UUID is the only one that exists, so history refresh, sync upload
+    /// and `markSynced` must all use it (pasta-109: uploading the discarded
+    /// UUID created phantom remote records and duplicate history on pull).
+    @discardableResult
+    public func insert(_ entry: ClipboardEntry, deduplicate: Bool) throws -> InsertOutcome {
         let contentHash = entry.contentHash
 
         do {
-            try dbWriter.write { db in
+            return try dbWriter.write { db in
                 if deduplicate {
                     if let existingID: String = try String.fetchOne(
                         db,
                         sql: "SELECT id FROM \(ClipboardEntry.databaseTableName) WHERE contentHash = ? LIMIT 1",
                         arguments: [contentHash]
                     ) {
+                        // isSynced = 0: the canonical record's copyCount changed,
+                        // so it must be uploaded again.
                         try db.execute(
                             sql: """
                             UPDATE \(ClipboardEntry.databaseTableName)
-                            SET copyCount = copyCount + 1, timestamp = ?
+                            SET copyCount = copyCount + 1, timestamp = ?, isSynced = 0
                             WHERE id = ?
                             """,
                             arguments: [entry.timestamp, existingID]
                         )
                         PastaLogger.database.debug("Updated duplicate entry with hash \(contentHash)")
-                        return
+                        guard let existing = try ClipboardEntry.fetchOne(db, key: existingID) else {
+                            throw DatabaseError(message: "deduplicated row \(existingID) vanished inside the write transaction")
+                        }
+                        return .deduplicated(existing)
                     }
                 }
 
@@ -55,6 +92,7 @@ extension DatabaseManager {
                     ]
                 )
                 PastaLogger.database.debug("Inserted new entry with type \(entry.contentType.rawValue)")
+                return .inserted(entry)
             }
         } catch {
             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to insert entry")

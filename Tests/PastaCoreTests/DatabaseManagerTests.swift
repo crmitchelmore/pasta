@@ -19,6 +19,43 @@ final class DatabaseManagerTests: XCTestCase {
         }
     }
 
+    func testInsertReportsThePersistedRowAndDedupMarksItPendingAgain() throws {
+        let db = try DatabaseManager.inMemory()
+        // Whole-second timestamps: the column stores millisecond precision, so
+        // a raw Date() would not round-trip exactly.
+        let first = ClipboardEntry(content: "same thing", contentType: .text, timestamp: Date(timeIntervalSince1970: 1_000))
+        guard case .inserted(let persisted) = try db.insert(first, deduplicate: true) else {
+            return XCTFail("a fresh row must be reported as inserted")
+        }
+        XCTAssertEqual(persisted.id, first.id)
+        try db.markSynced(ids: [first.id])
+        XCTAssertEqual(try db.unsyncedCount(), 0)
+
+        // A later copy of identical content arrives as a NEW entry with its own
+        // UUID. With dedup on it must fold into the existing row, and the
+        // caller must be told which row that is: uploading `again.id` would
+        // create a phantom remote record (pasta-109).
+        let again = ClipboardEntry(content: "same thing", contentType: .text, timestamp: first.timestamp.addingTimeInterval(60))
+        let outcome = try db.insert(again, deduplicate: true)
+        guard case .deduplicated(let canonical) = outcome else {
+            return XCTFail("identical content must deduplicate, got \(outcome)")
+        }
+        XCTAssertEqual(canonical.id, first.id)
+        XCTAssertEqual(canonical.copyCount, 2)
+        XCTAssertEqual(canonical.timestamp, again.timestamp)
+        XCTAssertFalse(canonical.isSynced, "the canonical row changed (copyCount), so it must upload again")
+        XCTAssertEqual(outcome.entry.id, first.id)
+        XCTAssertFalse(outcome.isNewRow)
+        XCTAssertNil(try db.fetch(id: again.id))
+        XCTAssertEqual(try db.fetchUnsynced().map(\.id), [first.id])
+        XCTAssertEqual(try db.countEntries(), 1)
+
+        // With dedup off, identical content is a distinct row and is reported as such.
+        let distinct = ClipboardEntry(content: "same thing", contentType: .text)
+        XCTAssertEqual(try db.insert(distinct, deduplicate: false), .inserted(distinct))
+        XCTAssertEqual(try db.countEntries(), 2)
+    }
+
     func testBatchInsertPreservesMixedSyncStates() throws {
         let db = try DatabaseManager.inMemory()
         let entries = (0..<1_001).map { index in
