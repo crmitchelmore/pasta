@@ -121,3 +121,65 @@ export function gitTagExists(version) {
     return false;
   }
 }
+
+/**
+ * Newest PUBLISHED (non-draft, non-prerelease) GitHub release version, when the
+ * caller knows it. CI resolves it with `gh release list` and passes it in as
+ * APPCAST_LATEST_PUBLISHED; offline runs leave it unset. Returns null if unset
+ * or malformed.
+ */
+export function latestPublishedReleaseVersion() {
+  const raw = (process.env.APPCAST_LATEST_PUBLISHED ?? '').trim().replace(/^v/, '');
+  return SEMVER.test(raw) ? raw : null;
+}
+
+/**
+ * Decide whether the repo copy of the appcast is fresh.
+ *
+ * The reference is the newest PUBLISHED release, not the newest git tag: a tag
+ * is created before the release is built, signed and published, so a tag whose
+ * release failed or was drafted legitimately never reaches the feed. Comparing
+ * against tags alone made a failed release block every later CI run (#113).
+ *
+ * @param {{ top: string, latestTag: string|null, latestPublished: string|null, requireLatest: boolean }} p
+ * @returns {{ level: 'ok'|'warn'|'fail', message: string }}
+ */
+export function assessFreshness({ top, latestTag, latestPublished, requireLatest }) {
+  if (latestTag && compareSemver(top, latestTag) > 0) {
+    return {
+      level: 'fail',
+      message: `appcast top version ${top} is AHEAD of the newest tag v${latestTag}; the appcast points at a release that does not exist`,
+    };
+  }
+  if (latestPublished) {
+    const cmp = compareSemver(top, latestPublished);
+    if (cmp === 0) {
+      return { level: 'ok', message: `appcast top ${top} matches the newest published release` };
+    }
+    if (cmp > 0) {
+      return {
+        level: 'fail',
+        message:
+          `appcast advertises ${top} but the newest PUBLISHED release is ${latestPublished}: ` +
+          `${top}'s release is missing, drafted or was pulled, so Sparkle clients would be sent to a dead download. ` +
+          'Restore the live feed to the newest published release (deploy-landing-page.yml preserves the live copy; do not overwrite a newer healthy release with an older feed).',
+      };
+    }
+    const message =
+      `landing-page/appcast.xml top item is ${top} but the newest published release is ${latestPublished}. ` +
+      'release.yml should have committed the regenerated appcast back (scripts/ci-commit-appcast.sh); ' +
+      'check that release run for a ::warning:: and merge its release/appcast-v* branch, or copy the live feed in.';
+    return { level: requireLatest ? 'fail' : 'warn', message };
+  }
+  if (latestTag && compareSemver(top, latestTag) < 0) {
+    // Without published-release evidence a lag cannot be told apart from a
+    // tag whose release failed before publication, so never fail here.
+    return {
+      level: 'warn',
+      message:
+        `landing-page/appcast.xml top item is ${top} but the newest tag is v${latestTag}; ` +
+        'no published-release information (APPCAST_LATEST_PUBLISHED) was available to tell a stale feed from a failed release.',
+    };
+  }
+  return { level: 'ok', message: `appcast top ${top} is not behind any known release` };
+}
