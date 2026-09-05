@@ -108,11 +108,14 @@ struct E2ECapturePipeline {
     func enrich(_ captured: ClipboardEntry) throws -> Result {
         var entry = captured
 
-        if entry.contentType == .image || entry.contentType == .screenshot, let data = entry.rawData {
+        if entry.contentType == .image || entry.contentType == .screenshot, entry.rawData != nil {
             if storeImages {
-                entry.imagePath = try imageStorage.saveImage(data)
+                // Production preserves inline bytes when file storage fails.
+                // Use the same core operation instead of mirroring its mutation.
+                try? imageStorage.persistImageData(in: &entry)
+            } else {
+                entry.rawData = nil
             }
-            entry.rawData = nil
             return Result(primary: entry, extracted: [], envVarSplit: [])
         }
 

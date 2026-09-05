@@ -14,15 +14,11 @@ public final class DeleteService {
     @discardableResult
     public func delete(id: UUID) throws -> Bool {
         do {
-            let entry = try database.fetch(id: id)
-            let deleted = try database.delete(id: id)
-
-            if deleted, let imagePath = entry?.imagePath {
-                try imageStorage.deleteImage(path: imagePath)
-            }
+            let result = try database.delete(ids: [id])
+            try database.deleteUnreferencedImages(paths: result.imagePaths, using: imageStorage)
 
             PastaLogger.database.debug("Deleted entry \(id.uuidString)")
-            return deleted
+            return result.count > 0
         } catch {
             PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to delete entry")
             throw error
@@ -41,9 +37,7 @@ public final class DeleteService {
         do {
             let result = try database.delete(ids: ids)
 
-            for imagePath in result.imagePaths {
-                try imageStorage.deleteImage(path: imagePath)
-            }
+            try database.deleteUnreferencedImages(paths: result.imagePaths, using: imageStorage)
 
             PastaLogger.database.debug("Deleted \(result.count) entries in bulk")
             return result.count
@@ -59,9 +53,7 @@ public final class DeleteService {
         do {
             let result = try database.deleteRecent(minutes: minutes, now: now)
 
-            for imagePath in result.imagePaths {
-                try imageStorage.deleteImage(path: imagePath)
-            }
+            try database.deleteUnreferencedImages(paths: result.imagePaths, using: imageStorage)
 
             PastaLogger.database.info("Deleted \(result.count) recent entries from last \(minutes) minutes")
             return result.count
@@ -81,9 +73,7 @@ public final class DeleteService {
         do {
             let result = try database.deleteAll(includePinned: includePinned)
 
-            for imagePath in result.imagePaths {
-                try imageStorage.deleteImage(path: imagePath)
-            }
+            try database.deleteUnreferencedImages(paths: result.imagePaths, using: imageStorage)
 
             PastaLogger.database.info("Deleted all \(result.count) entries (includePinned=\(includePinned))")
             return result.count
