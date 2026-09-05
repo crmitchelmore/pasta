@@ -49,8 +49,7 @@ public final class DatabaseManager: @unchecked Sendable {
 
         var writer: any DatabaseWriter
         do {
-            writer = try DatabasePool(path: databaseURL.path, configuration: config)
-            try DatabaseManager.migrator.migrate(writer)
+            writer = try DatabaseManager.openAndMigrate(databaseURL: databaseURL, configuration: config)
             PastaLogger.database.info("Database initialized at \(databaseURL.path)")
         } catch {
             PastaLogger.logError(error, logger: PastaLogger.database, context: "Database initialization or migration failed")
@@ -58,9 +57,8 @@ public final class DatabaseManager: @unchecked Sendable {
             if DatabaseManager.isCorruptionError(error) {
                 PastaLogger.database.warning("Database appears corrupted, attempting recovery")
                 do {
-                    try DatabaseManager.attemptRecovery(databaseURL: databaseURL)
-                    writer = try DatabasePool(path: databaseURL.path, configuration: config)
-                    try DatabaseManager.migrator.migrate(writer)
+                    try DatabaseManager.quarantineCorruptedDatabase(databaseURL: databaseURL)
+                    writer = try DatabaseManager.openAndMigrate(databaseURL: databaseURL, configuration: config)
                     PastaLogger.database.info("Database recovered and re-initialized at \(databaseURL.path)")
                 } catch {
                     PastaLogger.logError(error, logger: PastaLogger.database, context: "Database recovery failed")
@@ -96,22 +94,46 @@ public final class DatabaseManager: @unchecked Sendable {
         self.dbWriter = dbWriter
     }
 
-    private static func isCorruptionError(_ error: Error) -> Bool {
-        if let dbError = error as? DatabaseError {
-            return dbError.resultCode == .SQLITE_CORRUPT || dbError.resultCode == .SQLITE_NOTADB
+    private static func openAndMigrate(databaseURL: URL, configuration: Configuration) throws -> DatabasePool {
+        let writer = try DatabasePool(path: databaseURL.path, configuration: configuration)
+        do {
+            try migrator.migrate(writer)
+        } catch {
+            // Never move files while a failed migration's pool still holds
+            // SQLite connections. If closing fails, abort recovery as well.
+            try writer.close()
+            throw error
         }
-
-        let msg = error.localizedDescription.lowercased()
-        return msg.contains("corrupt") || msg.contains("malformed") || msg.contains("not a database")
+        return writer
     }
 
-    private static func attemptRecovery(databaseURL: URL) throws {
+    static func isCorruptionError(_ error: Error) -> Bool {
+        // Never replace a database on disk-full, I/O, lock, or migration errors,
+        // even if their diagnostic message happens to mention corruption.
+        guard let dbError = error as? DatabaseError else { return false }
+        return dbError.resultCode == .SQLITE_CORRUPT || dbError.resultCode == .SQLITE_NOTADB
+    }
+
+    @discardableResult
+    static func quarantineCorruptedDatabase(databaseURL: URL) throws -> URL {
         let fm = FileManager.default
-        for url in [databaseURL, databaseURL.appendingPathExtension("wal"), databaseURL.appendingPathExtension("shm")] {
+        let quarantine = databaseURL.deletingLastPathComponent().appendingPathComponent(
+            "\(databaseURL.lastPathComponent).corrupt-\(UUID().uuidString)", isDirectory: true
+        )
+        try fm.createDirectory(at: quarantine, withIntermediateDirectories: false)
+        // SQLite uses suffixes, not extensions: pasta.sqlite-wal/-shm.
+        // Move rather than delete, preserving bytes for recovery/support without
+        // requiring enough free disk space to duplicate a large database.
+        // If any move fails, throw before opening a replacement database; every
+        // artifact remains either at its original path or in this quarantine.
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let url = URL(fileURLWithPath: databaseURL.path + suffix)
             if fm.fileExists(atPath: url.path) {
-                try fm.removeItem(at: url)
+                try fm.moveItem(at: url, to: quarantine.appendingPathComponent(url.lastPathComponent))
             }
         }
+        PastaLogger.database.warning("Preserved corrupted database at \(quarantine.path)")
+        return quarantine
     }
 
     /// Provides access to the underlying database writer for components that
