@@ -56,17 +56,10 @@ final class PastaIOSUITests: PastaUITestCase {
         openTab("History", expecting: "history.list")
         XCTAssertTrue(app.navigationBars["Clipboard History"].waitForExistence(timeout: Self.uiTimeout))
 
-        // With an empty database the list shows the empty state unless the
-        // simulator pasteboard happened to hold text that was captured.
-        let emptyState = element("history.emptyState")
-        let firstRow = element("history.row")
-        let predicate = NSPredicate { _, _ in emptyState.exists || firstRow.exists }
-        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
-        XCTAssertEqual(
-            XCTWaiter().wait(for: [expectation], timeout: Self.uiTimeout),
-            .completed,
-            "History shows neither the empty state nor any rows"
-        )
+        XCTAssertTrue(element("history.emptyState").waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertFalse(element("history.row").exists, "Fresh install unexpectedly contains history")
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertEqual(element("settings.entryCount").label, "0")
     }
 
     func testSearchTabIsReachable() {
@@ -124,34 +117,28 @@ final class PastaIOSUITests: PastaUITestCase {
         XCTAssertTrue(element("search.emptyPrompt").exists, "List content missing beneath the search field")
     }
 
-    func testTypingASearchQueryShowsResultsOrEmptyState() {
-        launchApp()
+    func testSearchExcludesNonmatchingEntriesAndClearsToPrompt() {
+        let token = "PastaSearchKnown\(UUID().uuidString.prefix(8))"
+        launchApp(pasteboard: "Known clipboard content \(token)")
         waitForMainUI()
         openTab("Search", expecting: "search.list")
 
         let searchField = app.searchFields.firstMatch
         XCTAssertTrue(searchField.waitForExistence(timeout: Self.uiTimeout))
         searchField.tap()
-        searchField.typeText("zzqx-no-such-entry")
+        searchField.typeText(token)
+        XCTAssertTrue(element("search.row").waitForExistence(timeout: Self.uiTimeout), "Known query must return the captured entry first")
 
-        let noResults = element("search.noResults")
-        let firstResult = element("search.row")
-        let predicate = NSPredicate { _, _ in noResults.exists || firstResult.exists }
-        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: nil)
-        XCTAssertEqual(
-            XCTWaiter().wait(for: [expectation], timeout: Self.uiTimeout),
-            .completed,
-            "Search showed neither results nor the no-results state"
-        )
-        XCTAssertEqual(app.state, .runningForeground, "App crashed while searching")
+        // Start from a populated result set so the no-results assertion cannot
+        // pass against the initial empty UI before the async search completes.
+        searchField.typeText(" zzqxnosuchentry\(UUID().uuidString.prefix(8))")
+        XCTAssertTrue(element("search.noResults").waitForExistence(timeout: Self.uiTimeout), "Unmatched query must show no results")
+        XCTAssertTrue(waitForDisappearance(of: element("search.row")), "Search retained an unrelated result")
+        XCTAssertEqual(app.state, .runningForeground)
 
-        // Clearing the query returns to the idle prompt.
-        if app.buttons["Clear text"].exists {
-            app.buttons["Clear text"].tap()
-        } else {
-            searchField.buttons.firstMatch.tap()
-        }
+        searchField.buttons.firstMatch.tap()
         XCTAssertTrue(element("search.emptyPrompt").waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertFalse(element("search.row").exists)
     }
 
     func testSearchFindsACapturedClipboardEntry() {
@@ -302,7 +289,36 @@ final class PastaIOSUITests: PastaUITestCase {
         // The Settings entry count must agree with the list.
         openTab("Settings", expecting: "settings.list")
         let count = Int(element("settings.entryCount").label) ?? -1
-        XCTAssertGreaterThanOrEqual(count, 1, "Entry count does not reflect the captured entry")
+        XCTAssertEqual(count, 1, "One clipboard capture must produce exactly one stored entry")
+    }
+
+    /// Relaunch with unrelated clipboard content: the first entry can only
+    /// survive via the app's on-disk database, not by recapturing the fixture.
+    func testCapturedHistoryPersistsAndRemainsSearchableAfterRelaunch() {
+        let token = "PastaPersisted\(UUID().uuidString.prefix(8))"
+        let content = "Persisted clipboard content \(token)"
+        launchApp(pasteboard: content)
+        waitForMainUI()
+        XCTAssertTrue(app.staticTexts[content].waitForExistence(timeout: Self.uiTimeout))
+
+        app.terminate()
+        app = XCUIApplication()
+        launchApp(pasteboard: "Unrelated clipboard replacement", resetState: false)
+        waitForMainUI()
+        XCTAssertTrue(app.staticTexts[content].waitForExistence(timeout: Self.uiTimeout), "Captured history was lost across relaunch")
+
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertEqual(element("settings.entryCount").label, "2", "Relaunch must retain the first entry and capture the replacement once")
+        openTab("Search", expecting: "search.list")
+        let searchField = app.searchFields.firstMatch
+        XCTAssertTrue(searchField.waitForExistence(timeout: Self.uiTimeout))
+        searchField.tap()
+        searchField.typeText(token)
+        let match = app.staticTexts[content]
+        XCTAssertTrue(match.waitForExistence(timeout: Self.uiTimeout), "Persisted entry is absent from FTS search")
+        match.tap()
+        XCTAssertTrue(app.navigationBars["Entry"].waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertTrue(app.staticTexts[content].exists, "Detail must display the exact persisted content")
     }
 
     /// Tapping the captured entry opens its detail screen and back returns to

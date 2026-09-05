@@ -3,6 +3,52 @@ import XCTest
 @testable import PastaCore
 
 final class ImageStorageManagerTests: XCTestCase {
+    func testFailedImageFileWriteRetainsBytesThroughDatabaseReopen() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PastaImageFailure-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let images = root.appendingPathComponent("Images", isDirectory: true)
+        let storage = try ImageStorageManager(imagesDirectoryURL: images)
+        // Make the image destination unusable after initialization without
+        // relying on permissions (the test may run with elevated privileges).
+        try FileManager.default.removeItem(at: images)
+        try Data("not a directory".utf8).write(to: images)
+
+        let bytes = Data([0x01, 0x02, 0x03, 0x04])
+        var entry = ClipboardEntry(content: "", contentType: .image, rawData: bytes)
+
+        XCTAssertThrowsError(try storage.persistImageData(in: &entry))
+        XCTAssertEqual(entry.rawData, bytes)
+        XCTAssertNil(entry.imagePath)
+        XCTAssertFalse(entry.isSynced)
+
+        let databaseURL = root.appendingPathComponent("pasta.sqlite")
+        do {
+            let database = try DatabaseManager(databaseURL: databaseURL)
+            try database.insert(entry)
+        }
+        let reopened = try DatabaseManager(databaseURL: databaseURL)
+        let pending = try XCTUnwrap(reopened.fetchUnsynced().first)
+        XCTAssertEqual(pending.id, entry.id)
+        XCTAssertEqual(pending.rawData, bytes)
+        XCTAssertNil(pending.imagePath)
+    }
+
+    func testSuccessfulImageFileWriteClearsBytesOnlyAfterStorageSucceeds() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PastaImageSuccess-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let storage = try ImageStorageManager(imagesDirectoryURL: root)
+        let bytes = Data([0x01, 0x02, 0x03, 0x04])
+        var entry = ClipboardEntry(content: "", contentType: .screenshot, rawData: bytes)
+
+        try storage.persistImageData(in: &entry)
+
+        XCTAssertNil(entry.rawData)
+        let path = try XCTUnwrap(entry.imagePath)
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path)), bytes)
+    }
+
     func testSaveLoadDeleteAndTotalStorage() throws {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("PastaTests", isDirectory: true)

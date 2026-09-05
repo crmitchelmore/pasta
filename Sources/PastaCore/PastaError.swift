@@ -61,7 +61,7 @@ public enum PastaError: LocalizedError {
         case .databaseInitializationFailed:
             return "Check disk space and permissions for ~/Library/Application Support/Pasta/. Pasta will use temporary storage."
         case .diskFull:
-            return "Free up disk space and try again. The clipboard entry was saved but without the image."
+            return "Free up disk space and try again."
         case .imageSaveFailed:
             return "Check disk space and permissions for ~/Library/Application Support/Pasta/Images/."
         case .clipboardAccessDenied:

@@ -71,6 +71,9 @@ enum UITestConfiguration {
         #if canImport(UIKit)
         if let pasteboardString {
             UIPasteboard.general.string = pasteboardString
+        } else if shouldResetState {
+            // An empty-install test must not capture a previous test's text.
+            UIPasteboard.general.items = []
         }
         #endif
     }

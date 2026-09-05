@@ -6,22 +6,26 @@
     <description>Most recent updates to Pasta</description>
     <language>en</language>
     <item>
-      <title>Version 1.5.13</title>
-      <sparkle:version>154</sparkle:version>
-      <sparkle:shortVersionString>1.5.13</sparkle:shortVersionString>
-      <pubDate>Sat, 05 Sep 2026 10:04:20 +0000</pubDate>
+      <title>Version 1.5.14</title>
+      <sparkle:version>155</sparkle:version>
+      <sparkle:shortVersionString>1.5.14</sparkle:shortVersionString>
+      <pubDate>Sat, 05 Sep 2026 10:37:59 +0000</pubDate>
       <description><![CDATA[
 <h2>What’s new</h2>
 <h3>Fixes</h3>
 <ul>
-<li>handle literal punctuation and FTS operator words (#101)</li>
+<li>preserve downloaded entries' sync state on insert (#103)</li>
 </ul>
-<p><strong>Full changelog:</strong> <a href="https://github.com/crmitchelmore/pasta/compare/v1.5.12...v1.5.13">https://github.com/crmitchelmore/pasta/compare/v1.5.12...v1.5.13</a></p>
+<h3>Under the hood</h3>
+<ul>
+<li>update appcast for v1.5.12 [skip ci]</li>
+</ul>
+<p><strong>Full changelog:</strong> <a href="https://github.com/crmitchelmore/pasta/compare/v1.5.13...v1.5.14">https://github.com/crmitchelmore/pasta/compare/v1.5.13...v1.5.14</a></p>
       ]]></description>
       <enclosure
-        url="https://github.com/crmitchelmore/pasta/releases/download/v1.5.13/Pasta-1.5.13.dmg"
-        sparkle:edSignature="/I/1jP0Wra4CM6nF92Rng1LaHcdPxKN9FFN9YgGvhh5DSJkfRt0TNlFALWgJ2ogZ9yUEYPlGobxg0AJcq0YZCg=="
-        length="17289345"
+        url="https://github.com/crmitchelmore/pasta/releases/download/v1.5.14/Pasta-1.5.14.dmg"
+        sparkle:edSignature="zYrgevJ3YFCKYQJefOBolnO1KjbULuHHyA/+0lo/d/TgwW43TCBVp9Q910vkFzQWDCxsZFSFaW9FRlGljsflDg=="
+        length="17289561"
         type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>

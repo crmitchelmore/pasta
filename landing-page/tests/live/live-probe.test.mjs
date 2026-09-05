@@ -63,10 +63,26 @@ test('live: appcast.xml is served, parses, and its top DMG is downloadable', asy
   assert.ok([200, 302].includes(dmg.status), `HEAD ${top.enclosure.url} returned ${dmg.status}`);
 });
 
-test('live: appcast top version equals the newest v* git tag', async (t) => {
-  const latest = latestGitTagVersion();
-  if (!latest) {
-    t.skip('no v* tags in this checkout (shallow clone?)');
+test('live: appcast top version equals the newest PUBLISHED GitHub release', async (t) => {
+  // The reference is the newest published (non-draft, non-prerelease) release,
+  // not the newest tag: a tag whose release failed before publication must not
+  // make the live feed look stale (issue #113). GitHub's releases/latest
+  // endpoint is exactly that definition.
+  const api = await fetch('https://api.github.com/repos/crmitchelmore/pasta/releases/latest', {
+    headers: { 'user-agent': UA, accept: 'application/vnd.github+json' },
+  });
+  let published = null;
+  if (api.ok) {
+    const body = await api.json();
+    published = String(body.tag_name ?? '').replace(/^v/, '');
+  }
+  const latestTag = latestGitTagVersion();
+  if (!published) {
+    t.diagnostic(`GitHub releases/latest unavailable (HTTP ${api.status}); falling back to the newest v* tag`);
+    published = latestTag;
+  }
+  if (!published) {
+    t.skip('no published release or v* tag reference available');
     return;
   }
 
@@ -76,11 +92,14 @@ test('live: appcast top version equals the newest v* git tag', async (t) => {
   const live = items[0].shortVersion;
 
   assert.equal(
-    compareSemver(live, latest),
+    compareSemver(live, published),
     0,
-    `live appcast serves ${live} but the newest tag is v${latest}. ` +
-      (compareSemver(live, latest) < 0
-        ? 'The release workflow did not regenerate/deploy the appcast, or a landing-page deploy overwrote it with the stale copy in git.'
-        : 'The live feed is ahead of the tags in this checkout; fetch tags or check for a stray deploy.'),
+    `live appcast serves ${live} but the newest published release is ${published}. ` +
+      (compareSemver(live, published) < 0
+        ? 'The release workflow did not regenerate/deploy the appcast, or a landing-page deploy overwrote it with a stale copy.'
+        : 'The live feed advertises a version whose release is not published (drafted or pulled); Sparkle clients would hit a dead download.'),
   );
+  if (latestTag && compareSemver(latestTag, published) > 0) {
+    t.diagnostic(`note: tag v${latestTag} exists but is not published; its release failed or is still in flight`);
+  }
 });

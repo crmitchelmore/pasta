@@ -1,3 +1,4 @@
+import CloudKit
 import Foundation
 import XCTest
 
@@ -206,7 +207,15 @@ final class CaptureToPasteFlowTests: XCTestCase {
     // MARK: - Images
 
     func testImageCopyIsSpilledToDiskAndPastedBackAsTIFF() throws {
-        let bytes = Data((0..<64_000).map { UInt8(truncatingIfNeeded: $0 &* 31) })
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+            isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ))
+        for x in 0..<2 {
+            for y in 0..<2 { bitmap.setColor(.red, atX: x, y: y) }
+        }
+        let bytes = try XCTUnwrap(bitmap.representation(using: .tiff, properties: [:]))
 
         let captured = try XCTUnwrap(harness.capture(.image(bytes), in: self))
         XCTAssertEqual(captured.contentType, .image)
@@ -228,10 +237,18 @@ final class CaptureToPasteFlowTests: XCTestCase {
         XCTAssertTrue(row.prefersImageThumbnail)
         XCTAssertEqual(row.imagePath, imagePath)
 
-        let writer = E2EPasteboardWriter()
-        let paste = PasteService(pasteboard: writer, simulator: E2EPasteSimulator())
+        // Read the real pasteboard representation a receiving app gets, not
+        // merely an enum recorded by the fake writer. A unique board keeps
+        // parallel tests independent and does not disturb the user's clipboard.
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        let paste = PasteService(pasteboard: SystemPasteboardWriter(pasteboard: pasteboard), simulator: E2EPasteSimulator())
         XCTAssertTrue(paste.paste(stored))
-        XCTAssertEqual(writer.lastWrite, .imageTIFF(bytes), "paste must reload the bytes from the image file")
+        let received = try XCTUnwrap(pasteboard.data(forType: .tiff))
+        XCTAssertEqual(received, bytes, "paste must reload the bytes from the image file")
+        let decoded = try XCTUnwrap(NSBitmapImageRep(data: received), "A receiving app must be able to decode the pasted TIFF")
+        XCTAssertEqual(decoded.pixelsWide, 2)
+        XCTAssertEqual(decoded.pixelsHigh, 2)
         XCTAssertFalse(paste.pastePlainText(stored), "an image has no plain-text form")
     }
 
@@ -289,9 +306,17 @@ final class CaptureToPasteFlowTests: XCTestCase {
         try pipeline.ingest(captured)
 
         let sync = SyncManager(containerIdentifier: "iCloud.com.pasta.e2e", syncEnabled: false)
-        try await sync.pushEntry(captured)
+        do {
+            // Mirror the capture path: acknowledge only a successful upload.
+            try await sync.pushEntry(captured)
+            try database.markSynced(ids: [captured.id])
+            XCTFail("Unavailable CloudKit must not acknowledge an upload")
+        } catch {
+            XCTAssertEqual((error as? CKError)?.code, .notAuthenticated)
+        }
 
         XCTAssertEqual(try database.unsyncedCount(), 1)
         XCTAssertEqual(try database.fetchUnsynced().map(\.id), [captured.id])
+        XCTAssertEqual(try database.syncedCount(), 0)
     }
 }
