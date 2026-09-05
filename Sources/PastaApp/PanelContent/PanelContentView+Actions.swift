@@ -9,7 +9,7 @@ extension PanelContentView {
         guard let selectedEntryID,
               let entry = displayedEntries.first(where: { $0.id == selectedEntryID }) else { return }
 
-        PastaLogger.ui.debug("Pasting entry: \(entry.contentType.rawValue) (plain=\(asPlainText)) (\(entry.content.prefix(50))...)")
+        PastaLogger.ui.debug("Pasting entry: \(entry.contentType.rawValue) (plain=\(asPlainText))")
         if asPlainText {
             _ = PasteService().pastePlainText(entry)
         } else {
