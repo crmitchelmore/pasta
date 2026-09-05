@@ -34,8 +34,8 @@ extension DatabaseManager {
                 try db.execute(
                     sql: """
                     INSERT INTO \(ClipboardEntry.databaseTableName)
-                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isPinned, contentTypeMask)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isPinned, contentTypeMask, isSynced)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     arguments: [
                         entry.id.uuidString,
@@ -51,6 +51,7 @@ extension DatabaseManager {
                         entry.parentEntryId?.uuidString,
                         entry.isPinned,
                         entry.contentTypeMask,
+                        entry.isSynced,
                     ]
                 )
                 PastaLogger.database.debug("Inserted new entry with type \(entry.contentType.rawValue)")
@@ -116,8 +117,8 @@ extension DatabaseManager {
                         try db.execute(
                             sql: """
                             INSERT INTO \(ClipboardEntry.databaseTableName)
-                            (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isPinned, contentTypeMask)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isPinned, contentTypeMask, isSynced)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             arguments: [
                                 entry.id.uuidString,
@@ -133,6 +134,7 @@ extension DatabaseManager {
                                 entry.parentEntryId?.uuidString,
                                 entry.isPinned,
                                 entry.contentTypeMask,
+                                entry.isSynced,
                             ]
                         )
                         inserted += 1
