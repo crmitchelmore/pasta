@@ -9,9 +9,13 @@
 #   1. Launch with PASTA_CI=1 (disables CloudKit init and analytics, makes
 #      BackgroundService emit `PASTA_CI_READY` on stderr and to
 #      PASTA_CI_READY_FILE once the database has answered the initial history
-#      load and clipboard monitoring is running, and routes SIGTERM through
-#      NSApplication.terminate — see Sources/PastaApp/CIReadiness.swift).
-#   2. Wait up to READY_TIMEOUT seconds (default 30) for the marker.
+#      load and clipboard monitoring is running on DURABLE storage, and routes
+#      SIGTERM through NSApplication.terminate — see
+#      Sources/PastaApp/CIReadiness.swift). If a persistent service fell back
+#      to volatile storage the app emits `PASTA_CI_DEGRADED reason=<why>`
+#      instead and never becomes ready.
+#   2. Wait up to READY_TIMEOUT seconds (default 30) for the marker; a
+#      PASTA_CI_DEGRADED line fails immediately with its reason.
 #   3. kill -TERM and require exit code 0 within QUIT_TIMEOUT seconds (default 15).
 #
 # On any failure the app's stderr and the relevant unified-log excerpts (AppKit
@@ -65,6 +69,7 @@ dump_logs() {
   echo "  - dyld crash: framework not copied to Contents/Frameworks"
   echo "  - Code signature invalid: binary modified after signing"
   echo "  - Never ready: database open / initial history load / clipboard monitor start did not complete"
+  echo "  - PASTA_CI_DEGRADED: durable database or image storage failed and the app fell back to volatile storage"
 }
 
 echo "==> Smoke test: launching $APP_DIR"
@@ -76,9 +81,16 @@ APP_PID=$!
 
 # 1. Wait (<= READY_TIMEOUT s) for the app to prove it initialised, not just that it has a PID.
 READY=0
+DEGRADED=""
 for _ in $(seq 1 $((READY_TIMEOUT * 2))); do
   if [ -f "$READY_FILE" ] || grep -q "PASTA_CI_READY" "$LAUNCH_LOG" 2>/dev/null; then
     READY=1
+    break
+  fi
+  # The app knows it will never be ready (volatile-storage fallback): fail now
+  # with the reason rather than after READY_TIMEOUT with a generic message.
+  DEGRADED=$(grep -m1 "PASTA_CI_DEGRADED" "$LAUNCH_LOG" 2>/dev/null || true)
+  if [ -n "$DEGRADED" ]; then
     break
   fi
   if ! kill -0 "$APP_PID" 2>/dev/null; then
@@ -86,6 +98,15 @@ for _ in $(seq 1 $((READY_TIMEOUT * 2))); do
   fi
   sleep 0.5
 done
+
+if [ -n "$DEGRADED" ]; then
+  echo "ERROR: App refused readiness: $DEGRADED"
+  echo "       A persistent service fell back to volatile storage (in-memory database or temporary image directory); a release build must not ship in this state."
+  kill -KILL "$APP_PID" 2>/dev/null || true
+  wait "$APP_PID" 2>/dev/null || true
+  dump_logs
+  exit 1
+fi
 
 if [ "$READY" != "1" ]; then
   if kill -0 "$APP_PID" 2>/dev/null; then
