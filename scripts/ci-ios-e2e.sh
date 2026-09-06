@@ -90,8 +90,8 @@ cmd_resolve() {
 }
 
 # The Release configuration must carry PASTA_IOS_CLOUDKIT_PROVISIONED, the
-# compile-time gate that lets SyncManager touch CloudKit (see
-# Sources/PastaSync/SyncManager.swift). It has to live in the app target's
+# host compile-time approval passed explicitly to SyncManager. SwiftPM
+# targets do not inherit app compilation conditions. It must live in the app target's
 # Release build settings: passing it on the xcodebuild command line applies to
 # every target and replaces the SWIFT_PACKAGE define GRDB needs to import its
 # SQLite shim, which is exactly how the v1.5.9 TestFlight archive failed.
@@ -108,7 +108,7 @@ cmd_verify_release_settings() {
     return 1
   fi
   conds="$(printf '%s\n' "$settings" \
-    | awk -F' = ' '/^ *SWIFT_ACTIVE_COMPILATION_CONDITIONS = /{print $2; exit}')"
+    | awk -F' = ' '/^Build settings for action .* and target PastaIOS:/{app=1; next} /^Build settings for action /{app=0} app && /^ *SWIFT_ACTIVE_COMPILATION_CONDITIONS = /{print $2; exit}')"
   case " $conds " in
     *" PASTA_IOS_CLOUDKIT_PROVISIONED "*)
       echo "    Release SWIFT_ACTIVE_COMPILATION_CONDITIONS = $conds"

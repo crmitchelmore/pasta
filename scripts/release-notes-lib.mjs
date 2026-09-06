@@ -176,7 +176,10 @@ export const buildPrompt = (context) => {
         context.fileSummary || "No file summary was available.",
     ].join("\n").slice(0, 90_000);
 
-    return `Write detailed, user-facing Markdown release notes for Pasta, a fast, local-first clipboard history manager for macOS.
+    const product = context.platform === "ios"
+        ? "Pasta for iPhone, a clipboard history companion with local storage and optional iCloud sharing with Pasta on Mac. Describe only iPhone or shared-library changes supported by the supplied iOS paths; do not advertise Mac-only UI, hotkeys or Sparkle updates."
+        : "Pasta, a fast, local-first clipboard history manager for macOS.";
+    return `Write detailed, user-facing Markdown release notes for ${product}
 
 Requirements:
 - Begin with \"## Overview\" and a concise paragraph explaining the practical impact of this release.
@@ -279,5 +282,4 @@ export const generateReleaseNotes = async (options) => {
     notes += `\n<!-- release-notes: model=${options.model ?? DEFAULT_MODEL} effort=${options.reasoningEffort ?? DEFAULT_REASONING_EFFORT}${usedFallback ? " fallback=deterministic" : ""} -->\n`;
     return { notes, context, usedFallback };
 };
-
 

@@ -1,15 +1,17 @@
 import SwiftUI
+import PastaSync
 
 struct OnboardingView: View {
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var syncManager: SyncManager
 
     private var isReplay: Bool {
         appState.hasCompletedOnboarding
     }
 
     var body: some View {
+        ScrollView {
         VStack(spacing: 0) {
-            Spacer()
 
             // Icon
             Image(systemName: "clipboard.fill")
@@ -34,7 +36,7 @@ struct OnboardingView: View {
                 FeatureRow(
                     icon: "arrow.triangle.2.circlepath.icloud",
                     title: "Built for Mac + iPhone",
-                    description: "Pasta on iPhone is a companion app: it mirrors clipboard history from your Mac through iCloud."
+                    description: "Choose iCloud sync to access clipboard history from your Mac on your iPhone."
                 )
                 FeatureRow(
                     icon: "magnifyingglass",
@@ -49,31 +51,33 @@ struct OnboardingView: View {
                 FeatureRow(
                     icon: "lock.shield",
                     title: "Private by default",
-                    description: "Your data stays in iCloud/local storage tied to your Apple account."
+                    description: "Clipboard history stays on this iPhone until you choose to enable iCloud sync."
                 )
             }
             .padding(.horizontal, 24)
 
-            Spacer()
+            Color.clear.frame(height: 24)
 
-            // iCloud notice
-            if !appState.iCloudAvailable {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.icloud")
-                        .foregroundStyle(.orange)
-                    Text("iCloud is needed for cross-device sync. You can still browse local entries while offline.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding()
-                .background(Color(.systemGray6))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .padding(.horizontal, 24)
-                .padding(.bottom, 12)
+            if !isReplay {
+                Text("Enable iCloud sync to upload your existing and future clipboard history to your private iCloud account and receive history from your Mac. Sync is off by default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 12)
+                    .accessibilityIdentifier("onboarding.syncExplanation")
             }
 
             VStack(spacing: 8) {
-                // Continue button
+                if !isReplay {
+                    Button("Enable iCloud Sync") {
+                        appState.setICloudSyncEnabled(true, syncManager: syncManager)
+                        appState.completeOnboarding()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .accessibilityIdentifier("onboarding.enableSync")
+                }
+                // Local-only continuation never grants upload consent.
                 Button {
                     if isReplay {
                         appState.dismissOnboarding()
@@ -81,12 +85,12 @@ struct OnboardingView: View {
                         appState.completeOnboarding()
                     }
                 } label: {
-                    Text(isReplay ? "Done" : "Get Started")
+                    Text(isReplay ? "Done" : "Continue on This iPhone")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .controlSize(.large)
                 .accessibilityIdentifier("onboarding.primaryButton")
 
@@ -98,6 +102,8 @@ struct OnboardingView: View {
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 32)
+        }
+        .padding(.top, 24)
         }
     }
 }

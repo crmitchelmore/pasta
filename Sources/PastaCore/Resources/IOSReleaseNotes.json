@@ -1,0 +1,41 @@
+{
+  "entries": [
+    {
+      "version": "1.5.18",
+      "date": "2026-09-05",
+      "summary": "More reliable clipboard history shared from your Mac.",
+      "changes": [
+        "The Mac app now uploads the saved clipboard item when you copy existing content again, avoiding duplicate cloud records in your shared history."
+      ],
+      "source": "https://github.com/crmitchelmore/pasta/compare/v1.5.17...v1.5.18"
+    },
+    {
+      "version": "1.5.17",
+      "date": "2026-09-05",
+      "summary": "More private diagnostics.",
+      "changes": [
+        "Clipboard diagnostic messages now avoid exposing clipboard text and sensitive error details."
+      ],
+      "source": "https://github.com/crmitchelmore/pasta/compare/v1.5.16...v1.5.17"
+    },
+    {
+      "version": "1.5.16",
+      "date": "2026-09-05",
+      "summary": "Safer local history and more reliable iCloud downloads.",
+      "changes": [
+        "Downloaded clipboard changes are saved locally before iCloud progress is advanced, so a failed save can be retried without skipping items.",
+        "Clipboard history is preserved when storage encounters a runtime failure."
+      ],
+      "source": "https://github.com/crmitchelmore/pasta/compare/v1.5.14...v1.5.16"
+    },
+    {
+      "version": "1.5.14",
+      "date": "",
+      "summary": "Downloaded history remembers its sync state.",
+      "changes": [
+        "Items downloaded from iCloud remain marked as synced when saved locally, avoiding unnecessary uploads."
+      ],
+      "source": "https://github.com/crmitchelmore/pasta/compare/v1.5.13...v1.5.14"
+    }
+  ]
+}

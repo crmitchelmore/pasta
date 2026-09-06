@@ -255,7 +255,7 @@ final class SyncPullServiceTests: XCTestCase {
             try await manager.pullChanges(into: database)
             XCTFail("Unavailable transport must fail the pull")
         } catch {
-            XCTAssertEqual((error as? CKError)?.code, .notAuthenticated)
+            XCTAssertEqual(error as? SyncManager.AccountError, .syncDisabled)
             XCTAssertEqual(states, [.idle, .syncing, .error(error.localizedDescription)])
             XCTAssertEqual(manager.syncState, .error(error.localizedDescription))
         }

@@ -362,6 +362,14 @@ jobs:
             -scheme "$SCHEME" \
             -derivedDataPath "$BUILD_DIR/DerivedData"
 
+      - name: Prepare version and build specific iOS release notes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
+          GH_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: node scripts/prepare-ios-release-notes.mjs --version "$VERSION" --build "$BUILD_NUMBER" --published-history
+
       - name: Archive PastaIOS
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -381,7 +389,9 @@ jobs:
           # The project's Release configuration owns Manual / Apple Distribution,
           # the "PastaIOS AppStore CI" profile name and the
           # PASTA_IOS_CLOUDKIT_PROVISIONED compile flag on the app target only;
-          # scripts/ci-ios-e2e.sh asserts the flag is present before any upload.
+          # The host passes this approval explicitly into the shared SyncManager;
+          # SwiftPM targets do not inherit app compilation conditions.
+          # scripts/ci-ios-e2e.sh asserts the app flag is present before upload.
           xcodebuild archive \
             -onlyUsePackageVersionsFromResolvedFile \
             -project "$PROJECT" \
@@ -411,6 +421,8 @@ jobs:
           [ "$ACTUAL_ID" = "$BUNDLE_ID" ] || { echo "::error::Bundle id mismatch: expected $BUNDLE_ID, got $ACTUAL_ID"; exit 1; }
           [ "$ACTUAL_VERSION" = "$VERSION" ] || { echo "::error::Version mismatch: expected $VERSION, got $ACTUAL_VERSION"; exit 1; }
           [ "$ACTUAL_BUILD" = "$BUILD_NUMBER" ] || { echo "::error::Build mismatch: expected $BUILD_NUMBER, got $ACTUAL_BUILD"; exit 1; }
+
+          node scripts/verify-ios-release-notes.mjs "$APP_PATH" "$VERSION" "$BUILD_NUMBER" "$(git rev-parse HEAD)"
 
           codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/archive-entitlements.plist"
           CONTAINER="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-identifiers:0' "$RUNNER_TEMP/archive-entitlements.plist" 2>/dev/null || true)"
@@ -501,6 +513,9 @@ jobs:
 
       - name: Verify exported IPA (dry run)
         if: steps.upload.outputs.enabled != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
         run: |
           set -euo pipefail
           IPA="$(find "$EXPORT_PATH" -maxdepth 1 -name '*.ipa' -print -quit)"
@@ -510,6 +525,7 @@ jobs:
           unzip -q "$IPA" -d "$UNPACK"
           APP_PATH="$(find "$UNPACK/Payload" -maxdepth 1 -name '*.app' -print -quit)"
 
+          node scripts/verify-ios-release-notes.mjs "$APP_PATH" "$VERSION" "$BUILD_NUMBER" "$(git rev-parse HEAD)"
           codesign --verify --verbose=2 "$APP_PATH"
           codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/ipa-entitlements.plist"
           APS="$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' "$RUNNER_TEMP/ipa-entitlements.plist" 2>/dev/null || echo missing)"

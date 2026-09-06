@@ -32,6 +32,7 @@ public final class SyncManager: ObservableObject {
     private let recordMapper: RecordMapper
     private let logger = Logger(subsystem: "com.pasta.sync", category: "SyncManager")
     private let containerIdentifier: String?
+    private let cloudKitProvisioned: Bool
     
     // Zone for custom zone operations
     public static let zoneName = "PastaZone"
@@ -41,19 +42,66 @@ public final class SyncManager: ObservableObject {
     private let lastSyncDateKey = "com.pasta.sync.lastSyncDate"
     
     /// Whether sync is enabled. Disabled when CloudKit entitlement is missing.
-    public let syncEnabled: Bool
+    private let accessLock = NSLock()
+    private var accessGeneration: UInt = 0
+    private var accessEnabled: Bool
+    private var activeOperations: [ObjectIdentifier: CKDatabaseOperation] = [:]
+    public var syncEnabled: Bool { accessLock.withLock { accessEnabled } }
+
+    /// Withdrawing consent stops queued/in-flight operations and all later
+    /// batches. An upload already accepted by the server cannot be recalled.
+    public func setSyncEnabled(_ enabled: Bool) {
+        let operations = accessLock.withLock {
+            if accessEnabled != enabled { accessGeneration &+= 1 }
+            accessEnabled = enabled
+            return enabled ? [] : Array(activeOperations.values)
+        }
+        for operation in operations { operation.cancel() }
+    }
+
+    private func add(_ operation: CKDatabaseOperation, to database: CKDatabase, generation: UInt) throws {
+        try accessLock.withLock {
+            guard accessEnabled, generation == accessGeneration else { throw AccountError.syncDisabled }
+            activeOperations[ObjectIdentifier(operation)] = operation
+            database.add(operation)
+        }
+    }
+
+    private func finished(_ operation: CKDatabaseOperation) {
+        _ = accessLock.withLock { activeOperations.removeValue(forKey: ObjectIdentifier(operation)) }
+    }
+
+    private func transferGeneration() throws -> UInt {
+        try Task.checkCancellation()
+        return try accessLock.withLock {
+            guard accessEnabled else { throw AccountError.syncDisabled }
+            return accessGeneration
+        }
+    }
+
+    private func checkTransferAllowed(generation: UInt? = nil) throws {
+        let current = try transferGeneration()
+        if let generation, generation != current { throw AccountError.syncDisabled }
+    }
     
     /// - Parameters:
     ///   - containerIdentifier: Explicit CloudKit container ID, or nil to use the default container.
     ///   - syncEnabled: Set false to disable all CloudKit operations.
-    public init(containerIdentifier: String? = nil, syncEnabled: Bool = true, pullService: SyncPullService? = nil) {
+    ///   - cloudKitProvisioned: iOS host approval after its release signing checks.
+    ///     The host evaluates its own compilation conditions; SwiftPM targets do
+    ///     not inherit the app target's PASTA_IOS_CLOUDKIT_PROVISIONED definition.
+    public init(containerIdentifier: String? = nil, syncEnabled: Bool = true, pullService: SyncPullService? = nil, cloudKitProvisioned: Bool = false) {
         self.pullService = pullService
         self.containerIdentifier = containerIdentifier
-        self.syncEnabled = syncEnabled
+        self.accessEnabled = syncEnabled
+        self.cloudKitProvisioned = cloudKitProvisioned
         self.recordMapper = RecordMapper()
         self.lastSyncDate = UserDefaults.standard.object(forKey: lastSyncDateKey) as? Date
     }
     
+    /// Safe to inspect without creating a CKContainer (including simulators).
+    public var cloudKitAccessAllowed: Bool { syncEnabled && hasCloudKitEntitlement() }
+
     /// Resolves the CloudKit container. Returns false if CloudKit is unavailable.
     private func resolveContainer() -> Bool {
         guard syncEnabled else { return false }
@@ -61,7 +109,7 @@ public final class SyncManager: ObservableObject {
         
         // Check entitlement at runtime to avoid SIGTRAP from CKContainer
         // when the binary lacks CloudKit entitlements.
-        guard Self.hasCloudKitEntitlement() else {
+        guard hasCloudKitEntitlement() else {
             logger.info("CloudKit entitlement not present, sync disabled")
             return false
         }
@@ -76,7 +124,7 @@ public final class SyncManager: ObservableObject {
     }
     
     /// Checks whether the running binary has the icloud-services entitlement.
-    private static func hasCloudKitEntitlement() -> Bool {
+    private func hasCloudKitEntitlement() -> Bool {
         #if os(macOS)
         guard let task = SecTaskCreateFromSelf(nil) else { return false }
         let value = SecTaskCopyValueForEntitlement(
@@ -87,14 +135,10 @@ public final class SyncManager: ObservableObject {
         guard let services = value as? [String] else { return false }
         return services.contains("CloudKit")
         #else
-        // App Store builds may not retain a readable embedded provisioning
-        // profile after installation. The release lane defines this flag only
-        // after validating the profile and signed archive grant our container.
-        #if PASTA_IOS_CLOUDKIT_PROVISIONED
-        return true
-        #else
-        return false
-        #endif
+        // Installed App Store builds may have no readable embedded profile.
+        // The provisioned iOS host explicitly grants access; the shared package
+        // stays closed by default and never relies on an app-only compile flag.
+        return cloudKitProvisioned
         #endif
     }
     
@@ -125,6 +169,7 @@ public final class SyncManager: ObservableObject {
         // Callers mark the entry synced on success. An unavailable transport
         // must fail so the local row remains queued for a later upload.
         guard resolveContainer(), let database else { throw CKError(.notAuthenticated) }
+        let generation = try transferGeneration()
         let prepared: RecordMapper.PreparedRecord
         do {
             prepared = try recordMapper.preparedRecord(from: entry, zoneID: Self.zoneID)
@@ -134,7 +179,20 @@ public final class SyncManager: ObservableObject {
         }
         defer { prepared.cleanupTemporaryAsset() }
         do {
-            _ = try await database.save(prepared.record)
+            let operation = CKModifyRecordsOperation(recordsToSave: [prepared.record])
+            let outcome = SingleRecordSaveOutcome()
+            operation.perRecordSaveBlock = { _, result in outcome.recordSaved(result) }
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    operation.modifyRecordsResultBlock = { [weak operation] result in
+                        if let operation { self.finished(operation) }
+                        continuation.resume(with: outcome.completed(result))
+                    }
+                    do { try self.add(operation, to: database, generation: generation) }
+                    catch { continuation.resume(throwing: error) }
+                    if Task.isCancelled { operation.cancel() }
+                }
+            } onCancel: { operation.cancel() }
             logger.debug("Pushed entry \(entry.id.uuidString)")
         } catch let error as CKError where error.code == .serverRecordChanged {
             logger.info("Entry \(entry.id.uuidString) already exists with newer version, skipping")
@@ -154,6 +212,7 @@ public final class SyncManager: ObservableObject {
         onBatchSynced: (([UUID]) -> Void)? = nil
     ) async throws -> Int {
         guard resolveContainer(), let database else { throw CKError(.notAuthenticated) }
+        let generation = try transferGeneration()
         syncCancelled = false
         await MainActor.run {
             syncState = .syncing
@@ -168,6 +227,7 @@ public final class SyncManager: ObservableObject {
         
             var totalPushed = 0
             for (index, batch) in batches.enumerated() {
+                try checkTransferAllowed(generation: generation)
                 if syncCancelled {
                     let cancelledAt = totalPushed
                     logger.info("Sync cancelled by user after \(cancelledAt)/\(entries.count) entries")
@@ -206,7 +266,8 @@ public final class SyncManager: ObservableObject {
                 operation.qualityOfService = .utility
             
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    operation.modifyRecordsResultBlock = { result in
+                    operation.modifyRecordsResultBlock = { [weak operation] result in
+                        if let operation { self.finished(operation) }
                         switch result {
                         case .success:
                             continuation.resume()
@@ -214,7 +275,9 @@ public final class SyncManager: ObservableObject {
                             continuation.resume(throwing: error)
                         }
                     }
-                    database.add(operation)
+                    do { try self.add(operation, to: database, generation: generation) }
+                    catch { continuation.resume(throwing: error) }
+                    if Task.isCancelled { operation.cancel() }
                 }
             
                 totalPushed = min((index + 1) * batchSize, entries.count)
@@ -265,14 +328,16 @@ public final class SyncManager: ObservableObject {
         defer { isPullInProgress = false }
         syncState = .syncing
         do {
+            try checkTransferAllowed()
             if pullService == nil {
                 guard resolveContainer(), let database else {
                     throw CKError(.notAuthenticated)
                 }
                 let mapper = recordMapper
                 pullService = SyncPullService(
-                    fetch: { tokenData in
-                        return try await Self.fetchUncommittedChanges(
+                    fetch: { [weak self] tokenData in
+                        guard let self else { throw CancellationError() }
+                        return try await self.fetchUncommittedChanges(
                             from: database, mapper: mapper, previousTokenData: tokenData
                         )
                     }
@@ -290,11 +355,12 @@ public final class SyncManager: ObservableObject {
         }
     }
 
-    private static func fetchUncommittedChanges(
+    private func fetchUncommittedChanges(
         from database: CKDatabase,
         mapper: RecordMapper,
         previousTokenData: Data?
     ) async throws -> SyncChangeBatch {
+        let generation = try transferGeneration()
         let savedToken = try previousTokenData.flatMap {
             try NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: $0)
         }
@@ -346,10 +412,12 @@ public final class SyncManager: ObservableObject {
         operation.qualityOfService = .utility
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                operation.fetchRecordZoneChangesResultBlock = { result in
+                operation.fetchRecordZoneChangesResultBlock = { [weak operation] result in
+                    if let operation { self.finished(operation) }
                     continuation.resume(with: result)
                 }
-                database.add(operation)
+                do { try self.add(operation, to: database, generation: generation) }
+                catch { continuation.resume(throwing: error) }
                 if Task.isCancelled { operation.cancel() }
             }
         } onCancel: {
@@ -359,6 +427,7 @@ public final class SyncManager: ObservableObject {
         if skipped > 0 {
             Self.pullLogger.warning("Pull skipped \(skipped) remote record(s) this app version cannot represent; update the app to receive them")
         }
+        try checkTransferAllowed(generation: generation)
         return try changes.batch()
     }
 
@@ -427,9 +496,23 @@ public final class SyncManager: ObservableObject {
     
     // MARK: - Account Status
     
+    public enum AccountError: LocalizedError, Equatable {
+        case syncDisabled
+        case missingEntitlement
+
+        public var errorDescription: String? {
+            switch self {
+            case .syncDisabled: return "iCloud sync is disabled."
+            case .missingEntitlement:
+                return "This build cannot access iCloud. Install the latest signed Pasta update."
+            }
+        }
+    }
+
     /// Checks if iCloud is available.
     public func checkAccountStatus() async throws -> CKAccountStatus {
-        guard resolveContainer(), let container else { return .couldNotDetermine }
+        guard syncEnabled else { throw AccountError.syncDisabled }
+        guard resolveContainer(), let container else { throw AccountError.missingEntitlement }
         return try await container.accountStatus()
     }
     

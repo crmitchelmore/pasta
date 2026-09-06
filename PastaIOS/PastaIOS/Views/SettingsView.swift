@@ -4,36 +4,68 @@ import PastaSync
 struct SettingsView: View {
     @EnvironmentObject var syncManager: SyncManager
     @EnvironmentObject var appState: AppState
+    @State private var isConfirmingReset = false
 
     var body: some View {
         List {
             syncSection
             helpSection
             aboutSection
-            dangerSection
         }
         .listStyle(.insetGrouped)
         .accessibilityIdentifier("settings.list")
         .navigationTitle("Settings")
+        .alert("Reset iCloud Sync?", isPresented: $isConfirmingReset) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset Sync", role: .destructive) {
+                Task { await appState.resetSync(syncManager: syncManager) }
+            }
+            .accessibilityIdentifier("settings.confirmResetSync")
+        } message: {
+            Text("Your local history and iCloud data are kept. Pasta will download iCloud history again when sync is enabled and connected.")
+        }
     }
 
     // MARK: - Sync Section
 
     private var syncSection: some View {
         Section("Sync") {
+            Toggle("Enable iCloud Sync", isOn: Binding(
+                get: { appState.isICloudSyncEnabled },
+                set: { appState.setICloudSyncEnabled($0, syncManager: syncManager) }
+            ))
+            .accessibilityIdentifier("settings.iCloudConsent")
+            Text("Uploads existing and future clipboard history to your private iCloud account and downloads history from your Mac. Turning sync off stops transfers; local history and uploaded iCloud data are kept.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("settings.iCloudConsentExplanation")
+
             HStack {
                 Label("iCloud Status", systemImage: "icloud")
                 Spacer()
-                if appState.iCloudAvailable {
-                    Text("Connected")
-                        .foregroundStyle(.green)
-                } else {
-                    Text("Unavailable")
-                        .foregroundStyle(.red)
-                }
+                Text(!appState.isICloudSyncEnabled ? "Off" : (appState.isCheckingSync ? "Checking…" : appState.iCloudStatus.label))
+                    .foregroundStyle(appState.iCloudAvailable ? Color.green : Color.secondary)
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("settings.iCloudStatus")
+
+            syncFeedback
+
+            Button {
+                Task { await appState.performSync(syncManager: syncManager) }
+            } label: {
+                Label(appState.isCheckingSync ? "Syncing…" : "Sync Now", systemImage: "arrow.clockwise")
+            }
+            .disabled(!appState.isICloudSyncEnabled || syncIsBusy)
+            .accessibilityIdentifier("settings.syncNow")
+
+            Button {
+                isConfirmingReset = true
+            } label: {
+                Label(appState.isResettingSync ? "Resetting…" : "Reset Sync", systemImage: "arrow.counterclockwise")
+            }
+            .disabled(syncIsBusy)
+            .accessibilityIdentifier("settings.resetSync")
 
             if let lastSync = syncManager.lastSyncDate {
                 HStack {
@@ -52,14 +84,37 @@ struct SettingsView: View {
                     .accessibilityIdentifier("settings.entryCount")
             }
 
-            Button {
-                Task {
-                    await appState.performSync(syncManager: syncManager)
+        }
+    }
+
+    private var syncIsBusy: Bool {
+        appState.isCheckingSync || appState.isResettingSync || syncManager.syncState == .syncing
+    }
+
+    @ViewBuilder
+    private var syncFeedback: some View {
+        if let error = appState.syncErrorMessage {
+            Text(error)
+                .font(.footnote)
+                .foregroundStyle(.red)
+                .accessibilityIdentifier("settings.syncError")
+        } else if let message = appState.syncFeedbackMessage {
+            HStack(spacing: 10) {
+                if syncIsBusy {
+                    ProgressView()
+                        .accessibilityLabel("Sync in progress")
+                        .accessibilityIdentifier("settings.syncProgress")
                 }
-            } label: {
-                Label("Sync Now", systemImage: "arrow.clockwise")
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("settings.syncFeedback")
             }
-            .disabled(syncManager.syncState == .syncing)
+        } else if let guidance = appState.iCloudStatus.guidance {
+            Text(guidance)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("settings.iCloudGuidance")
         }
     }
 
@@ -101,20 +156,4 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Danger Section
-
-    private var dangerSection: some View {
-        Section {
-            Button(role: .destructive) {
-                Task {
-                    await appState.resetSync(syncManager: syncManager)
-                }
-            } label: {
-                Label("Reset Sync", systemImage: "arrow.counterclockwise")
-            }
-            .disabled(syncManager.syncState == .syncing)
-        } footer: {
-            Text("Clears the sync token and forces a full re-sync from iCloud.")
-        }
-    }
 }

@@ -43,7 +43,10 @@ from pathlib import Path
 if '-onlyUsePackageVersionsFromResolvedFile' not in sys.argv:
     sys.exit('The native gate must preserve strict dependency resolution')
 if '-showBuildSettings' in sys.argv:
+    print('Build settings for action build and target PastaSync:')
     print('    SWIFT_ACTIVE_COMPILATION_CONDITIONS = PASTA_IOS_CLOUDKIT_PROVISIONED')
+    print('Build settings for action build and target PastaIOS:')
+    print('    SWIFT_ACTIVE_COMPILATION_CONDITIONS = ' + os.environ.get('MOCK_APP_CONDITIONS', 'PASTA_IOS_CLOUDKIT_PROVISIONED'))
     sys.exit(0)
 if '-retry-tests-on-failure' in sys.argv:
     sys.exit('Retries must not conceal a failing gate')
@@ -85,6 +88,11 @@ sys.exit(int(os.environ.get('MOCK_RESULT_EXIT', '0')))
         self.run_script('ci-ios-e2e.sh', 'build-for-testing', success=True)
         output = self.run_script('ci-ios-e2e.sh', 'test', success=True)
         self.assertIn('Verified 2 passing XCUITests', output)
+
+    def test_package_flag_cannot_hide_missing_app_release_approval(self):
+        output = self.run_script('ci-ios-e2e.sh', 'build-for-testing',
+                                 success=False, MOCK_APP_CONDITIONS='')
+        self.assertIn('lacks PASTA_IOS_CLOUDKIT_PROVISIONED', output)
 
     def test_success_banner_cannot_hide_xcodebuild_failure(self):
         for command in ('build-for-testing', 'test'):
