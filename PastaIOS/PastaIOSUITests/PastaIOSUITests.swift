@@ -272,7 +272,12 @@ final class PastaIOSUITests: PastaUITestCase {
 
         reset.tap()
         XCTAssertTrue(confirmation.waitForExistence(timeout: Self.uiTimeout))
-        confirmation.buttons["Reset Sync"].tap()
+        // SwiftUI exposes nested accessibility buttons for this alert action.
+        // Scope to its identifier and choose one representation of the action.
+        let confirmReset = confirmation.buttons["settings.confirmResetSync"].firstMatch
+        XCTAssertTrue(confirmReset.waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertTrue(confirmReset.isHittable, "Reset confirmation must be actionable")
+        confirmReset.tap()
         XCTAssertTrue(waitForDisappearance(of: confirmation))
         let feedback = element("settings.syncFeedback")
         revealSettingsRow(feedback, scrollUp: false)
