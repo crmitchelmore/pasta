@@ -5,6 +5,64 @@ import XCTest
 
 @MainActor
 final class SyncAccountRecoveryTests: XCTestCase {
+    func testCaptureUploadFailureReplacesSuccessfulSyncFeedbackWithPendingRetry() async throws {
+        let database = try DatabaseManager.inMemory()
+        let recovery = SyncAccountRecovery()
+        let pull = SyncPullService(fetch: { _ in
+            SyncChangeBatch(modified: [], deleted: [], token: Data([1]))
+        })
+        var completedSync = false
+        await recovery.run(checkAccount: { .available }, prepare: {}, sync: {
+            try await pull.pull(into: database)
+            completedSync = true
+        })
+        func feedback() throws -> String? {
+            SyncAccountRecovery.captureFeedback(
+                count: try database.fetchUnsynced().count,
+                syncEnabled: true, availability: recovery.availability,
+                isBusy: false, hasError: recovery.errorMessage != nil,
+                hasCompletedSync: completedSync
+            )
+        }
+        XCTAssertEqual(try feedback(), "Sync complete.")
+
+        // Foreground capture happens after the full sync. A failed upload
+        // must leave its durable local row pending and replace that success.
+        let captured = ClipboardEntry(content: "captured after sync", contentType: .text)
+        try database.insert(captured)
+        let upload: (ClipboardEntry) async throws -> Void = { _ in throw CKError(.networkFailure) }
+        do {
+            try await upload(captured)
+            try database.markSynced(ids: [captured.id])
+            XCTFail("Fixture upload must fail")
+        } catch {}
+        XCTAssertEqual(try database.fetchUnsynced().map(\.id), [captured.id])
+        XCTAssertEqual(try feedback(), "1 local item is still waiting to upload. Tap Sync Now to retry.")
+
+        try database.markSynced(ids: [captured.id])
+        XCTAssertEqual(try feedback(), "Sync complete.", "Successful retry can restore completion after a real pull")
+        XCTAssertNil(SyncAccountRecovery.captureFeedback(
+            count: 0, syncEnabled: true, availability: .available,
+            isBusy: false, hasError: false, hasCompletedSync: false
+        ), "A capture upload alone must not claim a completed full sync")
+    }
+
+    func testCaptureFeedbackPreservesConsentAccountErrorsAndActiveOperations() {
+        let protectedStates: [(Bool, SyncAccountRecovery.Availability, Bool, Bool)] = [
+            (false, .available, false, false),
+            (true, .noAccount, false, false),
+            (true, .temporarilyUnavailable, false, false),
+            (true, .available, true, false),
+            (true, .available, false, true)
+        ]
+        for (enabled, availability, busy, hasError) in protectedStates {
+            XCTAssertNil(SyncAccountRecovery.captureFeedback(
+                count: 1, syncEnabled: enabled, availability: availability,
+                isBusy: busy, hasError: hasError, hasCompletedSync: true
+            ))
+        }
+    }
+
     func testOfflineLaunchThenRetryAppliesHistoryAndRetainsPendingUploads() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

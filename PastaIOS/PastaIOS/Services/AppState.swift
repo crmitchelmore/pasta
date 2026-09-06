@@ -34,6 +34,7 @@ final class AppState: ObservableObject {
     private let logger = Logger(subsystem: "com.pasta.ios", category: "AppState")
     private var lastObservedPasteboardChangeCount: Int?
     private var isSyncInProgress = false
+    private var hasCompletedSync = false
     private var isClipboardCaptureInProgress = false
     private let activationRequests = SyncRequestQueue()
     private let syncRequests = SyncRequestQueue()
@@ -85,6 +86,7 @@ final class AppState: ObservableObject {
             Task { await self.performSync(syncManager: syncManager) }
         } else {
             syncRequests.cancelAll()
+            hasCompletedSync = false
             iCloudStatus = .disabled
             syncErrorMessage = nil
             syncFeedbackMessage = "Sync is off. Enable iCloud Sync above to sync with your Mac."
@@ -95,7 +97,10 @@ final class AppState: ObservableObject {
         #if canImport(UIKit)
         guard !isClipboardCaptureInProgress else { return }
         isClipboardCaptureInProgress = true
-        defer { isClipboardCaptureInProgress = false }
+        defer {
+            isClipboardCaptureInProgress = false
+            refreshPendingUploadFeedback()
+        }
 
         guard let database,
               UIPasteboard.general.hasStrings,
@@ -124,20 +129,23 @@ final class AppState: ObservableObject {
             try database.insert(entry, deduplicate: false)
             lastObservedPasteboardChangeCount = changeCount
 
-            var persistedEntry = entry
+            // Show the durable local row, and invalidate an earlier sync
+            // success, before awaiting an upload that can fail or be delayed.
+            entries.insert(entry, at: 0)
+            refreshPendingUploadFeedback()
 
             if isICloudSyncEnabled && iCloudAvailable {
                 do {
                     try await syncManager.pushEntry(entry)
                     try database.markSynced(ids: [entry.id])
-                    persistedEntry.isSynced = true
                 } catch {
                     logger.warning("Clipboard capture push failed: \(error.localizedDescription)")
                 }
             }
 
-            entries.removeAll { $0.id == persistedEntry.id }
-            entries.insert(persistedEntry, at: 0)
+            // A concurrent sync may have updated the row while capture was
+            // awaiting CloudKit. Use durable state for the pending count.
+            try loadEntries()
             logger.info("Captured current clipboard on app activation")
         } catch {
             logger.error("Failed to capture current clipboard: \(error.localizedDescription)")
@@ -146,9 +154,23 @@ final class AppState: ObservableObject {
         #endif
     }
 
+    private func refreshPendingUploadFeedback() {
+        if let message = SyncAccountRecovery.captureFeedback(
+            count: entries.filter { !$0.isSynced }.count,
+            syncEnabled: isICloudSyncEnabled,
+            availability: iCloudStatus,
+            isBusy: isCheckingSync || isResettingSync,
+            hasError: syncErrorMessage != nil,
+            hasCompletedSync: hasCompletedSync
+        ) {
+            syncFeedbackMessage = message
+        }
+    }
+
     func resetSync(syncManager: SyncManager) async {
         guard !isResettingSync else { return }
         isResettingSync = true
+        hasCompletedSync = false
         syncErrorMessage = nil
         syncFeedbackMessage = "Resetting sync…"
         defer { isResettingSync = false }
@@ -190,6 +212,7 @@ final class AppState: ObservableObject {
         }
         guard !isSyncInProgress else { return }
         isSyncInProgress = true
+        hasCompletedSync = false
         defer { isSyncInProgress = false }
         isCheckingSync = true
         defer { isCheckingSync = false }
@@ -229,6 +252,7 @@ final class AppState: ObservableObject {
                 syncErrorMessage = prefix + error
                 syncFeedbackMessage = nil
             } else if completedSync && !Task.isCancelled {
+                hasCompletedSync = true
                 if pendingUploadCount > 0 {
                     let items = pendingUploadCount == 1 ? "item is" : "items are"
                     syncFeedbackMessage = prefix + "History downloaded. \(pendingUploadCount) local \(items) still waiting to upload. Tap Sync Now to retry."

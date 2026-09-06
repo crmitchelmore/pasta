@@ -37,6 +37,22 @@ public final class SyncAccountRecovery {
         }
     }
 
+    /// A clipboard capture can add pending work after a successful full sync.
+    /// Preserve consent, account recovery, errors and active operation feedback.
+    public static func captureFeedback(
+        count: Int,
+        syncEnabled: Bool,
+        availability: Availability,
+        isBusy: Bool,
+        hasError: Bool,
+        hasCompletedSync: Bool
+    ) -> String? {
+        guard syncEnabled, availability == .available, !isBusy, !hasError else { return nil }
+        guard count > 0 else { return hasCompletedSync ? "Sync complete." : nil }
+        let items = count == 1 ? "item is" : "items are"
+        return "\(count) local \(items) still waiting to upload. Tap Sync Now to retry."
+    }
+
     public private(set) var availability: Availability = .notChecked
     public private(set) var errorMessage: String?
     public private(set) var isRunning = false
