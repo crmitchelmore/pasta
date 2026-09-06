@@ -25,7 +25,7 @@ public final class SyncAccountRecovery {
 
         public var guidance: String? {
             switch self {
-            case .disabled: return "Clipboard history stays on this iPhone until you enable iCloud sync."
+            case .disabled: return "Turn on Enable iCloud Sync above to sync with your Mac."
             case .notChecked, .available: return nil
             case .noAccount: return "Sign in to iCloud in iPhone Settings, then tap Sync Now."
             case .restricted: return "iCloud access is restricted. Check the account restrictions in iPhone Settings."
@@ -78,12 +78,25 @@ public final class SyncAccountRecovery {
             case .syncDisabled: availability = .disabled
             case .missingEntitlement: availability = .unavailableBuild
             }
-            errorMessage = error.localizedDescription
+            errorMessage = availability.guidance
         } catch {
             if let cloudError = error as? CKError, cloudError.code == .notAuthenticated {
                 availability = .noAccount
             }
-            errorMessage = "Sync failed: \(error.localizedDescription)"
+            // CloudKit descriptions can contain record IDs and internal details.
+            // Keep the recovery action useful without exposing those in Settings.
+            switch (error as? CKError)?.code {
+            case .networkUnavailable, .networkFailure:
+                errorMessage = "Sync could not connect. Check your internet connection, then tap Sync Now."
+            case .notAuthenticated:
+                errorMessage = availability.guidance
+            case .quotaExceeded:
+                errorMessage = "Your iCloud storage is full. Free up space in iPhone Settings, then tap Sync Now."
+            case .serviceUnavailable, .requestRateLimited, .zoneBusy:
+                errorMessage = "iCloud is temporarily busy. Wait a moment, then tap Sync Now."
+            default:
+                errorMessage = "Sync could not finish. Your local history is safe. Tap Sync Now to retry."
+            }
         }
     }
 }

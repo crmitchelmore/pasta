@@ -158,6 +158,33 @@ final class PastaIOSUITests: PastaUITestCase {
 
     // MARK: - Settings
 
+    /// Tap the native switch, not the text/container SwiftUI also exposes.
+    /// Verify the visible state before testing persistence or starting a retry.
+    private func setSyncConsent(_ enabled: Bool, file: StaticString = #filePath, line: UInt = #line) {
+        let control = app.switches["settings.iCloudConsent"].firstMatch
+        revealSettingsRow(control, scrollUp: false)
+        XCTAssertTrue(control.waitForExistence(timeout: Self.uiTimeout), "Sync consent switch missing", file: file, line: line)
+        XCTAssertTrue(control.isHittable, "Sync consent switch is not reachable", file: file, line: line)
+        XCTAssertEqual(control.value as? String, enabled ? "0" : "1", "Journey must start in the opposite consent state", file: file, line: line)
+        // SwiftUI may give the switch a full-row frame including its label.
+        // The trailing edge is the actual switch thumb on this English UI.
+        control.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        let changed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", enabled ? "1" : "0"), object: control
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [changed], timeout: Self.uiTimeout), .completed,
+                       "Tapping consent must visibly change the switch", file: file, line: line)
+    }
+
+    private func revealSettingsRow(_ row: XCUIElement, scrollUp: Bool = true) {
+        let list = element("settings.list")
+        for _ in 0..<5 {
+            if row.exists && row.isHittable { return }
+            if scrollUp { list.swipeUp() } else { list.swipeDown() }
+        }
+    }
+
+
     func testSyncConsentIsExplicitAndWithdrawalPersistsWithoutDeletingHistory() {
         launchApp(pasteboard: "Private until consent")
         waitForMainUI()
@@ -166,20 +193,20 @@ final class PastaIOSUITests: PastaUITestCase {
         XCTAssertFalse(element("settings.syncNow").isEnabled)
         XCTAssertTrue(element("settings.iCloudConsentExplanation").exists)
         XCTAssertEqual(element("settings.entryCount").label, "1")
-        element("settings.iCloudConsent").tap()
+        setSyncConsent(true)
         app.terminate()
         launchApp(resetState: false)
         waitForMainUI()
         openTab("Settings", expecting: "settings.list")
-        XCTAssertEqual(element("settings.iCloudConsent").value as? String, "1")
-        element("settings.iCloudConsent").tap()
+        XCTAssertEqual(app.switches["settings.iCloudConsent"].firstMatch.value as? String, "1")
+        setSyncConsent(false)
         XCTAssertTrue(element("settings.iCloudStatus").label.contains("Off"))
         XCTAssertFalse(element("settings.syncNow").isEnabled)
         app.terminate()
         launchApp(resetState: false)
         waitForMainUI()
         openTab("Settings", expecting: "settings.list")
-        XCTAssertEqual(element("settings.iCloudConsent").value as? String, "0")
+        XCTAssertEqual(app.switches["settings.iCloudConsent"].firstMatch.value as? String, "0")
         XCTAssertEqual(element("settings.entryCount").label, "1")
     }
 
@@ -192,13 +219,23 @@ final class PastaIOSUITests: PastaUITestCase {
                       "Unavailable iCloud must explain how to recover")
         XCTAssertEqual(element("settings.entryCount").label, "1")
         XCTAssertFalse(element("settings.syncNow").isEnabled, "Sync requires explicit consent")
-        element("settings.iCloudConsent").tap()
-        element("settings.syncNow").tap()
+        setSyncConsent(true)
+        let syncNow = element("settings.syncNow")
+        revealSettingsRow(syncNow)
+        let accountCheckFinished = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "enabled == true"), object: syncNow
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [accountCheckFinished], timeout: Self.uiTimeout), .completed)
+        syncNow.tap()
         let retryFinished = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "enabled == true"), object: element("settings.syncNow")
         )
         XCTAssertEqual(XCTWaiter().wait(for: [retryFinished], timeout: Self.uiTimeout), .completed)
-        XCTAssertTrue(element("settings.iCloudGuidance").exists)
+        let failure = element("settings.syncError")
+        XCTAssertTrue(failure.waitForExistence(timeout: Self.uiTimeout), "Failed retry must give a visible next action")
+        XCTAssertTrue(failure.label.contains("update"), "The unprovisioned simulator must explain which action to take")
+        XCTAssertFalse(failure.label.contains("Sync complete"))
+        revealSettingsRow(element("settings.entryCount"))
         XCTAssertEqual(element("settings.entryCount").label, "1", "Retry must retain offline clipboard history")
 
         XCUIDevice.shared.press(.home)
@@ -216,6 +253,44 @@ final class PastaIOSUITests: PastaUITestCase {
         XCTAssertEqual(element("settings.entryCount").label, "1", "Offline history must survive relaunch after retries")
     }
 
+    func testResetExplainsItsEffectAndReportsResultWithoutDeletingOfflineHistory() {
+        let content = "Keep this history after reset"
+        launchApp(pasteboard: content)
+        waitForMainUI()
+        openTab("Settings", expecting: "settings.list")
+        let reset = element("settings.resetSync")
+        revealSettingsRow(reset)
+        reset.tap()
+        let confirmation = app.alerts["Reset iCloud Sync?"].firstMatch
+        XCTAssertTrue(confirmation.waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertTrue(confirmation.staticTexts[
+            "Your local history and iCloud data are kept. Pasta will download iCloud history again when sync is enabled and connected."
+        ].exists)
+        confirmation.buttons["Cancel"].tap()
+        XCTAssertTrue(waitForDisappearance(of: confirmation))
+        XCTAssertFalse(element("settings.syncFeedback").exists, "Cancelling must not claim a reset")
+
+        reset.tap()
+        XCTAssertTrue(confirmation.waitForExistence(timeout: Self.uiTimeout))
+        confirmation.buttons["Reset Sync"].tap()
+        XCTAssertTrue(waitForDisappearance(of: confirmation))
+        let feedback = element("settings.syncFeedback")
+        revealSettingsRow(feedback, scrollUp: false)
+        XCTAssertTrue(feedback.waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertEqual(feedback.label, "Sync reset. Local history kept. Enable iCloud Sync to download your history again.")
+        XCTAssertFalse(feedback.label.contains("Sync complete"), "A local-only reset is not a successful cloud sync")
+        revealSettingsRow(element("settings.entryCount"))
+        XCTAssertEqual(element("settings.entryCount").label, "1")
+
+        app.terminate()
+        launchApp(resetState: false)
+        waitForMainUI()
+        openTab("History", expecting: "history.list")
+        XCTAssertTrue(app.staticTexts[content].firstMatch.waitForExistence(timeout: Self.uiTimeout), "Reset must keep persisted clipboard history")
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertEqual(app.switches["settings.iCloudConsent"].firstMatch.value as? String, "0", "Reset must not grant sync consent")
+    }
+
     func testSettingsRendersItsSections() {
         launchApp()
         waitForMainUI()
@@ -228,17 +303,18 @@ final class PastaIOSUITests: PastaUITestCase {
         XCTAssertTrue(element("settings.replayWalkthrough").exists, "Replay Walkthrough missing")
         XCTAssertTrue(element("settings.whatsNew").exists, "What's New missing")
 
-        // The About and Reset rows may need a scroll on small simulators.
+        // Each row must be brought into view independently on small screens.
+        let reset = element("settings.resetSync")
+        revealSettingsRow(reset, scrollUp: false)
+        XCTAssertTrue(reset.exists, "Reset Sync button missing")
+        XCTAssertTrue(reset.isHittable, "Reset Sync must be reachable by scrolling")
         let version = element("settings.version")
-        if !version.exists {
-            app.swipeUp()
-        }
+        revealSettingsRow(version)
         XCTAssertTrue(version.waitForExistence(timeout: Self.uiTimeout), "Version row missing")
         XCTAssertFalse(version.label.isEmpty, "Version row is blank")
-        XCTAssertTrue(app.buttons["Reset Sync"].exists, "Reset Sync button missing")
 
         // Completed onboarding is not permission to upload clipboard history.
-        app.swipeDown()
+        revealSettingsRow(element("settings.iCloudStatus"), scrollUp: false)
         XCTAssertTrue(element("settings.iCloudStatus").label.contains("Off"))
         XCTAssertNotNil(Int(element("settings.entryCount").label))
     }

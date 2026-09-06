@@ -134,4 +134,22 @@ final class SyncAccountRecoveryTests: XCTestCase {
         XCTAssertEqual(recovery.availability, .unavailableBuild)
         XCTAssertNotNil(recovery.errorMessage)
     }
+    func testFailureGuidanceGivesAnActionWithoutExposingRawErrorDetails() async {
+        let recovery = SyncAccountRecovery()
+        let privateDetail = "clipboard-secret-record-id"
+        let cases: [(Error, String)] = [
+            (CKError(.networkFailure), "Check your internet connection"),
+            (CKError(.quotaExceeded), "Free up space"),
+            (CKError(.serviceUnavailable), "Wait a moment"),
+            (NSError(domain: "PrivateTransport", code: 99,
+                     userInfo: [NSLocalizedDescriptionKey: privateDetail]), "Tap Sync Now to retry")
+        ]
+        for (error, action) in cases {
+            await recovery.run(checkAccount: { .available }, prepare: {}, sync: { throw error })
+            XCTAssertTrue(recovery.errorMessage?.contains(action) == true)
+            XCTAssertFalse(recovery.errorMessage?.contains(privateDetail) == true)
+            XCTAssertFalse(recovery.errorMessage?.contains("Sync complete") == true)
+        }
+    }
+
 }
