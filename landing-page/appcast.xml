@@ -6,26 +6,27 @@
     <description>Most recent updates to Pasta</description>
     <language>en</language>
     <item>
-      <title>Version 1.5.18</title>
-      <sparkle:version>159</sparkle:version>
-      <sparkle:shortVersionString>1.5.18</sparkle:shortVersionString>
-      <pubDate>Sat, 05 Sep 2026 19:58:54 +0000</pubDate>
+      <title>Version 1.5.19</title>
+      <sparkle:version>160</sparkle:version>
+      <sparkle:shortVersionString>1.5.19</sparkle:shortVersionString>
+      <pubDate>Sun, 06 Sep 2026 08:07:32 +0000</pubDate>
       <description><![CDATA[
 <h2>What’s new</h2>
 <h3>Fixes</h3>
 <ul>
-<li>upload the canonical persisted row after clipboard deduplication (#115)</li>
+<li>recover iCloud sync and show current release notes</li>
 </ul>
 <h3>Under the hood</h3>
 <ul>
-<li>update appcast for v1.5.17 [skip ci]</li>
+<li>update appcast for v1.5.18 [skip ci]</li>
+<li>make refused readiness observable and fail the launch smoke fast (#117)</li>
 </ul>
-<p><strong>Full changelog:</strong> <a href="https://github.com/crmitchelmore/pasta/compare/v1.5.17...v1.5.18">https://github.com/crmitchelmore/pasta/compare/v1.5.17...v1.5.18</a></p>
+<p><strong>Full changelog:</strong> <a href="https://github.com/crmitchelmore/pasta/compare/v1.5.18...v1.5.19">https://github.com/crmitchelmore/pasta/compare/v1.5.18...v1.5.19</a></p>
       ]]></description>
       <enclosure
-        url="https://github.com/crmitchelmore/pasta/releases/download/v1.5.18/Pasta-1.5.18.dmg"
-        sparkle:edSignature="woP1D13eQWeGfKsL7rWJuxeSgPlIpmU5CBaCILUb+uvxrGvfK9xmsh+qninZCvlLlT0UjvGbE5WsQoc+cnUfDQ=="
-        length="17333251"
+        url="https://github.com/crmitchelmore/pasta/releases/download/v1.5.19/Pasta-1.5.19.dmg"
+        sparkle:edSignature="tBUVnGmAvzKaShOqAXnKGeDyxBUl8J3Rag98mTDc2Z2y1B30XDScmiVG1f44qMX1PaB5MmCe25bgmROsV7zJCA=="
+        length="17403488"
         type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
