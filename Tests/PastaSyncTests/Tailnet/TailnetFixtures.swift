@@ -15,6 +15,9 @@ actor TailnetTestNetwork {
     var devices: [TailnetDevice] = []
     var offline: Set<String> = []
     var chunks = 0
+    var pauseNextChunk = false
+    var paused: CheckedContinuation<Void, Never>?
+    var pauseObserver: CheckedContinuation<Void, Never>?
     var breakAfterChunk: Int?
     var clipboardWrites: [String: [UUID]] = [:]
     func register(_ engine: TailnetEngine, device: TailnetDevice) { engines[device.address] = engine; devices.append(device) }
@@ -25,11 +28,23 @@ actor TailnetTestNetwork {
         guard let engine = engines[target], !offline.contains(devices.first(where: { $0.address == target })?.id ?? "") else { throw URLError(.notConnectedToInternet) }
         if request.operation == .chunk {
             chunks += 1
+            if pauseNextChunk {
+                pauseNextChunk = false
+                await withCheckedContinuation { continuation in
+                    paused = continuation; pauseObserver?.resume(); pauseObserver = nil
+                }
+            }
             if let stop = breakAfterChunk, chunks > stop { throw URLError(.networkConnectionLost) }
         }
         return await engine.handle(address: source, request: request)
     }
     func setOffline(_ id: String, _ value: Bool) { if value { offline.insert(id) } else { offline.remove(id) } }
+    func pauseOnChunk() { pauseNextChunk = true }
+    func waitForPause() async {
+        if paused != nil { return }
+        await withCheckedContinuation { pauseObserver = $0 }
+    }
+    func resume() { paused?.resume(); paused = nil }
     func interrupt(after: Int?) { breakAfterChunk = after }
     func record(_ id: UUID, on device: String, clipboard: Bool) { if clipboard { clipboardWrites[device, default: []].append(id) } }
 }

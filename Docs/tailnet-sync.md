@@ -44,8 +44,10 @@ Pasta on personal Macs can explicitly pair across Apple accounts through an exis
 
 ## Verification record (9 September 2026)
 
-- Full local Swift suite: 429 tests passed, including 24 tailnet-specific tests and a TCP capture-to-search-to-paste E2E. Local release-gate scripts: 27 tests passed. Landing contract tests and 11 Playwright tests passed.
+- Full local Swift suite: 432 tests passed, including 27 tailnet-specific tests and a TCP capture-to-search-to-paste E2E. Local release-gate scripts: 27 tests passed. Landing contract tests and 12 Playwright tests passed after rebasing onto the website redesign.
 - The development bundle builds, signs, launches and passes the shared readiness smoke: durable history ready, then clean SIGTERM exit. Fixed the development Run script's process check to resolve this machine's symlinked build directory.
 - Rendered Settings → Tailnet inspected with native accessibility and screenshots, including off/on/connected states. Actual listener observed bound exclusively to the local tailnet IPv4 address on TCP 45873; disabling removed the listener. No pairing or personal-history sharing enabled during this UI check.
 - Current Tailscale peer inventory is available, but both visible Mac peers are offline. Real two-Mac/Tailscale/Keychain/target-dialog verification remains a release gate; TCP tests substitute the tailnet inventory and credentials, so they do not establish that result.
-- Native hosted iOS/macOS CI, independent review, and published release verification remain pending until the PR runs. Release requires all of them; do not infer shipment from these local results.
+- [PR #127](https://github.com/crmitchelmore/pasta/pull/127) is open with owner review requested. Native hosted iOS/macOS CI, independent review, and published release verification remain pending. Release requires all of them; do not infer shipment from these local results.
+
+- Large-file preparation and final verification run in cancellable worker tasks. Tests verify that unpairing or disabling while a chunk is in flight cannot commit received history, and that reenabling resumes safely. Later source edits/pins do not overwrite previously delivered peer content.

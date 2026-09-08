@@ -91,7 +91,7 @@ public final class TailnetSyncController: ObservableObject {
         displayedRequests.insert(request.id); showingRequest = true
         let alert = NSAlert()
         alert.messageText = "Allow \(request.device.name) to sync with this Mac?"
-        alert.informativeText = "This device is on your tailnet. Pairing shares new Pasta history both ways, including anything your capture settings allow. Older history, onward iCloud sharing and clipboard replacement stay off until you enable them."
+        alert.informativeText = "Tailscale address: \(request.device.address). Pairing shares new Pasta history both ways, including anything your capture settings allow. Older history, onward iCloud sharing and clipboard replacement stay off until you enable them."
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Decline")
         // A non-modal window keeps Pasta usable while a request is pending.

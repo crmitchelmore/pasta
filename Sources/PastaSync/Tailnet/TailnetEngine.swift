@@ -31,6 +31,8 @@ actor TailnetEngine {
     private var enabled = false
     private var generation = UUID()
     private var busy = false
+    private var preparation: (peerID: String, task: Task<TailnetPrepared, Error>)?
+    private var finalising: [UUID: Task<ClipboardEntry, Error>] = [:]
     private var status = "Off"
     private var available: [TailnetDevice] = []
     private var pending: [UUID: (request: TailnetPairingRequest, token: String)] = [:]
@@ -49,16 +51,21 @@ actor TailnetEngine {
     func setEnabled(_ value: Bool) {
         guard enabled != value else { return }
         enabled = value; generation = UUID()
-        if !value { transport.stop(); listeningAddress = nil; inventory = nil; pending.removeAll(); incoming.removeAll(); outgoing.removeAll(); available = []; status = "Off" }
+        if !value {
+            preparation?.task.cancel()
+            for task in finalising.values { task.cancel() }
+            transport.stop(); listeningAddress = nil; inventory = nil; pending.removeAll(); incoming.removeAll(); outgoing.removeAll(); available = []; status = "Off" }
     }
     func snapshot() throws -> TailnetSnapshot {
         pending = pending.filter { $0.value.request.expires > now() }
         return TailnetSnapshot(status: status, devices: available, peers: try store.peers(), requests: pending.values.map(\.request).sorted { $0.expires < $1.expires }, transfers: try store.transfers(limit: 200))
     }
     func update(_ peer: TailnetPeer) throws {
+        guard try store.peers().contains(where: { $0.id == peer.id && $0.pairingID == peer.pairingID }) else { throw TailnetError.denied }
         guard peer.approvalBytes >= 0, peer.approvalBytes <= 1_000_000_000_000,
               peer.receiveLimitBytes > 0, peer.receiveLimitBytes <= 1_000_000_000_000 else { throw TailnetError.invalid("Choose a limit between 1 MB and 1 TB.") }
         try store.save(peer)
+        if !peer.sendEnabled, preparation?.peerID == peer.id { preparation?.task.cancel() }
     }
     func backfill(_ id: String) throws { try store.enqueue(for: id, backfill: true) }
     func decideTransfer(_ transfer: TailnetTransfer, approve: Bool) throws {
@@ -170,6 +177,8 @@ actor TailnetEngine {
         let token = try credentials.read(peer.pairingID)
         // Local revocation is durable before any network await.
         try store.remove(id); try credentials.remove(peer.pairingID)
+        if preparation?.peerID == id { preparation?.task.cancel() }
+        for (entry, transfer) in incoming where transfer.peer == id { finalising[entry]?.cancel() }
         incoming = incoming.filter { $0.value.peer != id }; outgoing.removeValue(forKey: id)
         if let inventory, let device = inventory.peers.first(where: { $0.id == id }) {
             var request = TailnetRequest(operation: .revoke); request.pairingID = peer.pairingID; request.token = token
@@ -204,12 +213,15 @@ actor TailnetEngine {
             if request.operation == .pairingStatus { return TailnetResponse(status: "approved") }
             if request.operation == .revoke {
                 try store.remove(peer.id); try credentials.remove(peer.pairingID)
+                if preparation?.peerID == peer.id { preparation?.task.cancel() }
+                for (id, transfer) in incoming where transfer.peer == peer.id { finalising[id]?.cancel() }
                 incoming = incoming.filter { $0.value.peer != peer.id }
                 return TailnetResponse(status: "ok")
             }
             guard let id = request.entryID else { throw TailnetError.invalid("Missing entry identity.") }
             if request.operation == .received { return TailnetResponse(status: try store.hasReceived(id) ? "seen" : "new") }
             if request.operation == .begin {
+                guard finalising[id] == nil else { throw TailnetError.unavailable("Transfer is being committed; retry shortly.") }
                 guard let manifest = request.manifest, manifest.entry.id == id else { throw TailnetError.invalid("Missing manifest.") }
                 if try store.hasReceived(id) { return TailnetResponse(status: "seen") }
                 guard incoming[id] == nil || incoming[id]?.peer == peer.id,
@@ -224,17 +236,27 @@ actor TailnetEngine {
             }
             guard let transfer = incoming[id], transfer.peer == peer.id, transfer.pairing == peer.pairingID else { throw TailnetError.denied }
             if request.operation == .chunk {
+                guard finalising[id] == nil else { throw TailnetError.denied }
                 guard let bytes = request.bytes, let index = request.index, let offset = request.offset else { throw TailnetError.invalid("Missing chunk.") }
                 try files.appendChunk(bytes, index: index, offset: offset, manifest: transfer.manifest)
                 return TailnetResponse(status: "ok")
             }
             if request.operation == .commit {
                 try transfer.manifest.validate(limit: peer.receiveLimitBytes)
-                let entry = try files.finish(transfer.manifest)
-                let inserted = try store.receive(entry, publishToCloud: peer.publishToCloud)
+                guard finalising[id] == nil else { throw TailnetError.unavailable("Transfer is being committed; retry shortly.") }
+                let files = files
+                let run = generation
+                let task = Task.detached(priority: .utility) { try files.finish(transfer.manifest) }
+                finalising[id] = task
+                defer { finalising.removeValue(forKey: id) }
+                let entry = try await task.value
+                guard enabled, generation == run, incoming[id]?.pairing == peer.pairingID else { throw TailnetError.denied }
+                let currentPeer = try authorised(request, device: device)
+                try transfer.manifest.validate(limit: currentPeer.receiveLimitBytes)
+                let inserted = try store.receive(entry, publishToCloud: currentPeer.publishToCloud)
                 incoming.removeValue(forKey: id)
                 files.acknowledge(id)
-                if inserted { await onReceived(entry, peer.replaceClipboard && !transfer.manifest.backfill) }
+                if inserted { await onReceived(entry, currentPeer.replaceClipboard && !transfer.manifest.backfill) }
                 return TailnetResponse(status: "ok")
             }
             throw TailnetError.invalid("Unsupported request.")
@@ -245,9 +267,15 @@ actor TailnetEngine {
         guard let entry = try store.database.fetch(id: transfer.id) else { return }
         var query = TailnetRequest(operation: .received); query.entryID = entry.id
         if try await call(query, peer: initialPeer).status == "seen" { try store.setState(transfer, .sent); return }
-        let prepared = try files.prepare(entry, backfill: transfer.backfill); defer { prepared.cleanup() }
+        let files = files
+        let task = Task.detached(priority: .utility) { try files.prepare(entry, backfill: transfer.backfill) }
+        preparation = (initialPeer.id, task)
+        defer { preparation = nil }
+        let prepared = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        defer { prepared.cleanup() }
+        guard enabled, let currentPeer = try store.peers().first(where: { $0.id == initialPeer.id }), currentPeer.pairingID == initialPeer.pairingID else { throw CancellationError() }
         let digest = try prepared.manifest.digest
-        if entry.contentType == .filePath, prepared.manifest.totalBytes > initialPeer.approvalBytes, transfer.approvedDigest != digest {
+        if entry.contentType == .filePath, prepared.manifest.totalBytes > currentPeer.approvalBytes, transfer.approvedDigest != digest {
             try store.setState(transfer, .approval, detail: "\(prepared.manifest.totalBytes) bytes\(prepared.manifest.changedSinceCapture ? " · changed since capture" : "")", digest: digest)
             return
         }

@@ -77,7 +77,7 @@ struct TailnetManifest: Codable, Sendable {
     }
 }
 
-struct TailnetPrepared {
+struct TailnetPrepared: Sendable {
     var manifest: TailnetManifest
     var sources: [URL]
     var temporary: URL?
@@ -85,7 +85,7 @@ struct TailnetPrepared {
 }
 
 /// Only regular files/directories, no archive extraction and no executable launch.
-struct TailnetFiles {
+struct TailnetFiles: Sendable {
     static let chunkSize = 256 * 1024
     let root: URL
     init(root: URL) throws {

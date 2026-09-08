@@ -230,6 +230,58 @@ final class TailnetSyncTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
     }
 
+    func testUnpairWhileAChunkIsInFlightPreventsHistoryCommit() async throws {
+        let network = TailnetTestNetwork()
+        let a = try await TailnetTestNode(1, network: network, parent: root)
+        let b = try await TailnetTestNode(2, network: network, parent: root)
+        try await a.pair(b)
+        let entry = ClipboardEntry(content: "", contentType: .image, rawData: Data(repeating: 1, count: 600_000))
+        try a.db.insert(entry)
+        await network.pauseOnChunk()
+        let sending = Task { await a.tick() }
+        await network.waitForPause()
+        try await a.engine.unpair(b.device.id)
+        await network.resume()
+        await sending.value
+        XCTAssertNil(try b.db.fetch(id: entry.id))
+        XCTAssertTrue(try TailnetStore(database: a.db).peers().isEmpty)
+        XCTAssertTrue(try TailnetStore(database: b.db).peers().isEmpty)
+    }
+
+    func testTurningOffDuringTransferStopsBeforeCommitAndResumesWhenReenabled() async throws {
+        let network = TailnetTestNetwork()
+        let a = try await TailnetTestNode(1, network: network, parent: root)
+        let b = try await TailnetTestNode(2, network: network, parent: root)
+        try await a.pair(b)
+        let entry = ClipboardEntry(content: "", contentType: .image, rawData: Data(repeating: 2, count: 600_000))
+        try a.db.insert(entry)
+        await network.pauseOnChunk()
+        let sending = Task { await a.tick() }
+        await network.waitForPause()
+        await a.engine.setEnabled(false)
+        await network.resume(); await sending.value
+        XCTAssertNil(try b.db.fetch(id: entry.id))
+        await a.engine.setEnabled(true); await a.tick()
+        XCTAssertEqual(try b.db.fetch(id: entry.id)?.rawData, entry.rawData)
+    }
+
+    func testLaterLocalEditsAndPinsDoNotOverwriteDeliveredPeerContent() async throws {
+        let network = TailnetTestNetwork()
+        let a = try await TailnetTestNode(1, network: network, parent: root)
+        let b = try await TailnetTestNode(2, network: network, parent: root)
+        try await a.pair(b)
+        var entry = ClipboardEntry(content: "first version", contentType: .text)
+        try a.db.insert(entry); await a.tick()
+        try b.db.setPinned(id: entry.id, pinned: true)
+        entry.content = "later version"; entry.copyCount = 99
+        try a.db.applySyncChanges(modified: [entry], deleted: [])
+        try await a.engine.backfill(b.device.id); await a.tick()
+        let received = try XCTUnwrap(b.db.fetch(id: entry.id))
+        XCTAssertEqual(received.content, "first version")
+        XCTAssertEqual(received.copyCount, 1)
+        XCTAssertTrue(received.isPinned)
+    }
+
     func testImageAndRichTextBytesRoundTripAndMissingFileDoesNotBlockText() async throws {
         let network = TailnetTestNetwork()
         let a = try await TailnetTestNode(1, network: network, parent: root)
