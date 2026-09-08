@@ -170,11 +170,13 @@ final class QuickSearchController: ObservableObject {
         }
     }
     
-    func show() {
+    func show(initialQuery: String = "") {
         guard let contentBuilder else { return }
         
         // Always clear search state when showing
         QuickSearchManager.shared.prepareForSearch()
+        QuickSearchManager.shared.query = initialQuery
+        QuickSearchManager.shared.searchQueryChanged()
         
         if window == nil {
             createWindow()

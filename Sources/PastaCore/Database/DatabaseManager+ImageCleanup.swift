@@ -2,18 +2,36 @@ import Foundation
 import GRDB
 
 extension DatabaseManager {
-    /// Delete candidate image files only after their final database reference
-    /// disappears. Content-addressed files may be shared by several rows,
-    /// including pinned entries that survive a retention or bulk delete.
+    /// Reference discovery holds only a database read lock. Slow or failed file
+    /// removal must not hold the SQLite writer or abort the remaining cleanup.
     public func deleteUnreferencedImages(paths: [String], using storage: ImageStorageManager) throws {
-        let candidates = Array(Set(paths))
-        guard !candidates.isEmpty else { return }
+        var deferredPaths: [String] = []
+        var retryDelay: TimeInterval = 0
+        try deleteUnreferencedImages(paths: paths, remove: { path in
+            if let delay = try storage.deleteImageAfterGrace(path: path) {
+                deferredPaths.append(path)
+                retryDelay = max(retryDelay, delay)
+            }
+        })
+        guard !deferredPaths.isEmpty else { return }
+        let pending = deferredPaths
+        // Batch the retry: Delete All may contain thousands of recent files.
+        // Recheck references after the grace window, never keep a DB lock open.
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + retryDelay + 0.05) {
+            do {
+                try self.deleteUnreferencedImages(paths: pending, using: storage)
+            } catch {
+                PastaLogger.logError(error, logger: PastaLogger.storage, context: "Deferred image cleanup failed")
+            }
+        }
+    }
 
-        // Recheck after the delete commits, under the writer lock: a row added
-        // since the caller collected candidates must also protect its image.
-        // Keep the lock through removal so database writers cannot introduce
-        // a reference between this check and the filesystem operation.
-        try dbWriter.write { db in
+    /// Injection point for slow/failing files in concurrency regression tests.
+    func deleteUnreferencedImages(paths: [String], remove: (String) throws -> Void) throws {
+        let candidates = Array(Set(paths)).sorted()
+        guard !candidates.isEmpty else { return }
+        let unreferenced = try dbWriter.read { db in
+            var result: [String] = []
             for start in stride(from: 0, to: candidates.count, by: Self.batchChunkSize) {
                 let chunk = Array(candidates[start..<min(start + Self.batchChunkSize, candidates.count)])
                 let placeholders = chunk.map { _ in "?" }.joined(separator: ", ")
@@ -22,10 +40,13 @@ extension DatabaseManager {
                     sql: "SELECT DISTINCT imagePath FROM \(ClipboardEntry.databaseTableName) WHERE imagePath IN (\(placeholders))",
                     arguments: StatementArguments(chunk)
                 ))
-                for path in chunk where !referenced.contains(path) {
-                    try storage.deleteImage(path: path)
-                }
+                result.append(contentsOf: chunk.filter { !referenced.contains($0) })
             }
+            return result
+        }
+        for path in unreferenced {
+            do { try remove(path) }
+            catch { PastaLogger.logError(error, logger: PastaLogger.storage, context: "Image cleanup failed") }
         }
     }
 }

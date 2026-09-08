@@ -26,13 +26,16 @@ public final class SnippetStore: @unchecked Sendable {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return try list() }
 
-        let pattern = "%\(trimmed)%"
+        let escaped = trimmed.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+        let pattern = "%\(escaped)%"
         return try dbWriter.read { db in
             try Snippet
                 .filter(
-                    Column("name").like(pattern)
-                    || Column("keyword").like(pattern)
-                    || Column("content").like(pattern)
+                    Column("name").like(pattern, escape: "\\")
+                    || Column("keyword").like(pattern, escape: "\\")
+                    || Column("content").like(pattern, escape: "\\")
                 )
                 .order(Column("updatedAt").desc)
                 .fetchAll(db)

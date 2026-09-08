@@ -37,7 +37,7 @@ enum CIReadiness {
             do {
                 try line.write(toFile: path, atomically: true, encoding: .utf8)
             } catch {
-                PastaLogger.app.error("Failed to write CI readiness marker to \(path): \(error.localizedDescription)")
+                PastaLogger.app.error("Failed to write CI readiness marker to \(path): \(PastaLogger.diagnosticDescription(error))")
             }
         }
         PastaLogger.app.info("CI readiness signalled (\(entryCount) entries loaded)")

@@ -27,13 +27,13 @@ jobs:
 
     steps:
       - name: Checkout the exact CI commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ env.DEPLOY_SHA }}
 
       - name: Require every surface gate for the deployment commit
         id: gate
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const { verifyLandingDeploy } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
@@ -57,7 +57,7 @@ jobs:
 
       - name: Refuse a superseded deployment
         if: steps.gate.outputs.deploy == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const { verifyCurrentLandingSource } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
@@ -65,8 +65,27 @@ jobs:
 
       - name: Deploy to Cloudflare Pages
         if: steps.gate.outputs.deploy == 'true'
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
         with:
+          wranglerVersion: '4.129.1'
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy landing-page --project-name=pasta-app --branch=main --commit-dirty=true
+
+      - name: Set up Node for post-publication verification
+        if: steps.gate.outputs.deploy == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: landing-page/package-lock.json
+
+      - name: Install verification dependencies
+        if: steps.gate.outputs.deploy == 'true'
+        working-directory: landing-page
+        run: ../scripts/ci-npm-ci.sh
+
+      - name: Verify the published landing page
+        if: steps.gate.outputs.deploy == 'true'
+        working-directory: landing-page
+        run: npm run test:live

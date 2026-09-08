@@ -21,12 +21,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var hotKeyPauseObserver: NSObjectProtocol?
     var hotKeyChangeObserver: NSObjectProtocol?
     var settingsWindow: NSWindow?
+    var snippetExpansion: SnippetExpansionController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         PastaLogger.app.info("Pasta app initializing...")
 
         // Check if running from DMG and offer to move to Applications
-        checkAndOfferMoveToApplications()
+        if Bundle.main.bundleIdentifier != "com.pasta.clipboard.development" {
+            checkAndOfferMoveToApplications()
+        }
 
         // Register default values for settings
         UserDefaults.standard.register(defaults: [
@@ -37,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "pasta.respectTransientPasteboard": true
         ])
 
+        ExternalPasteCoordinator.shared.start()
         configureAppIcon()
         applyAppMode()
         observeDefaults()
@@ -57,6 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
+        NotificationCenter.default.addObserver(self, selector: #selector(openSnippetPicker), name: .openSnippetPicker, object: nil)
+
         // Start background clipboard monitoring (runs even when panel is closed)
         BackgroundService.shared.start()
 
@@ -69,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Configure command handlers
         setupCommandHandlers()
+        snippetExpansion = SnippetExpansionController()
 
         // Create the floating panel controller (main window)
         panelController = PanelController(

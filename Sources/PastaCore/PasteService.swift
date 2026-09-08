@@ -63,7 +63,20 @@ public protocol PasteEventSimulating {
 }
 
 public struct SystemPasteEventSimulator: PasteEventSimulating {
+    public static let syntheticEventMarker: Int64 = 0x5041535441
     public init() {}
+
+    public func moveCursorLeft(by count: Int) {
+        guard count > 0, AccessibilityPermission.isTrusted(),
+              let source = CGEventSource(stateID: .combinedSessionState) else { return }
+        for _ in 0..<count {
+            for down in [true, false] {
+                let event = CGEvent(keyboardEventSource: source, virtualKey: 123, keyDown: down)
+                event?.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
+                event?.post(tap: .cghidEventTap)
+            }
+        }
+    }
 
     public func simulateCommandV() {
         // Requires Accessibility permissions.
@@ -87,6 +100,9 @@ public struct SystemPasteEventSimulator: PasteEventSimulating {
             return
         }
         keyUp.flags = .maskCommand
+
+        keyDown.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
+        keyUp.setIntegerValueField(.eventSourceUserData, value: Self.syntheticEventMarker)
 
         // Post events with small delay between for reliability
         keyDown.post(tap: .cghidEventTap)

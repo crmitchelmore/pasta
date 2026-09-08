@@ -124,6 +124,7 @@ struct PanelContentView: View {
                     // Post notification to open settings via AppDelegate
                     NotificationCenter.default.post(name: .openSettings, object: nil)
                 },
+                onOpenSnippets: { NotificationCenter.default.post(name: .openSnippetPicker, object: nil) },
                 searchFocused: $searchFocused
             )
 

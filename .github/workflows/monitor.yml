@@ -7,8 +7,9 @@ name: Production monitor
 # release-time checks in release.yml only run when we ship; this catches a
 # CDN, DNS, GitHub-asset or stray-deploy regression in between.
 #
-# A red run is the alert: GitHub notifies the workflow's owner on scheduled
-# failures. Re-run manually with workflow_dispatch after fixing.
+# Failures create/update an incident assigned to the repository owner. This
+# avoids relying on the scheduled actor's personal notification settings.
+# A healthy rerun closes that incident; failures still keep the workflow red.
 
 on:
   schedule:
@@ -17,6 +18,7 @@ on:
 
 permissions:
   contents: read
+  issues: write  # Create/update only the production monitor's incident issue
 
 concurrency:
   group: production-monitor
@@ -29,12 +31,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout code (with tags)
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -58,3 +60,11 @@ jobs:
             echo "- Live appcast top item: $(curl -fsSL https://pasta-app.com/appcast.xml | grep -oE '<title>Version [0-9.]+</title>' | head -1 | sed -E 's/<[^>]+>//g')"
             echo "- Newest published release: $(curl -fsSL -H 'accept: application/vnd.github+json' https://api.github.com/repos/${{ github.repository }}/releases/latest | grep -oE '"tag_name": *"[^"]+"' | head -1 | cut -d'"' -f4)"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Route the monitor outcome to its owner
+        if: always()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const { reportMonitorResult } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-monitor-incident.mjs`);
+            await reportMonitorResult({ github, ...context.repo, runId: context.runId, status: '${{ job.status }}' });

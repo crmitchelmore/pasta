@@ -50,10 +50,10 @@ PAYLOAD=$(cat <<'JSON'
         "strict_required_status_checks_policy": false,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
-          { "context": "CI gate" },
-          { "context": "Build & Test" },
-          { "context": "iOS E2E (XCUITest)" },
-          { "context": "Appcast & Cloudflare config contract" }
+          { "context": "CI gate", "integration_id": 15368 },
+          { "context": "Build & Test", "integration_id": 15368 },
+          { "context": "iOS E2E (XCUITest)", "integration_id": 15368 },
+          { "context": "Appcast & Cloudflare config contract", "integration_id": 15368 }
         ]
       }
     }

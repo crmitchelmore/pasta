@@ -137,7 +137,7 @@ public final class QuickSearchManager: ObservableObject {
                     do {
                         return try database.pinnedCount()
                     } catch {
-                        PastaLogger.search.error("pinnedCount() failed: \(error.localizedDescription)")
+                        PastaLogger.search.error("pinnedCount() failed: \(PastaLogger.diagnosticDescription(error))")
                     }
                 }
                 return snapshot.reduce(0) { $0 + ($1.isPinned ? 1 : 0) }
@@ -167,6 +167,20 @@ public final class QuickSearchManager: ObservableObject {
             isCommandMode = true
             let commandQuery = String(trimmed.dropFirst())
             commandResults = CommandRegistry.shared.search(query: commandQuery)
+            if let snippetQuery = SnippetCommands.searchQuery(commandQuery), let database {
+                commandResults = []
+                searchTask = Task { @MainActor in
+                    do {
+                        let snippets = try await Task.detached(priority: .userInitiated) {
+                            try SnippetStore(database: database).find(matching: snippetQuery)
+                        }.value
+                        guard !Task.isCancelled, self.query.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed else { return }
+                        commandResults = SnippetCommands.commands(for: snippets)
+                    } catch {
+                        PastaLogger.logError(error, logger: PastaLogger.search, context: "Snippet search failed")
+                    }
+                }
+            }
             selectedIndex = 0
             results = []
             return
@@ -231,10 +245,10 @@ public final class QuickSearchManager: ObservableObject {
                         let startTime = CFAbsoluteTimeGetCurrent()
                         let matches = try dbSnapshot.searchFTS(query: querySnapshot, contentType: filterSnapshot, limit: 20, pinnedOnly: pinnedSnapshot)
                         let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
-                        PastaLogger.search.debug("FTS5 search '\(querySnapshot)': \(matches.count) results in \(String(format: "%.1f", elapsed))ms")
+                        PastaLogger.search.debug("FTS5 search: \(matches.count) results in \(String(format: "%.1f", elapsed))ms")
                         return matches
                     } catch {
-                        PastaLogger.search.error("FTS5 search failed: \(error.localizedDescription)")
+                        PastaLogger.search.error("FTS5 search failed: \(PastaLogger.diagnosticDescription(error))")
                     }
                 }
 

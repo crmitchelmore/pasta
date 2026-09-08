@@ -63,7 +63,7 @@ public final class ImportService {
         let data = try encoder.encode(payload)
         try data.write(to: fileURL, options: .atomic)
 
-        PastaLogger.database.info("Exported \(entries.count) entries to \(fileURL.path)")
+        PastaLogger.database.info("Exported \(entries.count) entries")
         return ExportResult(exported: entries.count, fileURL: fileURL)
     }
 
