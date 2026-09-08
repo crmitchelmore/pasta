@@ -206,20 +206,19 @@ section,[id] {
 }
 
 .hero__visual {
-  overflow:clip;
   position:relative;
   padding:54px 0 28px;
   min-width:0
 }
 .pasta-loop {
   position:absolute;
-  width:85%;
-  height:110%;
-  left:12%;
-  top:-3%;
+  width:72%;
+  height:90%;
+  left:14%;
+  top:5%;
   border:35px solid var(--pasta);
   border-radius:45% 55% 48% 52%;
-  transform:rotate(-24deg);
+  transform:rotate(-12deg);
   opacity:.9
 }
 .clipboard-demo {
