@@ -18,6 +18,9 @@ public final class SyncManager: ObservableObject {
     @Published public private(set) var syncedEntryCount: Int = 0
     @Published public private(set) var totalEntriesToSync: Int = 0
     
+    @MainActor private var lastUploadDiagnostic = "No upload observed since launch"
+    @MainActor private var lastDownloadDiagnostic = "No download observed since launch"
+
     private var syncCancelled = false
     
     /// Cancel an in-progress bulk sync.
@@ -193,10 +196,12 @@ public final class SyncManager: ObservableObject {
                     if Task.isCancelled { operation.cancel() }
                 }
             } onCancel: { operation.cancel() }
+            await MainActor.run { lastUploadDiagnostic = "Uploaded 1 record at \(Date().ISO8601Format())" }
             logger.debug("Pushed entry \(entry.id.uuidString)")
         } catch let error as CKError where error.code == .serverRecordChanged {
             logger.info("Entry \(entry.id.uuidString) already exists with newer version, skipping")
         } catch {
+            await MainActor.run { lastUploadDiagnostic = SyncDiagnostics.errorSummary(error) }
             logger.error("Failed to push entry: \(error.localizedDescription)")
             throw error
         }
@@ -286,6 +291,7 @@ public final class SyncManager: ObservableObject {
                 onBatchSynced?(batchIDs)
                 await MainActor.run {
                     syncedEntryCount = pushed
+                lastUploadDiagnostic = "Uploaded a batch of \(batchIDs.count) records at \(Date().ISO8601Format())"
                 }
                 logger.info("Pushed batch of \(batch.count) entries (\(pushed)/\(entries.count))")
             }
@@ -302,6 +308,7 @@ public final class SyncManager: ObservableObject {
         } catch {
             await MainActor.run {
                 syncState = .error(error.localizedDescription)
+                lastUploadDiagnostic = SyncDiagnostics.errorSummary(error)
                 totalEntriesToSync = 0
             }
             throw error
@@ -347,10 +354,12 @@ public final class SyncManager: ObservableObject {
             let batch = try await pullService.pull(into: localDatabase)
             lastSyncDate = Date()
             UserDefaults.standard.set(lastSyncDate, forKey: lastSyncDateKey)
+            lastDownloadDiagnostic = "Received \(batch.modified.count) records and \(batch.deleted.count) deletions at \(Date().ISO8601Format())"
             syncedEntryCount += batch.modified.count
             syncState = .idle
         } catch {
             syncState = .error(error.localizedDescription)
+            lastDownloadDiagnostic = SyncDiagnostics.errorSummary(error)
             throw error
         }
     }
@@ -516,6 +525,88 @@ public final class SyncManager: ObservableObject {
         return try await container.accountStatus()
     }
     
+    // MARK: - Read-only Diagnostics
+
+    /// Explicit user-requested metadata scan. Never advances the download
+    /// checkpoint, writes a record, or includes clipboard/account identifiers.
+    @MainActor
+    public func diagnosticReport(localDatabase: DatabaseManager?) async -> String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        var lines = [
+            "Pasta Sync Diagnostics",
+            "Generated: \(Date().ISO8601Format())",
+            "App: \(info["CFBundleShortVersionString"] as? String ?? "unknown") (\(info["CFBundleVersion"] as? String ?? "unknown"))",
+            "Platform: \(ProcessInfo.processInfo.operatingSystemVersionString)",
+            "Container: \(containerIdentifier ?? "default (resolved after account check)")",
+            "Database: private",
+            "Zone: \(Self.zoneName)",
+            "Sync enabled: \(syncEnabled)",
+            "CloudKit access allowed: \(cloudKitAccessAllowed)",
+            "Environment: \(diagnosticEnvironment)",
+            "Last upload: \(lastUploadDiagnostic)",
+            "Last download: \(lastDownloadDiagnostic)"
+        ]
+        var local: SyncLocalSnapshot?
+        if let localDatabase {
+            do {
+                local = try await Task.detached(priority: .utility) {
+                    try localDatabase.syncDiagnosticSnapshot()
+                }.value
+                if let local { lines += SyncDiagnostics.localLines(local) }
+            } catch { lines.append("Local snapshot failed: \(SyncDiagnostics.errorSummary(error))") }
+        } else { lines.append("Local history database: unavailable") }
+        do {
+            try Task.checkCancellation()
+            let status = try await checkAccountStatus()
+            lines.append("Account status: \(status.rawValue) (available=1)")
+            guard status == .available, let container, let database else {
+                lines.append("Cloud inventory: unavailable; account is not ready")
+                return lines.joined(separator: "\n")
+            }
+            lines.append("Resolved container: \(container.containerIdentifier ?? "unknown")")
+            let generation = try transferGeneration()
+            // CloudKit's user record is scoped to the container. The hash lets
+            // two reports be compared without exposing the actual identifier.
+            let userID = try await container.userRecordID()
+            try checkTransferAllowed(generation: generation)
+            lines.append("Account fingerprint: \(SyncDiagnostics.fingerprint(userID.recordName))")
+            let inventory = SyncCloudInventory()
+            let operation = inventory.makeOperation(zoneID: Self.zoneID)
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    operation.fetchRecordZoneChangesResultBlock = { [weak operation] result in
+                        if let operation { self.finished(operation) }
+                        continuation.resume(with: result)
+                    }
+                    do { try self.add(operation, to: database, generation: generation) }
+                    catch { continuation.resume(throwing: error) }
+                    if Task.isCancelled { operation.cancel() }
+                }
+            } onCancel: { operation.cancel() }
+            try checkTransferAllowed(generation: generation)
+            lines += SyncDiagnostics.comparisonLines(local: local, cloudIDs: try inventory.result())
+        } catch {
+            lines.append("Cloud inventory failed: \(SyncDiagnostics.errorSummary(error))")
+            lines.append("A failed scan is not a zero cloud count. History and download checkpoint are unchanged.")
+        }
+        lines.append("Compare container, environment and account fingerprint on both devices first. Then compare cloud records missing locally and local records absent from cloud. Clipboard content and raw IDs are excluded.")
+        return lines.joined(separator: "\n")
+    }
+
+    private var diagnosticEnvironment: String {
+        #if os(macOS)
+        guard let task = SecTaskCreateFromSelf(nil),
+              let environment = SecTaskCopyValueForEntitlement(task, "com.apple.developer.icloud-container-environment" as CFString, nil) as? String else {
+            return "Unavailable in signed entitlements"
+        }
+        return environment + " (signed entitlement)"
+        #else
+        return cloudKitProvisioned
+            ? "Production requested by release configuration (runtime entitlement is not inspectable on iOS)"
+            : "Unavailable in this build"
+        #endif
+    }
+
     // MARK: - Token Persistence
     
     /// Resets the sync state (clears token, forces full re-sync).

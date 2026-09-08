@@ -296,6 +296,53 @@ final class PastaIOSUITests: PastaUITestCase {
         XCTAssertEqual(app.switches["settings.iCloudConsent"].firstMatch.value as? String, "0", "Reset must not grant sync consent")
     }
 
+    func testSyncDiagnosticsWorksOfflineAndKeepsHistoryAndConsentUnchanged() {
+        let privateContent = "PrivateDiagnosticHistory\(UUID().uuidString.prefix(8))"
+        launchApp(pasteboard: privateContent)
+        waitForMainUI()
+        openTab("Settings", expecting: "settings.list")
+        let diagnostics = element("settings.syncDiagnostics")
+        revealSettingsRow(diagnostics)
+        XCTAssertTrue(diagnostics.isHittable, "Diagnostics must remain available without iCloud sync consent")
+        diagnostics.tap()
+
+        let report = element("syncDiagnostics.report")
+        XCTAssertTrue(report.waitForExistence(timeout: Self.uiTimeout), "Diagnostics report missing in the unprovisioned simulator")
+        let copy = app.buttons["syncDiagnostics.copy"].firstMatch
+        let collectionFinished = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "enabled == true"), object: copy
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [collectionFinished], timeout: Self.uiTimeout), .completed)
+        XCTAssertTrue(report.label.contains("iCloud.com.pasta.ios"), "Report must identify the shared CloudKit container")
+        XCTAssertFalse(report.label.contains(privateContent), "Diagnostics must exclude clipboard contents")
+        XCTAssertTrue(copy.isHittable, "Copy Report must be reachable without scrolling through the report")
+        let refresh = app.buttons["syncDiagnostics.refresh"].firstMatch
+        XCTAssertTrue(refresh.isHittable)
+        refresh.tap()
+        let refreshFinished = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "enabled == true"), object: copy
+        )
+        XCTAssertEqual(XCTWaiter().wait(for: [refreshFinished], timeout: Self.uiTimeout), .completed)
+        XCTAssertFalse(report.label.contains(privateContent))
+
+        let done = app.buttons["syncDiagnostics.done"].firstMatch
+        XCTAssertTrue(done.isHittable)
+        done.tap()
+        XCTAssertTrue(waitForDisappearance(of: done), "Done must dismiss diagnostics")
+
+        // Reopening captures any new pasteboard text. A second entry would
+        // expose an accidental report copy or clipboard replacement on open.
+        app.terminate()
+        launchApp(resetState: false)
+        waitForMainUI()
+        openTab("History", expecting: "history.list")
+        XCTAssertTrue(app.staticTexts[privateContent].firstMatch.waitForExistence(timeout: Self.uiTimeout))
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertEqual(app.switches["settings.iCloudConsent"].firstMatch.value as? String, "0", "Diagnostics must not grant sync consent")
+        revealSettingsRow(element("settings.entryCount"))
+        XCTAssertEqual(element("settings.entryCount").label, "1", "Diagnostics must retain history and leave the pasteboard unchanged")
+    }
+
     func testSettingsRendersItsSections() {
         launchApp()
         waitForMainUI()

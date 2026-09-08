@@ -425,6 +425,7 @@ jobs:
           node scripts/verify-ios-release-notes.mjs "$APP_PATH" "$VERSION" "$BUILD_NUMBER" "$(git rev-parse HEAD)"
 
           codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/archive-entitlements.plist"
+          python3 scripts/ci-verify-cloudkit-entitlements.py "$RUNNER_TEMP/archive-entitlements.plist"
           CONTAINER="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-identifiers:0' "$RUNNER_TEMP/archive-entitlements.plist" 2>/dev/null || true)"
           [ "$CONTAINER" = "$ICLOUD_CONTAINER" ] || { echo "::error::iCloud container mismatch in archive: expected $ICLOUD_CONTAINER, got '${CONTAINER:-missing}'"; exit 1; }
 
@@ -528,6 +529,7 @@ jobs:
           node scripts/verify-ios-release-notes.mjs "$APP_PATH" "$VERSION" "$BUILD_NUMBER" "$(git rev-parse HEAD)"
           codesign --verify --verbose=2 "$APP_PATH"
           codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/ipa-entitlements.plist"
+          python3 scripts/ci-verify-cloudkit-entitlements.py "$RUNNER_TEMP/ipa-entitlements.plist"
           APS="$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' "$RUNNER_TEMP/ipa-entitlements.plist" 2>/dev/null || echo missing)"
           if [ "$APS" != "production" ]; then
             echo "::warning::aps-environment is '$APS' in the exported IPA; App Store builds are expected to carry 'production'. Check the App Store profile grants Push Notifications."

@@ -167,6 +167,10 @@ final class AppState: ObservableObject {
         }
     }
 
+    func syncDiagnosticReport(syncManager: SyncManager) async -> String {
+        await syncManager.diagnosticReport(localDatabase: database)
+    }
+
     func resetSync(syncManager: SyncManager) async {
         guard !isResettingSync else { return }
         isResettingSync = true

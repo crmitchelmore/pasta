@@ -1,10 +1,12 @@
 import SwiftUI
 import PastaSync
+import UIKit
 
 struct SettingsView: View {
     @EnvironmentObject var syncManager: SyncManager
     @EnvironmentObject var appState: AppState
     @State private var isConfirmingReset = false
+    @State private var isShowingDiagnostics = false
 
     var body: some View {
         List {
@@ -17,12 +19,17 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .alert("Reset iCloud Sync?", isPresented: $isConfirmingReset) {
             Button("Cancel", role: .cancel) {}
-            Button("Reset Sync", role: .destructive) {
+            Button("Reset Sync") {
                 Task { await appState.resetSync(syncManager: syncManager) }
             }
             .accessibilityIdentifier("settings.confirmResetSync")
         } message: {
             Text("Your local history and iCloud data are kept. Pasta will download iCloud history again when sync is enabled and connected.")
+        }
+        .sheet(isPresented: $isShowingDiagnostics) {
+            SyncDiagnosticsSheet {
+                await appState.syncDiagnosticReport(syncManager: syncManager)
+            }
         }
     }
 
@@ -67,6 +74,13 @@ struct SettingsView: View {
             .disabled(syncIsBusy)
             .accessibilityIdentifier("settings.resetSync")
 
+            Button {
+                isShowingDiagnostics = true
+            } label: {
+                Label("Sync Diagnostics…", systemImage: "stethoscope")
+            }
+            .accessibilityIdentifier("settings.syncDiagnostics")
+
             if let lastSync = syncManager.lastSyncDate {
                 HStack {
                     Label("Last Synced", systemImage: "arrow.triangle.2.circlepath")
@@ -77,7 +91,7 @@ struct SettingsView: View {
             }
 
             HStack {
-                Label("Entries", systemImage: "doc.on.doc")
+                Label("Local Entries", systemImage: "doc.on.doc")
                 Spacer()
                 Text("\(appState.entries.count)")
                     .foregroundStyle(.secondary)
@@ -156,4 +170,70 @@ struct SettingsView: View {
         }
     }
 
+}
+
+/// Diagnostics never grant sync consent or start a sync; only Copy writes to the clipboard.
+private struct SyncDiagnosticsSheet: View {
+    let collectReport: @MainActor () async -> String
+    @Environment(\.dismiss) private var dismiss
+    @State private var report = ""
+    @State private var isLoading = true
+    @State private var refreshID = 0
+    @State private var didCopy = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Compare this report with your other device. Clipboard contents are excluded; local and iCloud history are unchanged.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+                if isLoading {
+                    ProgressView("Checking iCloud and local history…")
+                        .accessibilityIdentifier("syncDiagnostics.progress")
+                }
+
+                ScrollView {
+                    Text(report)
+                        .font(.system(.footnote, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("syncDiagnostics.report")
+                }
+
+                HStack {
+                    Button("Refresh") {
+                        isLoading = true
+                        refreshID += 1
+                    }
+                    .accessibilityIdentifier("syncDiagnostics.refresh")
+                    Spacer()
+                    Button(didCopy ? "Copied" : "Copy Report") {
+                        UIPasteboard.general.string = report
+                        didCopy = true
+                    }
+                    .disabled(report.isEmpty)
+                    .accessibilityIdentifier("syncDiagnostics.copy")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isLoading)
+            }
+            .padding()
+            .navigationTitle("Sync Diagnostics")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .accessibilityIdentifier("syncDiagnostics.done")
+                }
+            }
+            .task(id: refreshID) {
+                didCopy = false
+                let refreshedReport = await collectReport()
+                guard !Task.isCancelled else { return }
+                report = refreshedReport
+                isLoading = false
+            }
+        }
+    }
 }

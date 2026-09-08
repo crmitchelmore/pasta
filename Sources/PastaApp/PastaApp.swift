@@ -44,6 +44,10 @@ struct PastaApp: App {
                 syncedCount: {
                     (try? BackgroundService.shared.database.syncedCount()) ?? 0
                 },
+                syncDiagnosticReport: {
+                    let service = BackgroundService.shared
+                    return await service.syncManager.diagnosticReport(localDatabase: service.database)
+                },
                 openWalkthrough: {
                     NotificationCenter.default.post(name: .openOnboarding, object: nil)
                 },

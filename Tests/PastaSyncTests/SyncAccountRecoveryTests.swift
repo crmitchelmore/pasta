@@ -5,6 +5,66 @@ import XCTest
 
 @MainActor
 final class SyncAccountRecoveryTests: XCTestCase {
+    func testPartialUploadPreservesPendingImageAndCheckpointThenConfirmedRetryDownloads() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("partial-upload.sqlite")
+        let database = try DatabaseManager(databaseURL: url)
+        let image = ClipboardEntry(
+            content: "offline image", contentType: .image,
+            rawData: Data([1, 2, 3]), imagePath: "/local/preserved-image.png",
+            metadata: "local metadata"
+        )
+        let text = ClipboardEntry(content: "successfully uploaded text", contentType: .text)
+        try database.insertBatch([image, text], deduplicate: false)
+        let storedImage = try database.fetch(id: image.id)
+        try database.applySyncChanges(modified: [], deleted: [], checkpoint: Data([1]))
+        let staleImage = ClipboardEntry(id: image.id, content: image.content, contentType: .image)
+        let stalePull = SyncPullService(fetch: { _ in
+            XCTFail("Partial upload must stop before downloading a stale same-ID image")
+            return SyncChangeBatch(modified: [staleImage], deleted: [], token: Data([2]))
+        })
+        let recovery = SyncAccountRecovery()
+
+        await recovery.run(checkAccount: { .available }, prepare: {}, sync: {
+            _ = try await database.backfillUnsynced { pending, acknowledge in
+                acknowledge([text.id])
+                // The transport can skip failed asset staging and still return
+                // a success count. Durable acknowledgements decide completion.
+                return pending.count
+            }
+            try await stalePull.pull(into: database)
+        })
+
+        let reopened = try DatabaseManager(databaseURL: url)
+        XCTAssertEqual(try reopened.fetch(id: image.id), storedImage)
+        XCTAssertEqual(try reopened.fetchUnsynced().map(\.id), [image.id])
+        XCTAssertEqual(try reopened.loadSyncChangeToken(), Data([1]))
+        XCTAssertEqual(recovery.availability, .available)
+        XCTAssertEqual(recovery.errorMessage, PendingSyncUploadsError(count: 1).localizedDescription)
+
+        let remote = ClipboardEntry(content: "received after upload recovery", contentType: .text)
+        let confirmedPull = SyncPullService(fetch: { token in
+            XCTAssertEqual(token, Data([1]))
+            return SyncChangeBatch(modified: [image, remote], deleted: [], token: Data([2]))
+        })
+        await recovery.run(checkAccount: { .available }, prepare: {}, sync: {
+            _ = try await database.backfillUnsynced { pending, acknowledge in
+                XCTAssertEqual(pending.map(\.id), [image.id])
+                acknowledge(pending.map(\.id))
+                return pending.count
+            }
+            try await confirmedPull.pull(into: database)
+        })
+
+        XCTAssertNil(recovery.errorMessage)
+        XCTAssertEqual(try reopened.unsyncedCount(), 0)
+        XCTAssertEqual(try reopened.fetch(id: image.id)?.rawData, image.rawData)
+        XCTAssertEqual(try reopened.fetch(id: image.id)?.imagePath, image.imagePath)
+        XCTAssertEqual(try reopened.fetch(id: remote.id)?.content, remote.content)
+        XCTAssertEqual(try reopened.loadSyncChangeToken(), Data([2]))
+    }
+
     func testCaptureUploadFailureReplacesSuccessfulSyncFeedbackWithPendingRetry() async throws {
         let database = try DatabaseManager.inMemory()
         let recovery = SyncAccountRecovery()
