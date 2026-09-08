@@ -31,5 +31,6 @@ public struct SnippetKeywordMatcher {
 }
 
 public extension Notification.Name {
+    static let openSnippetPicker = Notification.Name("pasta.openSnippetPicker")
     static let snippetsDidChange = Notification.Name("pasta.snippetsDidChange")
 }

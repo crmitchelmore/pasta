@@ -145,7 +145,6 @@ public struct QuickSearchView: View {
             }
         }
         .onAppear {
-            manager.prepareForSearch()
             isSearchFocused = true
         }
         .onChange(of: manager.query) { _, _ in

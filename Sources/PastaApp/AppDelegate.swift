@@ -27,7 +27,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PastaLogger.app.info("Pasta app initializing...")
 
         // Check if running from DMG and offer to move to Applications
-        checkAndOfferMoveToApplications()
+        if Bundle.main.bundleIdentifier != "com.pasta.clipboard.development" {
+            checkAndOfferMoveToApplications()
+        }
 
         // Register default values for settings
         UserDefaults.standard.register(defaults: [
@@ -58,6 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: .openSettings,
             object: nil
         )
+
+        NotificationCenter.default.addObserver(self, selector: #selector(openSnippetPicker), name: .openSnippetPicker, object: nil)
 
         // Start background clipboard monitoring (runs even when panel is closed)
         BackgroundService.shared.start()

@@ -5,6 +5,11 @@ import PastaCore
 import PastaUI
 
 extension AppDelegate {
+    @objc func openSnippetPicker() {
+        panelController?.hide()
+        quickSearchController?.show(initialQuery: "!snippet ")
+    }
+
     func setupQuickSearch() {
         quickSearchController?.setContent { [weak self] in
             let isDockOnly = UserDefaults.standard.string(forKey: AppDelegate.Defaults.appMode) == AppDelegate.AppMode.dock.rawValue

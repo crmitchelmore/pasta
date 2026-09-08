@@ -93,7 +93,7 @@ struct GeneralSettingsTab: View {
 
             Section {
                 Toggle("Send anonymous crash reports", isOn: $crashReportingEnabled)
-                Text("Off by default. Sends crash reports and minimal performance traces to Sentry — never clipboard contents. Takes effect after restarting Pasta.")
+                Text("Off by default. Sends crash reports with stack traces and app version to Sentry — never clipboard contents. Takes effect after restarting Pasta.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

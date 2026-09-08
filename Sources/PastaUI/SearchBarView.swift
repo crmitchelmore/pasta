@@ -10,6 +10,7 @@ public struct SearchBarView: View {
     private let resultCount: Int
     private let availableContentTypes: [ContentType]
     private let onOpenSettings: () -> Void
+    private let onOpenSnippets: (() -> Void)?
     private let searchFocused: FocusState<Bool>.Binding
 
     @State private var isFieldFocused: Bool = false
@@ -22,6 +23,7 @@ public struct SearchBarView: View {
         availableContentTypes: [ContentType] = [],
         showContentTypePicker: Binding<Bool> = .constant(false),
         onOpenSettings: @escaping () -> Void,
+        onOpenSnippets: (() -> Void)? = nil,
         searchFocused: FocusState<Bool>.Binding
     ) {
         _query = query
@@ -30,6 +32,7 @@ public struct SearchBarView: View {
         self.availableContentTypes = availableContentTypes
         _showContentTypePicker = showContentTypePicker
         self.onOpenSettings = onOpenSettings
+        self.onOpenSnippets = onOpenSnippets
         self.searchFocused = searchFocused
     }
 
@@ -58,6 +61,18 @@ public struct SearchBarView: View {
                 .background(fieldBackground)
                 .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
                 .animation(chromeAnimation, value: isFieldFocused)
+
+            if let onOpenSnippets {
+                Button(action: onOpenSnippets) {
+                    Image(systemName: "text.badge.plus")
+                        .font(.system(size: 15, weight: .medium))
+                        .frame(width: Self.fieldHeight, height: Self.fieldHeight)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help("Paste a snippet")
+                .accessibilityLabel("Snippets")
+            }
 
             Button(action: onOpenSettings) {
                 Image(systemName: "gear")

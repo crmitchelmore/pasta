@@ -6,7 +6,10 @@ MODE="${1:-run}"
 APP_DIR="$ROOT_DIR/.build/development/Pasta Development.app"
 BINARY="$APP_DIR/Contents/MacOS/PastaDevelopment"
 # Only stop this checkout's development bundle, never the installed release.
-pkill -f "$BINARY" >/dev/null 2>&1 || true
+if [ -d "$APP_DIR/Contents/MacOS" ]; then
+  RUNNING_BINARY="$(cd "$APP_DIR/Contents/MacOS" && pwd -P)/PastaDevelopment"
+  pkill -f "$RUNNING_BINARY" >/dev/null 2>&1 || true
+fi
 swift build --force-resolved-versions
 BUILD_DIR="$(swift build --show-bin-path)"
 rm -rf "$APP_DIR"
