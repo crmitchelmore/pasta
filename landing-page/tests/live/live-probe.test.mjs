@@ -1,17 +1,7 @@
-// ADVISORY live probe of the deployed site. Requires network access.
-//
-// Not part of the offline suite: it runs only on pushes to main and manual
-// dispatches, with `continue-on-error: true` in CI, because a CDN hiccup or a
-// GitHub outage must never block a merge. Treat a red run as a prompt to look,
-// not as a broken build.
-//
-// Checks:
-//   - https://pasta-app.com/ and /appcast.xml respond 200 with the expected
-//     security/cache headers from _headers.
-//   - /download redirects (302) to the GitHub "latest release" page.
-//   - The live appcast parses, its top enclosure DMG URL answers 200/302, and
-//     its top version equals the newest v* tag in this checkout - i.e. the
-//     release workflow actually regenerated and deployed the feed.
+// Live publication/monitor probes fail closed. CI may run them advisory,
+// while standalone deployment and the six-hour monitor require success.
+// These probes check site headers, download routing, feed and asset reachability,
+// and compare against the newest published release, never an unpublished tag.
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -70,21 +60,13 @@ test('live: appcast top version equals the newest PUBLISHED GitHub release', asy
   // endpoint is exactly that definition.
   const api = await fetch('https://api.github.com/repos/crmitchelmore/pasta/releases/latest', {
     headers: { 'user-agent': UA, accept: 'application/vnd.github+json' },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   });
-  let published = null;
-  if (api.ok) {
-    const body = await api.json();
-    published = String(body.tag_name ?? '').replace(/^v/, '');
-  }
+  assert.equal(api.status, 200, 'Cannot verify published release: GitHub releases/latest unavailable');
+  const body = await api.json();
+  const published = String(body.tag_name ?? '').replace(/^v/, '');
+  assert.match(published, /^\d+\.\d+\.\d+$/, 'Invalid published release version');
   const latestTag = latestGitTagVersion();
-  if (!published) {
-    t.diagnostic(`GitHub releases/latest unavailable (HTTP ${api.status}); falling back to the newest v* tag`);
-    published = latestTag;
-  }
-  if (!published) {
-    t.skip('no published release or v* tag reference available');
-    return;
-  }
 
   const response = await probe(`${ORIGIN}/appcast.xml`, { method: 'GET' });
   assert.equal(response.status, 200);
