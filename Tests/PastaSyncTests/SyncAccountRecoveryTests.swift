@@ -17,6 +17,7 @@ final class SyncAccountRecoveryTests: XCTestCase {
         )
         let text = ClipboardEntry(content: "successfully uploaded text", contentType: .text)
         try database.insertBatch([image, text], deduplicate: false)
+        let storedImage = try database.fetch(id: image.id)
         try database.applySyncChanges(modified: [], deleted: [], checkpoint: Data([1]))
         let staleImage = ClipboardEntry(id: image.id, content: image.content, contentType: .image)
         let stalePull = SyncPullService(fetch: { _ in
@@ -36,7 +37,7 @@ final class SyncAccountRecoveryTests: XCTestCase {
         })
 
         let reopened = try DatabaseManager(databaseURL: url)
-        XCTAssertEqual(try reopened.fetch(id: image.id), image)
+        XCTAssertEqual(try reopened.fetch(id: image.id), storedImage)
         XCTAssertEqual(try reopened.fetchUnsynced().map(\.id), [image.id])
         XCTAssertEqual(try reopened.loadSyncChangeToken(), Data([1]))
         XCTAssertEqual(recovery.availability, .available)
