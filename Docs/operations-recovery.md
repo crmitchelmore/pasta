@@ -86,8 +86,10 @@ not proof of an installed update.
 
 ## Monitoring and Sentry evidence
 
-The production monitor runs every six hours; GitHub workflow notifications are
-the configured alert mechanism. Its workflow owner must confirm receipt of a
+The production monitor runs every six hours. A failure creates or updates one
+incident issue assigned to the repository owner, with the failing run and
+recovery steps; a healthy probe closes it. This avoids relying on the scheduled
+actor's personal email settings. The owner must still confirm receipt of a
 controlled failure notification. Keep synthetic failure tests in a test branch
 or staging environment; do not break production just to test alerting.
 
