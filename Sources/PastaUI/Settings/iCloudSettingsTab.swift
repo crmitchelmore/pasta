@@ -17,6 +17,8 @@ struct iCloudSettingsTab: View {
     @State private var iCloudAvailable: Bool? = nil
     @State private var isResetting = false
     @State private var displayedSyncedCount: Int = 0
+    let diagnosticReport: @MainActor () async -> String
+    @State private var isShowingDiagnostics = false
 
     var body: some View {
         Form {
@@ -34,16 +36,23 @@ struct iCloudSettingsTab: View {
                     }
                 }
 
-                LabeledContent("Synced Entries") {
-                    if syncManager.syncState == .syncing && syncManager.totalEntriesToSync > 0 {
+                LabeledContent("Local Entries Marked Synced") {
+                    Text("\(displayedSyncedCount)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                if syncManager.syncState == .syncing && syncManager.totalEntriesToSync > 0 {
+                    LabeledContent("Upload Progress") {
                         Text("\(syncManager.syncedEntryCount) / \(syncManager.totalEntriesToSync)")
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
-                    } else {
-                        Text("\(displayedSyncedCount)")
-                            .foregroundStyle(.secondary)
                     }
                 }
+
+                Text("The entry count describes history on this Mac. Open Sync Diagnostics to compare it with iCloud and your other devices.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } header: {
                 Label("Status", systemImage: "icloud")
             }
@@ -124,8 +133,23 @@ struct iCloudSettingsTab: View {
 
             Section {
                 HStack {
+                    Text("Inspect iCloud Connection")
                     Spacer()
-                    Button("Reset Sync…", role: .destructive) {
+                    Button("Sync Diagnostics…") {
+                        isShowingDiagnostics = true
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("settings.syncDiagnostics")
+                }
+
+                Text("View connection details and history counts without changing local or iCloud history.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Spacer()
+                    Button("Reset Sync…") {
                         isResetting = true
                     }
                     .buttonStyle(.bordered)
@@ -134,11 +158,11 @@ struct iCloudSettingsTab: View {
                     Spacer()
                 }
 
-                Text("Clears the sync token and forces a full re-sync from iCloud.")
+                Text("Reset Sync keeps all local and iCloud history and downloads iCloud history again on the next sync.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {
-                Label("Danger Zone", systemImage: "exclamationmark.triangle")
+                Label("Troubleshooting", systemImage: "wrench.and.screwdriver")
             }
         }
         .formStyle(.grouped)
@@ -154,12 +178,15 @@ struct iCloudSettingsTab: View {
             let status = try? await syncManager.checkAccountStatus()
             iCloudAvailable = (status == .available)
         }
+        .sheet(isPresented: $isShowingDiagnostics) {
+            SyncDiagnosticsSheet(collectReport: diagnosticReport)
+        }
         .confirmationDialog(
-            "Reset sync data?",
+            "Reset iCloud Sync?",
             isPresented: $isResetting,
             titleVisibility: .visible
         ) {
-            Button("Reset Sync", role: .destructive) {
+            Button("Reset Sync") {
                 do {
                     try resetSync?()
                     syncError = nil
@@ -169,7 +196,7 @@ struct iCloudSettingsTab: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This clears the sync token and forces a full re-download from iCloud on next sync.")
+            Text("All local history and iCloud data are kept. Pasta will download iCloud history again on the next sync.")
         }
     }
 

@@ -12,7 +12,8 @@ PastaSync provides bidirectional CloudKit sync between macOS Pasta and companion
 - **Delta Sync**: Incremental updates using CloudKit change tokens
 - **Asset Handling**: Images and large data as CKAssets
 - **Batch Operations**: Handles large clipboard histories efficiently
-- **Push Notifications**: CloudKit subscriptions for near-real-time sync
+- **Automatic Receiving**: macOS uploads pending history and downloads at launch and every 60 seconds while running; iOS syncs when it becomes active
+- **Diagnostics**: Read-only account fingerprints, signed/configured environment, local/cloud membership counts and redacted transport errors
 - **Observable**: SwiftUI-friendly with `@Published` state properties
 
 ## Usage
@@ -123,7 +124,7 @@ Maps between `ClipboardEntry` domain models and CloudKit `CKRecord`:
 ## Configuration
 
 ### Container Identifier
-Default: `iCloud.com.pasta.clipboard`
+Both app hosts explicitly use `iCloud.com.pasta.ios` with the private database and `PastaZone`. Production releases request the `Production` environment. A bare `SyncManager()` uses CloudKit’s default container; production hosts must pass their shared identifier.
 
 Override in initialization:
 ```swift
@@ -153,6 +154,14 @@ CloudKit errors are propagated as-is. Common scenarios:
 - **Assets**: Only large data (images) use CKAssets
 - **Batching**: Prevents CloudKit timeout on large syncs
 - **Quality of Service**: `.utility` for background, `.userInitiated` for pulls
+
+## Diagnosing device mismatches
+
+Open Settings → iCloud → Sync Diagnostics on Mac, or Settings → Sync Diagnostics on iOS. Compare container, environment and account fingerprint first, then the fresh cloud record count and the counts missing on either side. The iOS environment is labelled as the requested release configuration because iOS does not expose a public runtime entitlement lookup.
+
+The inventory requests only system record metadata, never clipboard fields or assets, and never changes history or the saved download checkpoint. A scan failure is shown as an error, not an empty cloud. Local “marked synced” counts are bookkeeping, not server totals. Reports can be refreshed or copied explicitly. Counts are snapshots and can change while another device syncs.
+
+Reset Sync clears only the download checkpoint. It preserves local history and cloud records; it does not re-upload rows already marked synced or delete/recreate the zone. Both apps pause the download if an upload leaves pending rows, including unreadable image assets, so an older cloud version cannot replace the pending local payload. Do not reset sync flags indiscriminately to repair a mismatch: stale rows could overwrite cloud records. Establish which records are missing first.
 
 ## Testing
 

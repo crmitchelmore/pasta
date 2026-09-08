@@ -2,6 +2,16 @@ import Foundation
 import GRDB
 
 extension DatabaseManager {
+    /// A consistent, content-free snapshot for comparing device/cloud membership.
+    public func syncDiagnosticSnapshot() throws -> SyncLocalSnapshot {
+        try dbWriter.read { db in
+            let ids = try String.fetchAll(db, sql: "SELECT id FROM clipboard_entries")
+            let pending = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM clipboard_entries WHERE isSynced = 0") ?? 0
+            let hasCheckpoint = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM sync_checkpoints WHERE name = 'cloudkit')") ?? false
+            return SyncLocalSnapshot(recordIDs: Set(ids.map { $0.uppercased() }), pendingCount: pending, hasCheckpoint: hasCheckpoint)
+        }
+    }
+
     /// Atomically applies downloaded changes by record identity, without the
     /// content-hash deduplication or copy-count increment used for local copies.
     /// Replaying a batch is safe, and deletion wins for IDs present in both lists.
@@ -115,14 +125,21 @@ extension DatabaseManager {
     /// The uploader controls batching and calls `onBatchSynced` only after a
     /// batch is durably stored remotely. If a later batch fails, earlier batches
     /// remain marked while the rest stay pending for the next retry.
+    /// A partial return (including failed asset staging) also throws while any
+    /// durable row remains pending, so callers cannot pull older cloud payloads
+    /// over local changes that have not reached the server.
     @discardableResult
     public func backfillUnsynced(using uploader: UnsyncedEntryUploader) async throws -> Int {
         let pending = try fetchUnsynced()
         guard !pending.isEmpty else { return 0 }
 
-        return try await uploader(pending) { [self] ids in
+        let uploaded = try await uploader(pending) { [self] ids in
             try? markSynced(ids: ids)
         }
+        try Task.checkCancellation()
+        let remaining = try unsyncedCount()
+        guard remaining == 0 else { throw PendingSyncUploadsError(count: remaining) }
+        return uploaded
     }
 
     /// Marks entries as synced to iCloud.
@@ -174,5 +191,23 @@ extension DatabaseManager {
                 sql: "SELECT COUNT(*) FROM \(ClipboardEntry.databaseTableName) WHERE isSynced = 1"
             ) ?? 0
         }
+    }
+}
+
+public struct SyncLocalSnapshot: Sendable {
+    public let recordIDs: Set<String>
+    public let pendingCount: Int
+    public let hasCheckpoint: Bool
+}
+
+/// Safe, content-free guidance shared by macOS and iOS sync orchestration.
+public struct PendingSyncUploadsError: LocalizedError, Equatable, Sendable {
+    public let count: Int
+
+    public init(count: Int) { self.count = count }
+
+    public var errorDescription: String? {
+        let records = count == 1 ? "record is" : "records are"
+        return "\(count) local \(records) still waiting to upload. Downloads are paused to preserve your history. Open Sync Diagnostics, then retry sync."
     }
 }

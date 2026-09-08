@@ -1,5 +1,6 @@
 import CloudKit
 import Foundation
+import PastaCore
 
 /// Rechecks the account on every attempt, including after an offline launch.
 /// The only injected boundaries are account lookup and the sync operations;
@@ -95,6 +96,8 @@ public final class SyncAccountRecovery {
             case .missingEntitlement: availability = .unavailableBuild
             }
             errorMessage = availability.guidance
+        } catch let error as PendingSyncUploadsError {
+            errorMessage = error.localizedDescription
         } catch {
             if let cloudError = error as? CKError, cloudError.code == .notAuthenticated {
                 availability = .noAccount

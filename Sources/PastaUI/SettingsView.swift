@@ -56,12 +56,14 @@ public struct SettingsView: View {
     private let resetSync: (@MainActor () throws -> Void)?
     private let syncNow: (@MainActor () async throws -> Void)?
     private let syncedCount: (() -> Int)?
+    private let syncDiagnosticReport: (@MainActor () async -> String)?
 
     public init(
         syncManager: SyncManager? = nil,
         syncNow: (@MainActor () async throws -> Void)? = nil,
         resetSync: (@MainActor () throws -> Void)? = nil,
         syncedCount: (() -> Int)? = nil,
+        syncDiagnosticReport: (@MainActor () async -> String)? = nil,
         openWalkthrough: (() -> Void)? = nil,
         checkForUpdates: (() -> Void)? = nil,
         automaticallyChecksForUpdates: Binding<Bool>? = nil
@@ -70,6 +72,7 @@ public struct SettingsView: View {
         self.syncNow = syncNow
         self.resetSync = resetSync
         self.syncedCount = syncedCount
+        self.syncDiagnosticReport = syncDiagnosticReport
         self.openWalkthrough = openWalkthrough
         self.checkForUpdates = checkForUpdates
         self.automaticallyChecksForUpdates = automaticallyChecksForUpdates
@@ -126,7 +129,10 @@ public struct SettingsView: View {
                     syncManager: syncManager,
                     syncNow: syncNow,
                     resetSync: resetSync,
-                    syncedCount: syncedCount ?? { 0 }
+                    syncedCount: syncedCount ?? { 0 },
+                    diagnosticReport: syncDiagnosticReport ?? {
+                        await syncManager.diagnosticReport(localDatabase: nil)
+                    }
                 )
                     .tabItem {
                         Label("iCloud", systemImage: "icloud")

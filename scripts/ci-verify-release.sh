@@ -13,7 +13,8 @@
 #   4. The DMG mounts; the app inside passes `spctl --assess --type execute`
 #      (Gatekeeper: Developer ID + notarization) and
 #      `codesign --verify --deep --strict`, and its CFBundleShortVersionString
-#      is <version> (and CFBundleVersion is sparkle:version).
+#      is <version> (and CFBundleVersion is sparkle:version). Signed CloudKit
+#      entitlements must grant iCloud.com.pasta.ios in Production.
 #   5. The enclosure's sparkle:edSignature is a valid Ed25519 signature of the
 #      downloaded DMG under the SUPublicEDKey baked into the shipped app
 #      (scripts/ci-verify-eddsa.sh) — otherwise every installed copy silently
@@ -150,6 +151,10 @@ echo "$SPCTL_OUT" | grep -q "accepted" || fail "spctl did not report 'accepted':
 
 echo "    codesign --verify --deep --strict:"
 codesign --verify --deep --strict --verbose=2 "$APP_IN_DMG" || fail "codesign --verify --deep --strict failed on the shipped app"
+codesign -d --entitlements - --xml "$APP_IN_DMG" > "$VERIFY_TMP/app-entitlements.plist" \
+  || fail "could not extract signed CloudKit entitlements from the shipped app"
+python3 "$SCRIPT_DIR/ci-verify-cloudkit-entitlements.py" "$VERIFY_TMP/app-entitlements.plist" \
+  || fail "the shipped app does not target Pasta's shared Production CloudKit container"
 
 INFO="$APP_IN_DMG/Contents/Info.plist"
 APP_SHORT=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO")

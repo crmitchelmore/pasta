@@ -30,6 +30,10 @@ extension AppDelegate {
                 syncedCount: {
                     (try? BackgroundService.shared.database.syncedCount()) ?? 0
                 },
+                syncDiagnosticReport: {
+                    let service = BackgroundService.shared
+                    return await service.syncManager.diagnosticReport(localDatabase: service.database)
+                },
                 openWalkthrough: { [weak self] in
                     self?.panelController?.show()
                     NotificationCenter.default.post(name: .openOnboarding, object: nil)

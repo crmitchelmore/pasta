@@ -35,6 +35,7 @@ final class BackgroundService: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var pruneTimer: Timer?
     private var refreshTask: Task<Void, Never>?
+    private let syncReceiver = SyncReceiveScheduler()
     /// Last pause state applied to the monitors, so the (debounced) defaults
     /// observer only starts/stops them when the setting actually flipped.
     private var monitorsPausedBySetting = UserDefaults.standard.bool(forKey: Defaults.pauseMonitoring)
@@ -141,6 +142,7 @@ final class BackgroundService: ObservableObject {
     }
     
     func start() {
+        setupSync()
         let isPaused = UserDefaults.standard.bool(forKey: Defaults.pauseMonitoring)
         if isPaused {
             PastaLogger.app.info("Clipboard monitoring is paused by user setting")
@@ -169,41 +171,49 @@ final class BackgroundService: ObservableObject {
         CIReadiness.signal(entryCount: entries.count)
     }
     
-    private var isSyncInProgress = false
-
     /// Settings uses this single operation in both window entry points.
     /// Publish a fresh history window only after downloaded changes commit.
     func syncNow() async throws {
-        guard !isSyncInProgress else { throw SyncPullService.PullError.alreadyInProgress }
-        isSyncInProgress = true
-        defer { isSyncInProgress = false }
+        try await syncReceiver.run {
+            try await synchronizeHistory()
+        }
+    }
+
+    /// Upload pending local rows before applying cloud versions of those IDs.
+    /// Automatic attempts use the same order as manual sync: receiving first
+    /// could overwrite an offline local change or image with its older cloud row.
+    private func synchronizeHistory() async throws {
+        try Task.checkCancellation()
         try await syncManager.setupZone()
         let database = database
         let syncManager = syncManager
         _ = try await database.backfillUnsynced { entries, onBatchSynced in
             try await syncManager.pushEntries(entries, onBatchSynced: onBatchSynced)
         }
+        try Task.checkCancellation()
         try await syncManager.pullChanges(into: database)
+        try Task.checkCancellation()
         refresh()
     }
 
     private func setupSync() {
-        Task {
-            do {
-                let status = try await syncManager.checkAccountStatus()
-                guard status == .available else {
-                    PastaLogger.app.info("iCloud not available, sync disabled")
-                    return
-                }
-                try await syncManager.setupZone()
-                PastaLogger.app.info("CloudKit sync initialised")
-            } catch {
-                PastaLogger.logError(error, logger: PastaLogger.app, context: "CloudKit sync setup failed")
+        guard !CIReadiness.isEnabled else { return }
+        syncReceiver.start(receive: { [weak self] in
+            guard let self else { return }
+            let status = try await self.syncManager.checkAccountStatus()
+            guard status == .available else {
+                PastaLogger.app.info("iCloud not available; receiving will retry automatically")
+                return
             }
-        }
+            try Task.checkCancellation()
+            try await self.synchronizeHistory()
+        }, onError: { error in
+            PastaLogger.logError(error, logger: PastaLogger.app, context: "CloudKit receive failed; retrying automatically")
+        })
     }
     
     func stop() {
+        syncReceiver.stop()
         clipboardMonitor.stop()
         screenshotMonitor.stop()
         refreshTask?.cancel()
