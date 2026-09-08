@@ -15,6 +15,7 @@ actor TailnetTestNetwork {
     var devices: [TailnetDevice] = []
     var offline: Set<String> = []
     var chunks = 0
+    var lastChunk: Data?
     var pauseNextChunk = false
     var pauseNextResponse: TailnetRequest.Operation?
     var paused: CheckedContinuation<Void, Never>?
@@ -29,6 +30,7 @@ actor TailnetTestNetwork {
         guard let engine = engines[target], !offline.contains(devices.first(where: { $0.address == target })?.id ?? "") else { throw URLError(.notConnectedToInternet) }
         if request.operation == .chunk {
             chunks += 1
+            lastChunk = request.bytes
             if pauseNextChunk {
                 pauseNextChunk = false
                 await withCheckedContinuation { continuation in
