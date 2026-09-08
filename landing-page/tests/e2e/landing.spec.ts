@@ -218,3 +218,23 @@ test.describe('accessibility', () => {
     expect(summary, JSON.stringify(summary, null, 2)).toEqual([]);
   });
 });
+
+test('release highlights and roadmap remain distinct and keyboard accessible', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('navigation').getByRole('link', { name: 'What’s cooking' }).click();
+  await expect(page).toHaveURL(/#whats-new$/);
+  const updates = page.locator('#whats-new');
+  await expect(updates.getByRole('link', { name: /1.6.2/ })).toHaveAttribute('href', `${REPO_URL}/releases/tag/v1.6.2`);
+  await expect(updates.getByRole('link', { name: /1.6.0/ })).toHaveAttribute('href', `${REPO_URL}/releases/tag/v1.6.0`);
+  const sharing = page.locator('#roadmap details').first();
+  await expect(sharing).not.toHaveAttribute('open');
+  await sharing.locator('summary').focus();
+  await page.keyboard.press('Enter');
+  await expect(sharing).toHaveAttribute('open', '');
+  await expect(sharing).toContainText('This isn’t available yet.');
+  await page.keyboard.press('Enter');
+  await expect(sharing).not.toHaveAttribute('open');
+  const shortcuts = page.locator('#shortcuts details');
+  await shortcuts.locator('summary').click();
+  await expect(shortcuts.getByText('Paste as plain text')).toBeVisible();
+});
