@@ -455,10 +455,16 @@ final class PastaIOSUITests: PastaUITestCase {
         launchApp(skipOnboarding: false, resetState: false)
         XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.launchTimeout))
         XCTAssertEqual(element("whatsNew.installedVersion").label, "Version 1.5.18 (141)")
-        // Drag from the navigation bar so the sheet dismisses, not the list.
+        // Start outside the list and drag across the window. A swipe confined
+        // to the navigation bar can end before the sheet dismissal threshold.
         let bar = app.navigationBars["What’s New"].firstMatch
-        bar.swipeDown()
-        XCTAssertTrue(waitForDisappearance(of: element("whatsNew.list")))
+        XCTAssertTrue(bar.waitForExistence(timeout: Self.uiTimeout), "What's New navigation bar missing")
+        XCTAssertTrue(bar.isHittable, "What's New navigation bar must be ready for the dismissal gesture")
+        let dragStart = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let dragEnd = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85))
+        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+        XCTAssertTrue(waitForDisappearance(of: element("whatsNew.list")),
+                      "Dragging the What's New sheet down must dismiss it")
         app.terminate()
         launchApp(skipOnboarding: false, resetState: false)
         waitForMainUI()
