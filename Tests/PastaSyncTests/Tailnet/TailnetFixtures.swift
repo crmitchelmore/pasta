@@ -16,6 +16,7 @@ actor TailnetTestNetwork {
     var offline: Set<String> = []
     var chunks = 0
     var pauseNextChunk = false
+    var pauseNextResponse: TailnetRequest.Operation?
     var paused: CheckedContinuation<Void, Never>?
     var pauseObserver: CheckedContinuation<Void, Never>?
     var breakAfterChunk: Int?
@@ -36,10 +37,18 @@ actor TailnetTestNetwork {
             }
             if let stop = breakAfterChunk, chunks > stop { throw URLError(.networkConnectionLost) }
         }
-        return await engine.handle(address: source, request: request)
+        let response = await engine.handle(address: source, request: request)
+        if pauseNextResponse == request.operation {
+            pauseNextResponse = nil
+            await withCheckedContinuation { continuation in
+                paused = continuation; pauseObserver?.resume(); pauseObserver = nil
+            }
+        }
+        return response
     }
     func setOffline(_ id: String, _ value: Bool) { if value { offline.insert(id) } else { offline.remove(id) } }
     func pauseOnChunk() { pauseNextChunk = true }
+    func pauseOnResponse(_ operation: TailnetRequest.Operation) { pauseNextResponse = operation }
     func waitForPause() async {
         if paused != nil { return }
         await withCheckedContinuation { pauseObserver = $0 }

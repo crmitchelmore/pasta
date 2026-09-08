@@ -86,11 +86,16 @@ actor TailnetEngine {
         catch { status = "Received-file cleanup needs attention. Check available storage and permissions." }
         guard enabled else { return }
         busy = true; defer { busy = false }
-        let run = generation
+        var run = generation
         do {
             let fresh = try await discover()
             guard enabled, generation == run else { return }
-            if inventory?.local.id != fresh.local.id { generation = UUID(); incoming.removeAll(); pending.removeAll(); outgoing.removeAll() }
+            if inventory?.local.id != fresh.local.id {
+                generation = UUID(); run = generation
+                preparation?.task.cancel()
+                for task in finalising.values { task.cancel() }
+                incoming.removeAll(); pending.removeAll(); outgoing.removeAll()
+            }
             inventory = fresh
             if listen, listeningAddress != fresh.local.address {
                 transport.stop()
@@ -98,15 +103,17 @@ actor TailnetEngine {
                     guard let self else { return TailnetResponse(status: "denied") }
                     return await self.handle(address: address, request: request)
                 }
+                guard enabled, generation == run else { transport.stop(); return }
                 listeningAddress = fresh.local.address
             }
             status = "Connected to Tailscale"
             var found: [TailnetDevice] = []
             // Only query Tailscale's visible peer set, never scan a subnet.
             for device in fresh.peers where device.online {
-                guard enabled else { return }
-                if let reply = try? await send(TailnetRequest(operation: .hello), device.address, fresh.local.address),
-                   reply.version == 1, reply.status == "hello", reply.device?.id == device.id { found.append(device) }
+                guard enabled, generation == run else { return }
+                let reply = try? await send(TailnetRequest(operation: .hello), device.address, fresh.local.address)
+                guard enabled, generation == run else { return }
+                if let reply, reply.version == 1, reply.status == "hello", reply.device?.id == device.id { found.append(device) }
             }
             available = found
             for (id, attempt) in outgoing {
@@ -115,6 +122,8 @@ actor TailnetEngine {
                 request.pairingID = attempt.pairing; request.token = attempt.token
                 guard let target = fresh.peers.first(where: { $0.id == id }), target.online else { continue }
                 let response = try await send(request, target.address, fresh.local.address)
+                guard enabled, generation == run else { return }
+                guard outgoing[id]?.pairing == attempt.pairing, attempt.expires > now() else { continue }
                 if response.status == "approved" {
                     var peer = TailnetPeer(id: id, name: target.name, address: target.address, pairingID: attempt.pairing)
                     peer.localNodeID = fresh.local.id
@@ -123,15 +132,18 @@ actor TailnetEngine {
                     outgoing.removeValue(forKey: id)
                 } else if response.status == "denied" { outgoing.removeValue(forKey: id); status = "Pairing declined or expired." }
             }
-            for var peer in try store.peers() where peer.localNodeID == fresh.local.id {
-                guard enabled else { return }
+            for candidate in try store.peers() where candidate.localNodeID == fresh.local.id {
+                guard enabled, generation == run else { return }
+                // Earlier peers may suspend this loop while settings or revocation
+                // change a later peer. Never write the stale snapshot back.
+                guard var peer = try store.peers().first(where: { $0.id == candidate.id && $0.pairingID == candidate.pairingID }) else { continue }
                 guard let device = fresh.peers.first(where: { $0.id == peer.id }), device.online else { continue }
                 peer.address = device.address; peer.name = device.name
                 try store.save(peer)
                 guard peer.sendEnabled else { continue }
                 try store.enqueue(for: peer.id)
                 for transfer in try store.transfers(peerID: peer.id, state: .pending, limit: 32) {
-                    guard enabled else { return }
+                    guard enabled, generation == run else { return }
                     do { try await transmit(transfer, to: peer) }
                     catch is CancellationError { return }
                     catch let error as TailnetError {
@@ -148,6 +160,7 @@ actor TailnetEngine {
             }
             try files.cleanup(database: store.database, active: Set(incoming.keys))
         } catch {
+            guard enabled, generation == run else { return }
             // Losing inventory means losing authority to listen or send.
             transport.stop(); listeningAddress = nil; inventory = nil; available = []
             status = (error as? TailnetError)?.localizedDescription ?? "Tailnet sync could not complete. Check Tailscale and storage, then retry."
@@ -157,8 +170,10 @@ actor TailnetEngine {
         guard enabled, let inventory, let device = inventory.peers.first(where: { $0.id == id && $0.online }),
               !(try store.peers()).contains(where: { $0.id == id }) else { throw TailnetError.denied }
         let pairing = UUID(), token = try TailnetKeychain.token()
+        let run = generation
         var request = TailnetRequest(operation: .pair); request.pairingID = pairing; request.token = token
         let response = try await send(request, device.address, inventory.local.address)
+        guard enabled, generation == run else { throw CancellationError() }
         guard response.status == "pending" else { throw TailnetError.unavailable("The target declined or is busy. Try again shortly.") }
         outgoing[id] = (device, pairing, token, now().addingTimeInterval(120))
         status = "Waiting for approval on \(device.name)"
@@ -226,6 +241,9 @@ actor TailnetEngine {
                 if try store.hasReceived(id) { return TailnetResponse(status: "seen") }
                 guard incoming[id] == nil || incoming[id]?.peer == peer.id,
                       incoming.count < 8 || incoming[id] != nil else { throw TailnetError.unavailable("Receiver is busy; retry shortly.") }
+                guard !incoming.contains(where: { $0.value.peer == peer.id && finalising[$0.key] != nil }) else {
+                    throw TailnetError.unavailable("Previous transfer is being committed; retry shortly.")
+                }
                 // One active selection per peer bounds aggregate disk exposure.
                 for (other, transfer) in incoming where transfer.peer == peer.id && other != id {
                     try files.discardPartial(other); incoming.removeValue(forKey: other)

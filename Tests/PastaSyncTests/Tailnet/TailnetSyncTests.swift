@@ -50,6 +50,68 @@ final class TailnetSyncTests: XCTestCase {
         XCTAssertEqual(hello.status, "denied")
     }
 
+    func testDelayedPairingApprovalCannotRestoreTrustAfterDisable() async throws {
+        let network = TailnetTestNetwork()
+        let a = try await TailnetTestNode(1, network: network, parent: root)
+        let b = try await TailnetTestNode(2, network: network, parent: root)
+        await a.tick(); await b.tick()
+        try await a.engine.requestPairing(b.device.id)
+        let request = try await b.engine.snapshot().requests.first!
+        try await b.engine.approve(request.id, allow: true)
+        await network.pauseOnResponse(.pairingStatus)
+        let polling = Task { await a.tick() }
+        await network.waitForPause()
+        await a.engine.setEnabled(false)
+        await network.resume(); await polling.value
+        let snapshot = try await a.engine.snapshot()
+        XCTAssertTrue(snapshot.peers.isEmpty)
+        XCTAssertEqual(snapshot.status, "Off")
+        XCTAssertNil(try a.credentials.read(request.id))
+        await a.engine.setEnabled(true); await a.tick()
+        XCTAssertTrue(try TailnetStore(database: a.db).peers().isEmpty)
+    }
+
+    func testDelayedInitialPairingReplyCannotSurviveDisableAndReenable() async throws {
+        let network = TailnetTestNetwork()
+        let a = try await TailnetTestNode(1, network: network, parent: root)
+        let b = try await TailnetTestNode(2, network: network, parent: root)
+        await a.tick(); await b.tick()
+        await network.pauseOnResponse(.pair)
+        let requesting = Task { try await a.engine.requestPairing(b.device.id) }
+        await network.waitForPause()
+        let request = try await b.engine.snapshot().requests.first!
+        try await b.engine.approve(request.id, allow: true)
+        await a.engine.setEnabled(false)
+        await a.engine.setEnabled(true); await a.tick()
+        await network.resume()
+        do { try await requesting.value; XCTFail("Stale pairing reply must be cancelled") } catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        await a.tick()
+        XCTAssertTrue(try TailnetStore(database: a.db).peers().isEmpty)
+    }
+
+    func testLaterPeersKeepRevocationAndPolicyChangesWhileEarlierPeerTransfers() async throws {
+        let network = TailnetTestNetwork()
+        let a = try await TailnetTestNode(1, network: network, parent: root)
+        let b = try await TailnetTestNode(2, network: network, parent: root)
+        let c = try await TailnetTestNode(3, network: network, parent: root)
+        let d = try await TailnetTestNode(4, network: network, parent: root)
+        try await a.pair(b); try await a.pair(c); try await a.pair(d)
+        let entry = ClipboardEntry(content: "", contentType: .image, rawData: Data(repeating: 3, count: 300_000))
+        try a.db.insert(entry)
+        await network.pauseOnChunk()
+        let sending = Task { await a.tick() }
+        await network.waitForPause()
+        try await a.engine.unpair(c.device.id)
+        var policy = try a.peer(d); policy.sendEnabled = false
+        try await a.engine.update(policy)
+        await network.resume(); await sending.value
+        XCTAssertNotNil(try b.db.fetch(id: entry.id))
+        XCTAssertNil(try c.db.fetch(id: entry.id))
+        XCTAssertNil(try d.db.fetch(id: entry.id))
+        XCTAssertFalse(try TailnetStore(database: a.db).peers().contains { $0.id == c.device.id })
+        XCTAssertFalse(try a.peer(d).sendEnabled)
+    }
+
     func testExpiredPairingCannotBeApprovedAndRequestsAreRateLimited() async throws {
         let clock = TailnetTestClock()
         let network = TailnetTestNetwork()
