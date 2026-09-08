@@ -166,11 +166,14 @@ struct PanelContentView: View {
                 .frame(width: widths.sidebar)
                 .accessibilitySortPriority(3)
 
-                SplitDivider(
+                PaneDivider(
                     label: "Drag to resize sidebar",
-                    width: SplitLayout.dividerWidth
+                    width: SplitLayout.dividerWidth,
+                    onDragChanged: { delta in
+                        resizeSidebar(by: delta, totalWidth: proxy.size.width, widths: widths)
+                    },
+                    onDragEnded: { persistLiveColumnWidths(totalWidth: proxy.size.width) }
                 )
-                .gesture(sidebarDividerDrag(totalWidth: proxy.size.width, widths: widths))
 
                 ClipboardListView(
                     entries: displayedEntries,
@@ -199,11 +202,14 @@ struct PanelContentView: View {
                 .focusEffectDisabled()
                 .accessibilitySortPriority(2)
 
-                SplitDivider(
+                PaneDivider(
                     label: "Drag to resize list and preview",
-                    width: SplitLayout.dividerWidth
+                    width: SplitLayout.dividerWidth,
+                    onDragChanged: { delta in
+                        resizePreview(by: delta, totalWidth: proxy.size.width, widths: widths)
+                    },
+                    onDragEnded: { persistLiveColumnWidths(totalWidth: proxy.size.width) }
                 )
-                .gesture(previewDividerDrag(totalWidth: proxy.size.width, widths: widths))
 
                 PreviewPanelView(
                     entry: displayedEntries.first(where: { $0.id == selectedEntryID }),
@@ -509,48 +515,32 @@ private extension PanelContentView {
         )
     }
 
-    func sidebarDividerDrag(totalWidth: CGFloat, widths: ColumnWidths) -> some Gesture {
-        DragGesture(minimumDistance: 1)
-            .onChanged { value in
-                let drag = activeSplitDrag ?? SplitDrag(
-                    sidebar: widths.sidebar,
-                    list: widths.list,
-                    preview: widths.preview
-                )
-                activeSplitDrag = drag
+    func resizeSidebar(by translation: CGFloat, totalWidth: CGFloat, widths: ColumnWidths) {
+        let drag = activeSplitDrag ?? SplitDrag(
+            sidebar: widths.sidebar, list: widths.list, preview: widths.preview
+        )
+        activeSplitDrag = drag
 
-                let minimums = columnMinimums(totalWidth: totalWidth)
-                let minimumDelta = minimums.sidebar - drag.sidebar
-                let maximumDelta = drag.list - minimums.list
-                let delta = clamp(value.translation.width, minimumDelta, maximumDelta)
-                liveSidebarColumnWidth = drag.sidebar + delta
-                liveListColumnWidth = drag.list - delta
-            }
-            .onEnded { _ in
-                persistLiveColumnWidths(totalWidth: totalWidth)
-            }
+        let minimums = columnMinimums(totalWidth: totalWidth)
+        let minimumDelta = minimums.sidebar - drag.sidebar
+        let maximumDelta = min(SplitLayout.sidebarMax - drag.sidebar, drag.list - minimums.list)
+        let delta = clamp(translation, minimumDelta, maximumDelta)
+        liveSidebarColumnWidth = drag.sidebar + delta
+        liveListColumnWidth = drag.list - delta
     }
 
-    func previewDividerDrag(totalWidth: CGFloat, widths: ColumnWidths) -> some Gesture {
-        DragGesture(minimumDistance: 1)
-            .onChanged { value in
-                let drag = activeSplitDrag ?? SplitDrag(
-                    sidebar: widths.sidebar,
-                    list: widths.list,
-                    preview: widths.preview
-                )
-                activeSplitDrag = drag
+    func resizePreview(by translation: CGFloat, totalWidth: CGFloat, widths: ColumnWidths) {
+        let drag = activeSplitDrag ?? SplitDrag(
+            sidebar: widths.sidebar, list: widths.list, preview: widths.preview
+        )
+        activeSplitDrag = drag
 
-                let minimums = columnMinimums(totalWidth: totalWidth)
-                let minimumDelta = minimums.list - drag.list
-                let maximumDelta = drag.preview - minimums.preview
-                let delta = clamp(value.translation.width, minimumDelta, maximumDelta)
-                liveSidebarColumnWidth = drag.sidebar
-                liveListColumnWidth = drag.list + delta
-            }
-            .onEnded { _ in
-                persistLiveColumnWidths(totalWidth: totalWidth)
-            }
+        let minimums = columnMinimums(totalWidth: totalWidth)
+        let minimumDelta = minimums.list - drag.list
+        let maximumDelta = drag.preview - minimums.preview
+        let delta = clamp(translation, minimumDelta, maximumDelta)
+        liveSidebarColumnWidth = drag.sidebar
+        liveListColumnWidth = drag.list + delta
     }
 
     func persistLiveColumnWidths(totalWidth: CGFloat) {
@@ -564,40 +554,6 @@ private extension PanelContentView {
 
     func clamp(_ value: CGFloat, _ lower: CGFloat, _ upper: CGFloat) -> CGFloat {
         min(max(value, lower), max(lower, upper))
-    }
-}
-
-private struct SplitDivider: View {
-    let label: String
-    let width: CGFloat
-    @State private var isHovering = false
-
-    var body: some View {
-        Rectangle()
-            .fill(Color.clear)
-            .frame(width: width)
-            .overlay {
-                Capsule()
-                    .fill(isHovering ? Color.accentColor.opacity(0.55) : Color.secondary.opacity(0.28))
-                    .frame(width: isHovering ? 3 : 1)
-            }
-            .contentShape(Rectangle())
-            .help(label)
-            .accessibilityLabel(label)
-            .onHover { hovering in
-                if hovering && !isHovering {
-                    NSCursor.resizeLeftRight.push()
-                } else if !hovering && isHovering {
-                    NSCursor.pop()
-                }
-                isHovering = hovering
-            }
-            .onDisappear {
-                if isHovering {
-                    NSCursor.pop()
-                    isHovering = false
-                }
-            }
     }
 }
 
