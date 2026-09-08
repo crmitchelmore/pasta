@@ -20,6 +20,7 @@ extension AppDelegate {
             window.title = "Pasta Settings"
             window.contentView = NSHostingView(rootView: SettingsView(
                 syncManager: BackgroundService.shared.syncManager,
+                tailnetSync: BackgroundService.shared.tailnetSync,
                 syncNow: {
                     try await BackgroundService.shared.syncNow()
                 },

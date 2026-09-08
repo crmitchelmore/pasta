@@ -77,9 +77,21 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
     /// Pinned entries are excluded from `DeleteService.deleteAll()` unless
     /// `includePinned: true` is passed, and are skipped by retention pruning.
     public var isPinned: Bool
+    /// Local policy; never infer upload consent from isSynced bookkeeping.
+    public var cloudSyncAllowed: Bool
+    /// Preserved through CloudKit so forwarding remains an explicit choice.
+    public var receivedViaTailnet: Bool
 
     /// Whether this entry was extracted from a parent entry.
     public var isExtracted: Bool { parentEntryId != nil }
+
+    public var allowsCloudUpload: Bool { cloudSyncAllowed && contentType != .filePath }
+
+    public var filePaths: [String] {
+        guard contentType == .filePath else { return [] }
+        if let rawData, let paths = try? JSONDecoder().decode([String].self, from: rawData) { return paths }
+        return content.split(separator: "\n").map(String.init)
+    }
 
     public var contentHash: String {
         if contentType == .image || contentType == .screenshot {
@@ -114,8 +126,12 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
         parentEntryId: UUID? = nil,
         isSynced: Bool = false,
         isPinned: Bool = false,
-        contentTypeMask: ContentTypeMask? = nil
+        contentTypeMask: ContentTypeMask? = nil,
+        cloudSyncAllowed: Bool = true,
+        receivedViaTailnet: Bool = false
     ) {
+        self.cloudSyncAllowed = cloudSyncAllowed
+        self.receivedViaTailnet = receivedViaTailnet
         self.id = id
         self.content = content
         self.contentType = contentType
@@ -133,13 +149,15 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
 
     private enum CodingKeys: String, CodingKey {
         case id, content, contentType, rawData, imagePath, timestamp, copyCount
-        case sourceApp, metadata, parentEntryId, isSynced, isPinned, contentTypeMask
+        case sourceApp, metadata, parentEntryId, isSynced, isPinned, contentTypeMask, cloudSyncAllowed, receivedViaTailnet
     }
 
     /// Custom decoding so rows and JSON exports that predate `contentTypeMask`
     /// still decode, deriving the mask from the metadata they do carry.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        cloudSyncAllowed = try c.decodeIfPresent(Bool.self, forKey: .cloudSyncAllowed) ?? true
+        receivedViaTailnet = try c.decodeIfPresent(Bool.self, forKey: .receivedViaTailnet) ?? false
         id = try c.decode(UUID.self, forKey: .id)
         content = try c.decode(String.self, forKey: .content)
         contentType = try c.decode(ContentType.self, forKey: .contentType)
@@ -158,6 +176,8 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
     }
 
     public func encode(to container: inout PersistenceContainer) {
+        container["cloudSyncAllowed"] = cloudSyncAllowed
+        container["receivedViaTailnet"] = receivedViaTailnet
         container["id"] = id.uuidString
         container["content"] = content
         container["contentType"] = contentType.rawValue

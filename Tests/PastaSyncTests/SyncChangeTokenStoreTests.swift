@@ -86,7 +86,16 @@ final class SyncChangeTokenStoreTests: XCTestCase {
     private func createLegacyDatabase(at url: URL, entry: ClipboardEntry) throws {
         let writer = try DatabaseQueue(path: url.path)
         try DatabaseManager.migrator.migrate(writer, upTo: "addContentTypeMask")
-        try DatabaseManager(dbWriter: writer).insert(entry)
+        // Seed the historical schema directly. Today's insert API legitimately
+        // writes columns that did not exist at this migration boundary.
+        try writer.write { db in
+            try db.execute(sql: """
+                INSERT INTO clipboard_entries
+                (id, content, contentType, timestamp, copyCount, contentHash, isPinned, isSynced, contentTypeMask)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, arguments: [entry.id.uuidString, entry.content, entry.contentType.rawValue,
+                                   entry.timestamp, entry.copyCount, entry.contentHash, entry.isPinned, entry.isSynced, entry.contentTypeMask])
+        }
     }
 }
 

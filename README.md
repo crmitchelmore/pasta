@@ -12,7 +12,8 @@ A blazing-fast, local-first clipboard history manager for macOS with intelligent
 - **Ultra-Fast Search** — Full-text search with fuzzy matching
 - **Keyboard-First** — Global hotkey (`⌃⌘V`) and full keyboard navigation
 - **Preview Everything** — Images, decoded base64, syntax-highlighted code
-- **Privacy-First** — Local-first storage. Pasta ignores pasteboard items marked transient/concealed/auto-generated ([nspasteboard.org](http://nspasteboard.org) convention used by password managers), so secrets are never recorded. Optional iCloud sync (off by default), opt-in anonymous crash reporting, and opt-in anonymous usage analytics ([exact event list](SECURITY.md#security-considerations)) are the only network features; clipboard contents never leave your machine.
+- **Privacy-First** — Local-first storage with existing transient-content capture exclusions. iCloud sync and approved Tailnet Sync pairings are optional and off by default. Clipboard content is shared only through those enabled sync routes; crash reporting and anonymous usage analytics are separate opt-ins ([details](SECURITY.md#security-considerations)).
+- **Tailnet Sync** — Pair your personal Macs across iCloud accounts through Tailscale discovery and approval on the target. Sync new history, optionally send older items, and transfer files/folders into managed receiver storage. Large file selections require sender approval (50 MB by default). [Setup and behaviour](Docs/tailnet-sync.md).
 
 ## Installation
 

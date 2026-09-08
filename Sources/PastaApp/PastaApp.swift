@@ -34,6 +34,7 @@ struct PastaApp: App {
         Settings {
             SettingsView(
                 syncManager: BackgroundService.shared.syncManager,
+                tailnetSync: BackgroundService.shared.tailnetSync,
                 syncNow: {
                     try await BackgroundService.shared.syncNow()
                 },

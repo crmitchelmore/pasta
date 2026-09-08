@@ -105,13 +105,13 @@ for provenance and the update procedure.
 - **PastaCore** (`Sources/PastaCore/`) — platform-neutral models, GRDB database (FTS5 search), clipboard monitoring, import/export, commands.
 - **PastaUI** (`Sources/PastaUI/`) — SwiftUI/AppKit views for the panel: list, search bar, previews, filters, settings tabs.
 - **PastaDetectors** (`Sources/PastaDetectors/`) — content-type detectors (URLs, emails, colours, API keys, code, ...) and their strictness configuration.
-- **PastaSync** (`Sources/PastaSync/`) — CloudKit sync shared by macOS and iOS; see `Sources/PastaSync/README.md`.
+- **PastaSync** (`Sources/PastaSync/`) — CloudKit sync shared by macOS and iOS, plus macOS-only approved tailnet pairing and file transfer; see `Sources/PastaSync/README.md`.
 - **PastaIOS** (`PastaIOS/`) — Xcode project for the iOS companion app, built on PastaCore + PastaSync.
 
 ## Conventions & Patterns
 
 - Conventional commits drive auto-release: `feat` → minor, `fix`/`perf` → patch; other types do not release.
-- Privacy is opt-in only: no clipboard content ever leaves the device unless the user enables iCloud sync.
+- Privacy is opt-in only: clipboard content leaves the device only through explicitly enabled iCloud sync or approved Tailnet Sync pairings. Tailnet forwarding, onward iCloud publication and clipboard replacement are separate per-peer controls, off by default. File payloads remain tailnet-only.
 - Keep `AGENTS.md` and `CLAUDE.md` in sync — the Build/Architecture/Conventions/Release gates sections must match in both.
 
 ## Release gates

@@ -26,8 +26,8 @@ public struct SettingsView: View {
     }
 
     private enum Layout {
-        static let settingsWidth: CGFloat = 680
-        static let settingsHeight: CGFloat = 500
+        static let settingsWidth: CGFloat = 760
+        static let settingsHeight: CGFloat = 560
     }
 
     @AppStorage(Defaults.launchAtLogin) private var launchAtLogin: Bool = false
@@ -52,6 +52,7 @@ public struct SettingsView: View {
     private let checkForUpdates: (() -> Void)?
     private let automaticallyChecksForUpdates: Binding<Bool>?
     private let openWalkthrough: (() -> Void)?
+    private let tailnetSync: TailnetSyncController?
     private let syncManager: SyncManager?
     private let resetSync: (@MainActor () throws -> Void)?
     private let syncNow: (@MainActor () async throws -> Void)?
@@ -60,6 +61,7 @@ public struct SettingsView: View {
 
     public init(
         syncManager: SyncManager? = nil,
+        tailnetSync: TailnetSyncController? = nil,
         syncNow: (@MainActor () async throws -> Void)? = nil,
         resetSync: (@MainActor () throws -> Void)? = nil,
         syncedCount: (() -> Int)? = nil,
@@ -68,6 +70,7 @@ public struct SettingsView: View {
         checkForUpdates: (() -> Void)? = nil,
         automaticallyChecksForUpdates: Binding<Bool>? = nil
     ) {
+        self.tailnetSync = tailnetSync
         self.syncManager = syncManager
         self.syncNow = syncNow
         self.resetSync = resetSync
@@ -140,6 +143,11 @@ public struct SettingsView: View {
                     .tag(SettingsTab.iCloud)
             }
             
+            if let tailnetSync {
+                TailnetSettingsTab(sync: tailnetSync)
+                    .tabItem { Label("Tailnet", systemImage: "network") }
+                    .tag(SettingsTab.tailnet)
+            }
             SnippetsSettingsTab()
             .tabItem {
                 Label("Snippets", systemImage: "text.badge.plus")
@@ -155,7 +163,7 @@ public struct SettingsView: View {
             }
             .tag(SettingsTab.about)
         }
-        // Wide enough for all seven tab items; keep in sync with the tab count so
+        // Wide enough for all eight tab items; keep in sync with the tab count so
         // the macOS tab bar never overflows.
         .frame(width: Layout.settingsWidth, height: Layout.settingsHeight)
         .padding(.top, 8)
@@ -164,7 +172,7 @@ public struct SettingsView: View {
     }
 
     private enum SettingsTab: Hashable {
-        case general, clipboard, detection, storage, iCloud, snippets, about
+        case general, clipboard, detection, storage, iCloud, tailnet, snippets, about
     }
 }
 

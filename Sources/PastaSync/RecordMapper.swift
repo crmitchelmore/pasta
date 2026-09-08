@@ -10,6 +10,15 @@ public struct RecordMapper {
     private static let inlineDataThreshold = 50_000 // 50KB
     
     public init() {}
+    private struct TailnetMetadata: Codable {
+        var pastaTailnetVersion: Int
+        var originalMetadata: String?
+    }
+    private func cloudMetadata(_ entry: ClipboardEntry) -> String? {
+        guard entry.receivedViaTailnet else { return entry.metadata }
+        return (try? JSONEncoder().encode(TailnetMetadata(pastaTailnetVersion: 1, originalMetadata: entry.metadata)))
+            .flatMap { String(data: $0, encoding: .utf8) }
+    }
 
     /// A record ready to push, plus the temporary asset file backing it (if
     /// any). CKAsset only references the file, so it must stay on disk until
@@ -35,6 +44,7 @@ public struct RecordMapper {
     /// its asset and then marking it synced would silently lose the image
     /// bytes on every other device, with no retry.
     public func preparedRecord(from entry: ClipboardEntry, zoneID: CKRecordZone.ID) throws -> PreparedRecord {
+        guard entry.allowsCloudUpload else { throw CocoaError(.fileReadNoPermission) }
         let recordID = CKRecord.ID(recordName: entry.id.uuidString, zoneID: zoneID)
         let record = CKRecord(recordType: Self.recordType, recordID: recordID)
 
@@ -44,7 +54,7 @@ public struct RecordMapper {
         record["timestamp"] = entry.timestamp as CKRecordValue
         record["copyCount"] = entry.copyCount as CKRecordValue
         record["sourceApp"] = entry.sourceApp as CKRecordValue?
-        record["metadata"] = entry.metadata as CKRecordValue?
+        record["metadata"] = cloudMetadata(entry) as CKRecordValue?
         record["parentEntryId"] = entry.parentEntryId?.uuidString as CKRecordValue?
 
         // macOS moves captured images to imagePath and clears rawData before
@@ -90,7 +100,9 @@ public struct RecordMapper {
         
         let copyCount = record["copyCount"] as? Int ?? 1
         let sourceApp = record["sourceApp"] as? String
-        let metadata = record["metadata"] as? String
+        let storedMetadata = record["metadata"] as? String
+        let envelope = storedMetadata.flatMap { $0.data(using: .utf8) }.flatMap { try? JSONDecoder().decode(TailnetMetadata.self, from: $0) }
+        let metadata = envelope?.pastaTailnetVersion == 1 ? envelope?.originalMetadata : storedMetadata
         let parentEntryId: UUID? = {
             guard let str = record["parentEntryId"] as? String else { return nil }
             return UUID(uuidString: str)
@@ -117,7 +129,8 @@ public struct RecordMapper {
             sourceApp: sourceApp,
             metadata: metadata,
             parentEntryId: parentEntryId,
-            isSynced: true
+            isSynced: true,
+            receivedViaTailnet: envelope?.pastaTailnetVersion == 1
         )
     }
     
