@@ -1,5 +1,6 @@
 import Foundation
 import Sentry
+import PastaCore
 
 /// Manages Sentry crash reporting and error tracking.
 ///
@@ -29,16 +30,16 @@ enum SentryManager {
             options.dsn = "https://ba04b3c3ce2e5249bc5cf50832c885e7@o4510682832240640.ingest.de.sentry.io/4510790604488784"
             
             // Enable performance monitoring
-            options.tracesSampleRate = 0.2  // 20% of transactions
+            options.tracesSampleRate = 0  // Crash diagnostics only; no clipboard UI traces
             
             // Attach stack traces to all events
             options.attachStacktrace = true
             
             // Enable automatic breadcrumbs
-            options.enableAutoBreadcrumbTracking = true
+            options.enableAutoBreadcrumbTracking = false
             
             // Capture HTTP client errors
-            options.enableCaptureFailedRequests = true
+            options.enableCaptureFailedRequests = false
             
             // Set environment
             options.environment = "production"
@@ -51,6 +52,21 @@ enum SentryManager {
             
             // Don't send PII by default
             options.sendDefaultPii = false
+            options.beforeSend = { event in
+                // Strip incidental UI/network/error payloads even for crashes.
+                // Keep stack frames, binary UUIDs and release metadata for symbols.
+                event.breadcrumbs = nil
+                event.request = nil
+                event.extra = nil
+                event.user = nil
+                event.context = nil
+                event.error = nil
+                event.message = nil
+                for exception in event.exceptions ?? [] {
+                    exception.value = "Diagnostic details withheld for clipboard privacy"
+                }
+                return event
+            }
         }
         #endif
     }
@@ -59,7 +75,9 @@ enum SentryManager {
     static func capture(error: Error, context: [String: Any]? = nil) {
         #if !DEBUG
         guard isEnabled else { return }
-        SentrySDK.capture(error: error) { scope in
+        let safeError = NSError(domain: "com.pasta.diagnostic", code: (error as NSError).code,
+                                userInfo: [NSLocalizedDescriptionKey: PastaLogger.diagnosticDescription(error)])
+        SentrySDK.capture(error: safeError) { scope in
             if let context = context {
                 scope.setContext(value: context, key: "custom")
             }

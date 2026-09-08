@@ -86,7 +86,26 @@ extension AppDelegate {
             )
         }
 
+        if case .pasteSnippet(let id) = result {
+            return await pasteSnippet(id: id)
+        }
         return result
+    }
+
+    private func pasteSnippet(id: UUID) async -> CommandResult {
+        let database = BackgroundService.shared.database
+        let clipboard = NSPasteboard.general.string(forType: .string)
+        do {
+            let evaluation = try await Task.detached(priority: .userInitiated) {
+                try SnippetRenderer(database: database).render(id: id, clipboardText: clipboard)
+            }.value
+            guard let evaluation else { return .error("This snippet was deleted. Search again.") }
+            pasteEntry(ClipboardEntry(content: evaluation.text, contentType: .text), cursorMoveCount: evaluation.cursorMoveCount)
+            return .dismissed
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.ui, context: "Snippet paste failed")
+            return .error("Could not load this snippet.")
+        }
     }
 
     func showMainWindow() {
@@ -94,23 +113,11 @@ extension AppDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func pasteEntry(_ entry: ClipboardEntry) {
-        // Hide quick search first if visible
-        quickSearchController?.hide()
-
-        // Copy content to clipboard
-        let pasteService = PasteService()
-        _ = pasteService.copy(entry)
-        AnalyticsManager.shared.capture(.pastePerformed(contentType: entry.contentType))
-
-        // Deactivate our app and return focus to previous app, then paste
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            NSApp.hide(nil)
-
-            // Small delay to ensure previous app has focus before pasting
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                SystemPasteEventSimulator().simulateCommandV()
-            }
+    func pasteEntry(_ entry: ClipboardEntry, cursorMoveCount: Int = 0) {
+        ExternalPasteCoordinator.shared.paste(entry, cursorMoveCount: cursorMoveCount) {
+            quickSearchController?.hide()
+            panelController?.hide()
         }
+        AnalyticsManager.shared.capture(.pastePerformed(contentType: entry.contentType))
     }
 }

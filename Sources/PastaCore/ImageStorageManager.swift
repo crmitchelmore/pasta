@@ -8,12 +8,18 @@ import AppKit
 
 public final class ImageStorageManager {
     private let imagesDirectoryURL: URL
+    // File IO is serialized independently of SQLite. Refreshing the timestamp
+    // even for deduplicated saves protects captures awaiting their row insert.
+    private static let fileLock = NSLock()
+    let cleanupGracePeriod: TimeInterval
 
-    public init(imagesDirectoryURL: URL = ImageStorageManager.defaultImagesDirectoryURL()) throws {
+
+    public init(imagesDirectoryURL: URL = ImageStorageManager.defaultImagesDirectoryURL(), cleanupGracePeriod: TimeInterval = 60) throws {
         self.imagesDirectoryURL = imagesDirectoryURL
+        self.cleanupGracePeriod = max(0, cleanupGracePeriod)
         do {
             try FileManager.default.createDirectory(at: imagesDirectoryURL, withIntermediateDirectories: true)
-            PastaLogger.storage.info("Image storage initialized at \(imagesDirectoryURL.path)")
+            PastaLogger.storage.info("Image storage initialized")
         } catch {
             PastaLogger.logError(error, logger: PastaLogger.storage, context: "Failed to create images directory")
             throw PastaError.storageUnavailable(path: imagesDirectoryURL.path)
@@ -23,20 +29,22 @@ public final class ImageStorageManager {
     public static func defaultImagesDirectoryURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return appSupport
-            .appendingPathComponent("Pasta", isDirectory: true)
+            .appendingPathComponent(PastaStorageLocation.directoryName, isDirectory: true)
             .appendingPathComponent("Images", isDirectory: true)
     }
 
     /// Saves image data to disk and returns the absolute file path.
     /// Uses the SHA256 of the data to generate a stable, unique filename.
     public func saveImage(_ data: Data) throws -> String {
+        Self.fileLock.lock()
+        defer { Self.fileLock.unlock() }
         let filename = "\(ImageStorageManager.sha256Hex(data)).dat"
         let url = imagesDirectoryURL.appendingPathComponent(filename)
 
         if !FileManager.default.fileExists(atPath: url.path) {
             do {
                 try data.write(to: url, options: [.atomic])
-                PastaLogger.storage.debug("Saved image to \(url.path) (\(data.count) bytes)")
+                PastaLogger.storage.debug("Saved image (\(data.count) bytes)")
             } catch let error as NSError {
                 // Check for disk full errors
                 if error.domain == NSCocoaErrorDomain && (error.code == NSFileWriteOutOfSpaceError || error.code == NSFileWriteVolumeReadOnlyError) {
@@ -48,6 +56,7 @@ public final class ImageStorageManager {
             }
         }
 
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
         return url.path
     }
 
@@ -67,7 +76,7 @@ public final class ImageStorageManager {
             return image
         }
         // Return placeholder for missing files
-        PastaLogger.storage.debug("Image not found at \(path), returning placeholder")
+        PastaLogger.storage.debug("Image not found, returning placeholder")
         return NSImage(systemSymbolName: "photo", accessibilityDescription: "Missing image")
     }
     #else
@@ -76,12 +85,33 @@ public final class ImageStorageManager {
     }
     #endif
 
+    /// Returns the remaining grace time when a recent capture still owns the
+    /// file. Called only after a database reference check, outside its lock.
+    func deleteImageAfterGrace(path: String) throws -> TimeInterval? {
+        Self.fileLock.lock()
+        defer { Self.fileLock.unlock() }
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        let attributes = try FileManager.default.attributesOfItem(atPath: path)
+        guard attributes[.type] as? FileAttributeType == .typeRegular else { return nil }
+        let modified = attributes[.modificationDate] as? Date ?? Date()
+        let remaining = cleanupGracePeriod - Date().timeIntervalSince(modified)
+        if remaining > 0 { return remaining }
+        try removeImage(path: path)
+        return nil
+    }
+
     public func deleteImage(path: String) throws {
+        Self.fileLock.lock()
+        defer { Self.fileLock.unlock() }
+        try removeImage(path: path)
+    }
+
+    private func removeImage(path: String) throws {
         let url = URL(fileURLWithPath: path)
         if FileManager.default.fileExists(atPath: url.path) {
             do {
                 try FileManager.default.removeItem(at: url)
-                PastaLogger.storage.debug("Deleted image at \(path)")
+                PastaLogger.storage.debug("Deleted image")
             } catch {
                 PastaLogger.logError(error, logger: PastaLogger.storage, context: "Failed to delete image")
                 throw error

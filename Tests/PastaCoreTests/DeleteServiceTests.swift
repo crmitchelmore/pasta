@@ -9,7 +9,7 @@ final class DeleteServiceTests: XCTestCase {
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot)
+        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot, cleanupGracePeriod: 0)
 
         let imageData = Data([0x01, 0x02, 0x03])
         let imagePath = try imageStorage.saveImage(imageData)
@@ -41,7 +41,7 @@ final class DeleteServiceTests: XCTestCase {
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot)
+        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot, cleanupGracePeriod: 0)
         let now = Date(timeIntervalSince1970: 1_000)
 
         let imageData = Data([0x01, 0x02, 0x03])
@@ -79,7 +79,7 @@ final class DeleteServiceTests: XCTestCase {
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot)
+        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot, cleanupGracePeriod: 0)
 
         let imageData = Data([0x01, 0x02, 0x03])
         let imagePath = try imageStorage.saveImage(imageData)
@@ -100,7 +100,7 @@ final class DeleteServiceTests: XCTestCase {
         let db = try DatabaseManager.inMemory()
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
-        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot)
+        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot, cleanupGracePeriod: 0)
 
         let pinnedID = UUID()
         let unpinnedID = UUID()
@@ -121,7 +121,7 @@ final class DeleteServiceTests: XCTestCase {
         let db = try DatabaseManager.inMemory()
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
-        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot)
+        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot, cleanupGracePeriod: 0)
 
         try db.insert(ClipboardEntry(content: "keep", contentType: .text, isPinned: true))
         try db.insert(ClipboardEntry(content: "drop", contentType: .text))
@@ -139,7 +139,7 @@ final class DeleteServiceTests: XCTestCase {
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot)
+        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot, cleanupGracePeriod: 0)
 
         let imagePathA = try imageStorage.saveImage(Data([0x01]))
         let imagePathB = try imageStorage.saveImage(Data([0x02]))
@@ -171,7 +171,7 @@ final class DeleteServiceTests: XCTestCase {
         let db = try DatabaseManager.inMemory()
         let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
-        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot)
+        let imageStorage = try ImageStorageManager(imagesDirectoryURL: tempRoot, cleanupGracePeriod: 0)
 
         try db.insert(ClipboardEntry(content: "keep", contentType: .text))
 

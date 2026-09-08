@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var hotKeyPauseObserver: NSObjectProtocol?
     var hotKeyChangeObserver: NSObjectProtocol?
     var settingsWindow: NSWindow?
+    var snippetExpansion: SnippetExpansionController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         PastaLogger.app.info("Pasta app initializing...")
@@ -37,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "pasta.respectTransientPasteboard": true
         ])
 
+        ExternalPasteCoordinator.shared.start()
         configureAppIcon()
         applyAppMode()
         observeDefaults()
@@ -69,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Configure command handlers
         setupCommandHandlers()
+        snippetExpansion = SnippetExpansionController()
 
         // Create the floating panel controller (main window)
         panelController = PanelController(

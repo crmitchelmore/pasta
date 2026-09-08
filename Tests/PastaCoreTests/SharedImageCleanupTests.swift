@@ -3,6 +3,58 @@ import XCTest
 @testable import PastaCore
 
 final class SharedImageCleanupTests: XCTestCase {
+    func testSlowUnlinkDoesNotHoldDatabaseWriterAndFailureDoesNotAbortRemainingFiles() throws {
+        let database = try DatabaseManager.inMemory()
+        let unlinked = expectation(description: "cleanup completed")
+        let enteredRemoval = DispatchSemaphore(value: 0)
+        let allowRemoval = DispatchSemaphore(value: 0)
+        let saved = expectation(description: "capture can persist during unlink")
+        DispatchQueue.global().async {
+            defer { unlinked.fulfill() }
+            do {
+                try database.deleteUnreferencedImages(paths: ["a", "b"]) { path in
+                    if path == "a" {
+                        enteredRemoval.signal()
+                        _ = allowRemoval.wait(timeout: .now() + 3)
+                        throw NSError(domain: NSPOSIXErrorDomain, code: 13)
+                    }
+                    XCTAssertEqual(path, "b")
+                    // A second database write from the removal callback would
+                    // deadlock if cleanup still owned SQLite's writer queue.
+                    try database.insert(ClipboardEntry(content: "after failed unlink", contentType: .text))
+                }
+            } catch { XCTFail("Unexpected cleanup error: \(error)") }
+        }
+        XCTAssertEqual(enteredRemoval.wait(timeout: .now() + 2), .success)
+        DispatchQueue.global().async {
+            do { try database.insert(ClipboardEntry(content: "capture", contentType: .text)) }
+            catch { XCTFail("Capture failed: \(error)") }
+            saved.fulfill()
+        }
+        wait(for: [saved], timeout: 1)
+        allowRemoval.signal()
+        wait(for: [unlinked], timeout: 3)
+        XCTAssertEqual(try database.fetchRecent().count, 2)
+    }
+
+    func testGraceProtectsSaveBeforeInsertAndEventuallyRemovesAbandonedFiles() throws {
+        let database = try DatabaseManager.inMemory()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storage = try ImageStorageManager(imagesDirectoryURL: directory, cleanupGracePeriod: 0.15)
+        let protected = try storage.saveImage(Data([1, 2]))
+        let abandoned = try storage.saveImage(Data([3, 4]))
+        try database.deleteUnreferencedImages(paths: [protected, abandoned], using: storage)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: protected))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: abandoned))
+        try database.insert(ClipboardEntry(content: "", contentType: .image, imagePath: protected))
+        let elapsed = expectation(description: "deferred cleanup ran")
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { elapsed.fulfill() }
+        wait(for: [elapsed], timeout: 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: protected))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: abandoned))
+    }
+
     private enum Deletion: CaseIterable {
         case single, bulk, recent, all, maxEntries, age
     }
@@ -13,7 +65,7 @@ final class SharedImageCleanupTests: XCTestCase {
             let directory = FileManager.default.temporaryDirectory
                 .appendingPathComponent("PastaSharedImages-\(UUID().uuidString)", isDirectory: true)
             defer { try? FileManager.default.removeItem(at: directory) }
-            let storage = try ImageStorageManager(imagesDirectoryURL: directory)
+            let storage = try ImageStorageManager(imagesDirectoryURL: directory, cleanupGracePeriod: 0)
             let bytes = Data([0x01, 0x02, 0x03])
             let path = try storage.saveImage(bytes)
             // Identical captures intentionally use the same content-addressed file.
@@ -65,7 +117,7 @@ final class SharedImageCleanupTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("PastaSharedImages-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        let storage = try ImageStorageManager(imagesDirectoryURL: directory)
+        let storage = try ImageStorageManager(imagesDirectoryURL: directory, cleanupGracePeriod: 0)
         let bytes = Data([0x04, 0x05])
         let path = try storage.saveImage(bytes)
         let victim = ClipboardEntry(content: "", contentType: .image, imagePath: path)

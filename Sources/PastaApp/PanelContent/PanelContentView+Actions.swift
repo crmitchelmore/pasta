@@ -10,14 +10,8 @@ extension PanelContentView {
               let entry = displayedEntries.first(where: { $0.id == selectedEntryID }) else { return }
 
         PastaLogger.ui.debug("Pasting entry: \(entry.contentType.rawValue) (plain=\(asPlainText))")
-        if asPlainText {
-            _ = PasteService().pastePlainText(entry)
-        } else {
-            _ = PasteService().paste(entry)
-        }
+        ExternalPasteCoordinator.shared.paste(entry, asPlainText: asPlainText, hide: closePanel)
         AnalyticsManager.shared.capture(.pastePerformed(contentType: entry.contentType))
-
-        closePanel()
     }
 
     func togglePinSelectedEntry() {
@@ -112,9 +106,8 @@ extension PanelContentView {
 
     func pasteEntry(_ entry: ClipboardEntry) {
         PastaLogger.ui.debug("Pasting entry: \(entry.contentType.rawValue)")
-        _ = PasteService().paste(entry)
+        ExternalPasteCoordinator.shared.paste(entry, hide: closePanel)
         AnalyticsManager.shared.capture(.pastePerformed(contentType: entry.contentType))
-        closePanel()
     }
 
     /// If the selected entry's content is a URL, open it in the user's default browser
@@ -153,7 +146,7 @@ extension PanelContentView {
             return false
         }
 
-        PastaLogger.ui.info("Opening URL from clipboard entry: \(url.absoluteString)")
+        PastaLogger.ui.info("Opening URL from clipboard entry")
         NSWorkspace.shared.open(url)
         closePanel()
         return true

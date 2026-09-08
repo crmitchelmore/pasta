@@ -60,7 +60,7 @@ extension DatabaseManager {
                             """,
                             arguments: [entry.timestamp, existingID]
                         )
-                        PastaLogger.database.debug("Updated duplicate entry with hash \(contentHash)")
+                        PastaLogger.database.debug("Updated duplicate entry")
                         guard let existing = try ClipboardEntry.fetchOne(db, key: existingID) else {
                             throw DatabaseError(message: "deduplicated row \(existingID) vanished inside the write transaction")
                         }

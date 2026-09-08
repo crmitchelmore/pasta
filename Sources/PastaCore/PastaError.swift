@@ -76,7 +76,7 @@ public enum PastaError: LocalizedError {
     }
 }
 
-/// A logger wrapper that logs to both os.log and stdout
+/// Structured diagnostics; debug stdout is available only in debug builds.
 public struct ConsoleLogger {
     private let osLogger: Logger
     private let category: String
@@ -93,7 +93,9 @@ public struct ConsoleLogger {
     
     public func debug(_ message: String) {
         osLogger.debug("\(message)")
+        #if DEBUG
         stdout("DEBUG", message)
+        #endif
     }
     
     public func info(_ message: String) {
@@ -132,10 +134,26 @@ public struct PastaLogger {
     
     /// Log an error with context
     public static func logError(_ error: Error, logger: ConsoleLogger, context: String) {
+        logger.error("\(context): \(diagnosticDescription(error))")
+    }
+
+    /// Error descriptions/userInfo can embed clipboard text, SQL arguments,
+    /// URLs or user paths. Keep those for local user-facing alerts, never logs.
+    public static func diagnosticDescription(_ error: Error) -> String {
         if let pastaError = error as? PastaError {
-            logger.error("\(context): \(pastaError.errorDescription ?? "Unknown") - \(pastaError.failureReason ?? "")")
-        } else {
-            logger.error("\(context): \(error.localizedDescription)")
+            switch pastaError {
+            case .databaseCorrupted(let underlying), .databaseInitializationFailed(let underlying),
+                 .diskFull(_, let underlying), .imageSaveFailed(let underlying), .unknown(let underlying):
+                return "\(pastaError.errorDescription ?? "Error") (\(diagnosticDescription(underlying)))"
+            default:
+                return pastaError.errorDescription ?? "Error"
+            }
         }
+        let nsError = error as NSError
+        // Only known domains are emitted: custom NSError domains are strings
+        // supplied by callers and may themselves contain private content.
+        let domain = [NSCocoaErrorDomain, NSPOSIXErrorDomain, NSURLErrorDomain, "GRDB.DatabaseError"]
+            .contains(nsError.domain) ? nsError.domain : "Error"
+        return "\(domain) code=\(nsError.code)"
     }
 }

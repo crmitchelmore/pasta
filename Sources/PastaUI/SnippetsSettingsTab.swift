@@ -123,6 +123,7 @@ private struct SnippetEditorView: View {
     let preview: String
     let onSave: () -> Void
     let onDelete: () -> Void
+    @AppStorage("pasta.snippetKeywordExpansionEnabled") private var keywordExpansion = false
 
     var body: some View {
         Form {
@@ -132,6 +133,24 @@ private struct SnippetEditorView: View {
                     get: { draft.keyword ?? "" },
                     set: { draft.keyword = $0.isEmpty ? nil : $0 }
                 ))
+            }
+
+            Section {
+                Text("Open Quick Search and type !snippet followed by a name or keyword, then press Return to paste. Keywords also work with optional automatic expansion.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Keyword expansion") {
+                Toggle("Expand keywords while typing in other apps", isOn: $keywordExpansion)
+                Text("Off by default. Requires Accessibility and Input Monitoring permissions. Type an exact, unique keyword followed by Space. Only the current word is kept in memory; secure password fields are excluded.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if keywordExpansion && (!AccessibilityPermission.isTrusted() || !AccessibilityPermission.hasInputMonitoring()) {
+                    Text("Grant Pasta Accessibility and Input Monitoring access in System Settings, then restart Pasta to activate expansion.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             Section("Content") {
@@ -180,7 +199,7 @@ private struct SnippetEditorView: View {
                 .keyboardShortcut("s", modifiers: [.command])
             }
         }
-        .onChange(of: draft) { _, _ in
+        .onChange(of: [draft.name, draft.content, draft.keyword ?? ""]) { _, _ in
             // Persist on every edit. Simpler than a "dirty" indicator and
             // matches what users expect from settings.
             onSave()
@@ -223,6 +242,7 @@ final class SnippetsSettingsModel: ObservableObject {
         let snippet = Snippet(name: "Untitled", content: "", keyword: nil)
         do {
             _ = try store.create(snippet)
+            NotificationCenter.default.post(name: .snippetsDidChange, object: nil)
             snippets.insert(snippet, at: 0)
             selectedID = snippet.id
         } catch {
@@ -234,6 +254,7 @@ final class SnippetsSettingsModel: ObservableObject {
         guard let store, snippets.indices.contains(index) else { return }
         do {
             let saved = try store.update(snippets[index])
+            NotificationCenter.default.post(name: .snippetsDidChange, object: nil)
             snippets[index] = saved
         } catch {
             report(error: error)
@@ -244,6 +265,7 @@ final class SnippetsSettingsModel: ObservableObject {
         guard let store else { return }
         do {
             _ = try store.delete(id: id)
+            NotificationCenter.default.post(name: .snippetsDidChange, object: nil)
             snippets.removeAll { $0.id == id }
             if selectedID == id {
                 selectedID = snippets.first?.id
@@ -289,6 +311,7 @@ final class SnippetsSettingsModel: ObservableObject {
             let incoming = try SnippetJSONIO.decode(data)
             let summary = try SnippetJSONIO.importSnippets(incoming, into: store)
             lastImportExportSummary = "Imported \(summary.inserted) new, updated \(summary.updated)"
+            NotificationCenter.default.post(name: .snippetsDidChange, object: nil)
             load()
         } catch {
             report(error: error)

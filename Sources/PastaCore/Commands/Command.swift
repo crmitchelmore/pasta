@@ -56,6 +56,7 @@ public enum CommandResult: Sendable {
     case needsConfirmation(String, confirmAction: @Sendable @MainActor () async -> CommandResult)
     case error(String)
     case openMainWindow(contentType: ContentType?)
+    case pasteSnippet(UUID)
     case dismissed
     
     public var message: String? {
@@ -63,7 +64,7 @@ public enum CommandResult: Sendable {
         case .success(let msg): return msg
         case .error(let msg): return msg
         case .needsConfirmation(let msg, _): return msg
-        case .openMainWindow, .dismissed: return nil
+        case .openMainWindow, .pasteSnippet, .dismissed: return nil
         }
     }
 }

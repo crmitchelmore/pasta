@@ -11,7 +11,7 @@ two-device clipboard journey. Use this map when describing release confidence.
 | iOS install, capture, search, detail | XCUITest drives the real app/database with a controlled pasteboard. Empty history and unmatched search require exact outcomes. | Hooks seed the app-owned pasteboard. Cross-app paste permission, live iCloud, image clipboard capture and device provisioning are not exercised. |
 | iOS persistence after termination | Capture → terminate → relaunch with unrelated clipboard text → search → detail proves original content survives on disk and the count is exactly two. | This proves local persistence, not transport between devices. |
 | iCloud sync | Package tests exercise their stated model/persistence contracts. | Simulator UI tests disable sync. They cannot establish that two signed production clients exchange the same content, images/deletes, or recover from account/network changes. |
-| Landing page | Local Playwright checks rendering, links, assets and accessibility. Contracts parse appcast and Cloudflare config. | Third-party requests are stubbed; checking an href is not completing a download. Live probes remain advisory. |
+| Landing page | Local Playwright checks rendering, links, assets and accessibility. Contracts parse appcast and Cloudflare config. | Third-party requests are stubbed; checking an href is not completing a download. CI live probes are advisory; standalone publication now runs a required post-deploy live probe and the six-hour production monitor fails on probe errors. |
 | Sparkle release | Live feed/DMG verification checks metadata, signatures, notarization and launch; failure drafts the GitHub release. | No installed older app is driven through Sparkle's update UI and relaunch. Drafting does not undo already-downloaded copies. |
 | TestFlight | Processing must report `VALID`; rejection or unverified timeout fails. | Upload has already occurred. `VALID` is processing acceptance, not an installed-device journey or external tester approval. Timeout does not cancel processing. |
 
@@ -40,9 +40,8 @@ read-only decision, exercised with failure-injection tests.
 
 Workflow gates are not repository enforcement. Read the actual GitHub rules
 on main before claiming that every suite blocks merges. The owner script
-requests macOS, iOS and appcast checks but omits the path-filtered browser job.
-An always-running aggregate required check could require either browser
-success or a verified irrelevant-path decision. Auto-release now requires
+requests the aggregate, macOS, iOS and appcast checks but omits the path-filtered browser job itself.
+The active `Release gates` ruleset requires the always-running `CI gate` aggregate plus all three native/contract checks, scoped to GitHub Actions. The aggregate requires browser success or a verified irrelevant-path decision. Auto-release now requires
 path detection itself to succeed before accepting a skipped browser suite.
 
 The macOS release independently validates exact tagged-commit CI evidence
@@ -72,3 +71,29 @@ receiving app and reads back exact content. Sync needs two signed clients and
 a controlled account, with persisted/displayed outcomes checked after network
 failure and restart. Until then, do not describe service fixtures or readiness
 smoke as full user e2e, or claim zero production regressions.
+
+## Outstanding-issue closeout (8 September 2026)
+
+- Local regression tests cover nonblocking/per-file image cleanup and the recent-save grace period, redacted error diagnostics, inline-image rendering and changed-byte cache invalidation.
+- Quick Search `!snippet <name or keyword>` reads the current saved template at activation. Date/time, UUID, current clipboard, history offsets and cursor position are resolved for that paste. Settings CRUD/JSON round trips remain supported. Optional keyword expansion is off by default, requires Accessibility and Input Monitoring, resets on focus/pointer/navigation/secure-input changes, and retains only a bounded current token. Test with a synthetic template in a disposable receiving document before enabling it for everyday use.
+- Both row renderers already share `ClipboardRowData`; detector and preview files have already been split by responsibility. The old simplification and inline-image follow-ups require verification, not a second rewrite.
+- `scripts/ci-merge-after-release.mjs` refuses merges while any publication lane or main-push CI is queued/running. This preserves the strict main-supersession policy. It is a maintainer merge entrypoint, not a transactional GitHub merge queue; humans must use the same discipline. Failed completed releases permit corrective merges after investigation.
+- Workflow actions are pinned to commit SHAs, Wrangler to 4.129.1, create-dmg to v1.3.0's commit, and iOS Xcode to the last green CI's 26.3. Update them with native CI evidence; do not float them during recovery.
+- macOS publication retains a dSYM archive and verifies each architecture's UUID before stripping. Upload it to Sentry before claiming production symbolication. Sentry event payloads strip free-form error details, breadcrumbs, requests, user data and incidental context; stack/binary/release evidence remains. Actual event symbolication and alert routing still need a controlled event and access to the Sentry project.
+
+See `Docs/operations-recovery.md` for recovery steps and the external evidence needed to close GitHub #110/#113. Written procedures and synthetic tests do not substitute for an observed two-device, Sparkle, or alert-delivery exercise.
+
+`script/build_and_run.sh` builds a separate **Pasta Development** bundle with
+its own defaults and (in Debug) `Pasta Development` database/image directory.
+It never stops or replaces `/Applications/Pasta.app`. Quit the installed copy
+before testing the shared global shortcut. The development bundle needs its
+own Accessibility/Input Monitoring grants for simulated paste/keyword tests;
+keep these UI checks distinct from service tests. `--build-only` stages the
+bundle without launching; `--verify` checks process survival after launch.
+
+Observed on 8 September: the installed signed app updated from 1.4.0 to 1.5.19
+through Sparkle's Install and Relaunch UI, and its installed deep/strict signature
+verified. A synthetic TextEdit copy/search journey then exposed the main panel
+posting Cmd+V before restoring the receiver. The shared external paste coordinator
+now closes the panel, activates the remembered receiver, and verifies focus
+before posting keys. Re-run that journey on the newly published version.

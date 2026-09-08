@@ -31,7 +31,7 @@ jobs:
       # ============================================================================
       
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0  # Fetch all history for proper version detection
       
@@ -67,6 +67,11 @@ jobs:
             .build/x86_64-apple-macosx/release/PastaApp \
             -output .build/universal/PastaApp
           
+          echo "==> Retaining symbols before stripping"
+          dsymutil .build/universal/PastaApp -o .build/universal/PastaApp.dSYM
+          python3 scripts/ci-verify-symbols.py .build/universal/PastaApp .build/universal/PastaApp.dSYM
+          ditto -c -k --keepParent .build/universal/PastaApp.dSYM .build/universal/PastaApp.dSYM.zip
+
           echo "==> Stripping debug symbols"
           strip -x .build/universal/PastaApp
           
@@ -350,7 +355,15 @@ jobs:
       # ============================================================================
       
       - name: Install create-dmg
-        run: brew install create-dmg
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: create-dmg/create-dmg
+          ref: a2b71d0fda6d0df2a86dc7f67082d4d73e84c59f # v1.3.0
+          path: .build/tools/create-dmg
+          persist-credentials: false
+
+      - name: Add pinned create-dmg to PATH
+        run: echo "$GITHUB_WORKSPACE/.build/tools/create-dmg" >> "$GITHUB_PATH"
       
       - name: Generate DMG assets
         run: |
@@ -571,7 +584,7 @@ jobs:
       # CI may still be running its tag-push job; the shared gate requires
       # completed successful surface jobs without waiting on that parent run.
       - name: Require every surface gate before publishing the release
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const { verifyReleasePublication } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
@@ -583,13 +596,14 @@ jobs:
 
       - name: Create GitHub Release
         id: publish
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
         with:
           name: Pasta ${{ steps.version.outputs.version }}
           body_path: release_notes.md
           files: |
             ${{ steps.dmg.outputs.dmg_file }}
             ${{ env.APPCAST_PATH }}
+            .build/universal/PastaApp.dSYM.zip
           draft: false
           prerelease: false
         env:
@@ -602,15 +616,16 @@ jobs:
           echo "Appcast copied to landing-page/appcast.xml"
       
       - name: Refuse superseded release landing source
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const { verifyCurrentLandingSource } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
             await verifyCurrentLandingSource({ github, ...context.repo, sha: process.env.RELEASE_SHA });
 
       - name: Deploy landing page with updated appcast
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
         with:
+          wranglerVersion: '4.129.1'
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy landing-page --project-name=pasta-app --branch=main
@@ -694,7 +709,7 @@ jobs:
       
       - name: Upload build artifacts (for debugging)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: failed-build-artifacts
           path: |
@@ -708,7 +723,7 @@ jobs:
       # every publication attempt, including failed/cancelled action outcomes.
       - name: Draft release after publication failure
         if: ${{ always() && (failure() || cancelled()) && steps.publication_attempt.outputs.started == 'true' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             const { draftAttemptedRelease } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-draft-release.mjs`);
@@ -734,7 +749,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Verify live appcast, DMG, Gatekeeper, signature and launch
         id: verify

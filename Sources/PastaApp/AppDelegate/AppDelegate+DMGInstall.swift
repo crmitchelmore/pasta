@@ -66,7 +66,7 @@ extension AppDelegate {
                 }
             }
         } catch {
-            PastaLogger.app.debug("Could not check for mounted DMG: \(error.localizedDescription)")
+            PastaLogger.app.debug("Could not check for mounted DMG: \(PastaLogger.diagnosticDescription(error))")
         }
     }
 
@@ -152,7 +152,7 @@ extension AppDelegate {
                     configuration: NSWorkspace.OpenConfiguration()
                 ) { _, error in
                     if let error = error {
-                        PastaLogger.app.error("Failed to relaunch: \(error.localizedDescription)")
+                        PastaLogger.app.error("Failed to relaunch: \(PastaLogger.diagnosticDescription(error))")
                     }
                 }
 
@@ -163,7 +163,7 @@ extension AppDelegate {
             }
 
         } catch {
-            PastaLogger.app.error("Failed to move to Applications: \(error.localizedDescription)")
+            PastaLogger.app.error("Failed to move to Applications: \(PastaLogger.diagnosticDescription(error))")
 
             let errorAlert = NSAlert()
             errorAlert.messageText = "Failed to Move"
@@ -227,7 +227,7 @@ extension AppDelegate {
                 }
             }
         } catch {
-            PastaLogger.app.error("Failed to eject/delete DMG: \(error.localizedDescription)")
+            PastaLogger.app.error("Failed to eject/delete DMG: \(PastaLogger.diagnosticDescription(error))")
         }
     }
 }

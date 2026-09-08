@@ -646,7 +646,7 @@ final class BackgroundService: ObservableObject {
             
             UNUserNotificationCenter.current().add(request) { error in
                 if let error {
-                    PastaLogger.app.warning("Failed to show notification: \(error.localizedDescription)")
+                    PastaLogger.app.warning("Failed to show notification: \(PastaLogger.diagnosticDescription(error))")
                 }
             }
         }

@@ -135,11 +135,11 @@ public final class ScreenshotMonitor {
         
         // Try to use FSEvents for efficient monitoring
         if startFSEventsStream(for: directoryURL) {
-            PastaLogger.clipboard.info("Started FSEvents monitoring for screenshots at \(directoryURL.path)")
+            PastaLogger.clipboard.info("Started FSEvents monitoring for screenshots")
         } else {
             // Fallback to polling
             startPolling()
-            PastaLogger.clipboard.info("Started polling for screenshots at \(directoryURL.path)")
+            PastaLogger.clipboard.info("Started polling for screenshots")
         }
     }
 
@@ -259,7 +259,7 @@ public final class ScreenshotMonitor {
             seenPaths.removeAll()
             captureStartTime = now().addingTimeInterval(-1)
             seedSeenPaths(in: directoryURL)
-            PastaLogger.clipboard.info("Screenshot directory changed to \(directoryURL.path)")
+            PastaLogger.clipboard.info("Screenshot directory changed")
         }
 
         let urls: [URL]
@@ -336,7 +336,7 @@ public final class ScreenshotMonitor {
         do {
             data = try Data(contentsOf: url, options: [.mappedIfSafe])
         } catch {
-            PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Failed to read screenshot file at \(path)")
+            PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Failed to read screenshot file")
             return
         }
 
@@ -349,7 +349,7 @@ public final class ScreenshotMonitor {
         )
 
         guard isRunning else { return }
-        PastaLogger.clipboard.info("Captured screenshot: \(url.lastPathComponent)")
+        PastaLogger.clipboard.info("Captured screenshot")
         seenPaths.insert(path)
         subject.send(entry)
     }
@@ -366,7 +366,7 @@ public final class ScreenshotMonitor {
                 return URL(fileURLWithPath: expanded, isDirectory: true)
             }
 
-            PastaLogger.clipboard.warning("Screenshot directory not accessible at \(expanded)")
+            PastaLogger.clipboard.warning("Screenshot directory not accessible")
             return nil
         }
 

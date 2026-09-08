@@ -219,7 +219,7 @@ public struct QuickSearchView: View {
                 onDismiss()
                 // The handler in AppDelegate will open the main window
 
-            case .dismissed:
+            case .pasteSnippet, .dismissed:
                 onDismiss()
             }
         }
@@ -305,7 +305,7 @@ public struct QuickSearchView: View {
                 .font(.title2)
                 .foregroundStyle(manager.isCommandMode ? PastaTheme.command : .secondary)
 
-            TextField(manager.isCommandMode ? "Type a command..." : "Search clipboard history... (! for commands)", text: $manager.query)
+            TextField(manager.isCommandMode ? "Type a command..." : "Search clipboard history... (!snippet for snippets)", text: $manager.query)
                 .textFieldStyle(.plain)
                 .font(.title3)
                 .focused($isSearchFocused)

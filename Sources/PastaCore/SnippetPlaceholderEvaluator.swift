@@ -6,9 +6,14 @@ public struct SnippetEvaluation: Equatable {
     /// Character offset of the `{cursor}` marker in the rendered text, or
     /// nil if the template did not contain `{cursor}`. Counted in
     /// `String.count` (extended grapheme clusters), matching the offset
-    /// used when constructing the text. v1 only records this; the panel
-    /// pastes the full text and does not move the user's cursor.
+    /// used when constructing the text and restoring the insertion point.
     public var cursorOffset: Int?
+
+    /// Left-arrow count after the rendered text is pasted.
+    public var cursorMoveCount: Int {
+        guard let cursorOffset else { return 0 }
+        return max(0, text.count - max(0, cursorOffset))
+    }
 
     public init(text: String, cursorOffset: Int? = nil) {
         self.text = text

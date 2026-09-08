@@ -50,7 +50,7 @@ public final class DatabaseManager: @unchecked Sendable {
         var writer: any DatabaseWriter
         do {
             writer = try DatabaseManager.openAndMigrate(databaseURL: databaseURL, configuration: config)
-            PastaLogger.database.info("Database initialized at \(databaseURL.path)")
+            PastaLogger.database.info("Database initialized")
         } catch {
             PastaLogger.logError(error, logger: PastaLogger.database, context: "Database initialization or migration failed")
 
@@ -59,7 +59,7 @@ public final class DatabaseManager: @unchecked Sendable {
                 do {
                     try DatabaseManager.quarantineCorruptedDatabase(databaseURL: databaseURL)
                     writer = try DatabaseManager.openAndMigrate(databaseURL: databaseURL, configuration: config)
-                    PastaLogger.database.info("Database recovered and re-initialized at \(databaseURL.path)")
+                    PastaLogger.database.info("Database recovered and re-initialized")
                 } catch {
                     PastaLogger.logError(error, logger: PastaLogger.database, context: "Database recovery failed")
                     throw PastaError.databaseCorrupted(underlying: error)
@@ -132,7 +132,7 @@ public final class DatabaseManager: @unchecked Sendable {
                 try fm.moveItem(at: url, to: quarantine.appendingPathComponent(url.lastPathComponent))
             }
         }
-        PastaLogger.database.warning("Preserved corrupted database at \(quarantine.path)")
+        PastaLogger.database.warning("Preserved corrupted database for recovery")
         return quarantine
     }
 
@@ -143,7 +143,7 @@ public final class DatabaseManager: @unchecked Sendable {
     public static func defaultDatabaseURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return appSupport
-            .appendingPathComponent("Pasta", isDirectory: true)
+            .appendingPathComponent(PastaStorageLocation.directoryName, isDirectory: true)
             .appendingPathComponent("pasta.sqlite")
     }
 }
