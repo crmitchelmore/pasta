@@ -6,26 +6,26 @@
     <description>Most recent updates to Pasta</description>
     <language>en</language>
     <item>
-      <title>Version 1.6.1</title>
-      <sparkle:version>162</sparkle:version>
-      <sparkle:shortVersionString>1.6.1</sparkle:shortVersionString>
-      <pubDate>Tue, 08 Sep 2026 16:49:36 +0000</pubDate>
+      <title>Version 1.6.2</title>
+      <sparkle:version>163</sparkle:version>
+      <sparkle:shortVersionString>1.6.2</sparkle:shortVersionString>
+      <pubDate>Tue, 08 Sep 2026 20:53:51 +0000</pubDate>
       <description><![CDATA[
 <h2>What’s new</h2>
 <h3>Fixes</h3>
 <ul>
-<li>make pane dividers resize reliably (#122)</li>
+<li>restore automatic Mac receiving and add safe diagnostics (#123)</li>
 </ul>
 <h3>Under the hood</h3>
 <ul>
-<li>update appcast for v1.6.0 [skip ci]</li>
+<li>update appcast for v1.6.1 [skip ci]</li>
 </ul>
-<p><strong>Full changelog:</strong> <a href="https://github.com/crmitchelmore/pasta/compare/v1.6.0...v1.6.1">https://github.com/crmitchelmore/pasta/compare/v1.6.0...v1.6.1</a></p>
+<p><strong>Full changelog:</strong> <a href="https://github.com/crmitchelmore/pasta/compare/v1.6.1...v1.6.2">https://github.com/crmitchelmore/pasta/compare/v1.6.1...v1.6.2</a></p>
       ]]></description>
       <enclosure
-        url="https://github.com/crmitchelmore/pasta/releases/download/v1.6.1/Pasta-1.6.1.dmg"
-        sparkle:edSignature="QAsJDOOS6hDQuDzlTtHFUkp37Acgdgbmw+9BXc1Pq2AmZv5KYY6OjDbzcxTXCiP1DwxCijpEowQ2xgTirK09Bg=="
-        length="17443013"
+        url="https://github.com/crmitchelmore/pasta/releases/download/v1.6.2/Pasta-1.6.2.dmg"
+        sparkle:edSignature="gftIuZkQrgB7M2NEdIyLLG1uTnuqdBdSCHCkH58pkJzy44tTrSaIfEPHxFPfg0aIPPXlvygVVHyV51PBvvJ9DA=="
+        length="17532436"
         type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
