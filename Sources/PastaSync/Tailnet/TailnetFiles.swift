@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import CryptoKit
+import Darwin
 import PastaCore
 
 public enum TailnetError: LocalizedError, Sendable {
@@ -87,6 +88,9 @@ struct TailnetPrepared: Sendable {
 /// Only regular files/directories, no archive extraction and no executable launch.
 struct TailnetFiles: Sendable {
     static let chunkSize = 256 * 1024
+    // Matches the largest configurable receiver quota. Sender snapshots also
+    // preserve the same free-space reserve used by incoming transfers.
+    static let maximumSelectionBytes: Int64 = 1_000_000_000_000
     let root: URL
     init(root: URL) throws {
         self.root = root
@@ -110,12 +114,17 @@ struct TailnetFiles: Sendable {
             if original.contentType == .filePath {
                 result.manifest.entry.content = ""
                 guard !original.filePaths.isEmpty, original.filePaths.count <= 1000 else { throw TailnetError.invalid("Empty or oversized file selection.") }
+                let temporary = root.appendingPathComponent("out-\(UUID().uuidString)", isDirectory: true)
+                result.temporary = temporary
+                try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
                 for (index, path) in original.filePaths.enumerated() {
                     guard path.hasPrefix("/") else { throw TailnetError.invalid("A file selection must use absolute local paths.") }
                     let source = URL(fileURLWithPath: path)
                     let relative = "\(index)/\(source.lastPathComponent)"
                     result.manifest.roots.append(relative)
-                    try append(source, relative: relative, captured: original.timestamp, result: &result)
+                    let descriptor = try openSource(path, parent: AT_FDCWD)
+                    defer { Darwin.close(descriptor) }
+                    try append(descriptor, relative: relative, captured: original.timestamp, result: &result)
                 }
             } else if let bytes = original.rawData {
                 guard bytes.count <= 64_000_000 else { throw TailnetError.invalid("Clipboard attachment exceeds 64 MB.") }
@@ -135,21 +144,89 @@ struct TailnetFiles: Sendable {
             return result
         } catch { result.cleanup(); throw error }
     }
-    private func append(_ source: URL, relative: String, captured: Date, result: inout TailnetPrepared) throws {
+    private func openSource(_ path: String, parent: Int32) throws -> Int32 {
+        // Every descendant is opened relative to a held directory descriptor.
+        // A rename cannot redirect traversal, and O_NONBLOCK prevents a swapped
+        // FIFO from hanging before fstat rejects it.
+        let descriptor = Darwin.openat(parent, path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard descriptor >= 0 else {
+            throw TailnetError.unavailable("Source unavailable or a symbolic link. Restore the original file or folder, then Retry.")
+        }
+        return descriptor
+    }
+    private func children(of descriptor: Int32) throws -> [String] {
+        let copy = Darwin.dup(descriptor)
+        guard copy >= 0 else { throw TailnetError.unavailable("Could not read the source folder. Retry.") }
+        guard let directory = fdopendir(copy) else {
+            Darwin.close(copy)
+            throw TailnetError.unavailable("Could not read the source folder. Retry.")
+        }
+        defer { closedir(directory) }
+        var names: [String] = []
+        while true {
+            try Task.checkCancellation()
+            errno = 0
+            guard let entry = readdir(directory) else {
+                guard errno == 0 else { throw TailnetError.unavailable("Could not read the complete source folder. Retry.") }
+                break
+            }
+            let name = withUnsafeBytes(of: &entry.pointee.d_name) { bytes in
+                String(cString: bytes.baseAddress!.assumingMemoryBound(to: CChar.self))
+            }
+            guard name != ".", name != ".." else { continue }
+            guard names.count < 10_000 else { throw TailnetError.invalid("Selection exceeds 10,000 files/folders.") }
+            names.append(name)
+        }
+        return names.sorted()
+    }
+    private func append(_ descriptor: Int32, relative: String, captured: Date, result: inout TailnetPrepared) throws {
         try Task.checkCancellation()
         try TailnetManifest.validatePath(relative)
         guard result.manifest.files.count + result.manifest.directories.count < 10_000 else { throw TailnetError.invalid("Selection exceeds 10,000 files/folders.") }
-        let values = try source.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey, .fileSizeKey, .contentModificationDateKey])
-        guard values.isSymbolicLink != true else { throw TailnetError.invalid("Symbolic links are not transferred. Copy their contents explicitly.") }
-        if let modified = values.contentModificationDate, modified > captured { result.manifest.changedSinceCapture = true }
-        if values.isDirectory == true {
+        var before = stat()
+        guard fstat(descriptor, &before) == 0 else { throw TailnetError.unavailable("Could not inspect the source. Retry.") }
+        let modified = Date(timeIntervalSince1970: Double(before.st_mtimespec.tv_sec) + Double(before.st_mtimespec.tv_nsec) / 1_000_000_000)
+        if modified > captured { result.manifest.changedSinceCapture = true }
+        if before.st_mode & S_IFMT == S_IFDIR {
             result.manifest.directories.append(relative)
-            for child in try FileManager.default.contentsOfDirectory(at: source, includingPropertiesForKeys: nil).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-                try append(child, relative: relative + "/" + child.lastPathComponent, captured: captured, result: &result)
+            for name in try children(of: descriptor) {
+                let child = try openSource(name, parent: descriptor)
+                defer { Darwin.close(child) }
+                try append(child, relative: relative + "/" + name, captured: captured, result: &result)
             }
-        } else if values.isRegularFile == true {
-            result.manifest.files.append(TailnetFile(path: relative, size: Int64(values.fileSize ?? 0), sha256: try Self.hashFile(source)))
-            result.sources.append(source)
+        } else if before.st_mode & S_IFMT == S_IFREG {
+            let size = Int64(before.st_size)
+            guard size >= 0, size <= Self.maximumSelectionBytes - result.manifest.totalBytes else {
+                throw TailnetError.invalid("Selection exceeds the maximum 1 TB transfer size.")
+            }
+            let free = (try FileManager.default.attributesOfFileSystem(forPath: root.path)[.systemFreeSize] as? NSNumber)?.int64Value ?? 0
+            guard size <= max(0, free - 64_000_000) else {
+                throw TailnetError.unavailable("Not enough free space to prepare this selection. Free space, then retry.")
+            }
+            let snapshot = result.temporary!.appendingPathComponent(String(result.sources.count))
+            guard FileManager.default.createFile(atPath: snapshot.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { throw CocoaError(.fileWriteUnknown) }
+            let output = try FileHandle(forWritingTo: snapshot); defer { try? output.close() }
+            let input = FileHandle(fileDescriptor: descriptor, closeOnDealloc: false)
+            var remaining = size
+            var hash = SHA256()
+            while remaining > 0 {
+                try Task.checkCancellation()
+                guard let bytes = try input.read(upToCount: Int(min(Int64(Self.chunkSize), remaining))), !bytes.isEmpty else {
+                    throw TailnetError.invalid("Source changed while preparing. Retry to send its current contents.")
+                }
+                try output.write(contentsOf: bytes)
+                hash.update(data: bytes); remaining -= Int64(bytes.count)
+            }
+            var after = stat()
+            guard fstat(descriptor, &after) == 0, after.st_size == before.st_size,
+                  after.st_mtimespec.tv_sec == before.st_mtimespec.tv_sec, after.st_mtimespec.tv_nsec == before.st_mtimespec.tv_nsec,
+                  after.st_ctimespec.tv_sec == before.st_ctimespec.tv_sec, after.st_ctimespec.tv_nsec == before.st_ctimespec.tv_nsec else {
+                throw TailnetError.invalid("Source changed while preparing. Retry to send its current contents.")
+            }
+            // Hash the bytes written to private staging, then send only those
+            // snapshots. Approval can never authorise a later source mutation.
+            result.manifest.files.append(TailnetFile(path: relative, size: size, sha256: hash.finalize().map { String(format: "%02x", $0) }.joined()))
+            result.sources.append(snapshot)
         } else { throw TailnetError.invalid("Only regular files and folders can be transferred.") }
     }
 

@@ -1,5 +1,6 @@
 #if os(macOS)
 import XCTest
+import Darwin
 import PastaCore
 @testable import PastaSync
 
@@ -39,8 +40,44 @@ final class TailnetFilesTests: XCTestCase {
         let captured = ClipboardEntry(content: original.path, contentType: .filePath, rawData: try JSONEncoder().encode([original.path]))
         let prepared = try files.prepare(captured, backfill: false); defer { prepared.cleanup() }
         XCTAssertEqual(prepared.manifest.roots, ["0/real\nfile.txt"])
-        XCTAssertEqual(prepared.sources, [original])
+        XCTAssertNotEqual(prepared.sources, [original])
+        XCTAssertEqual(try Data(contentsOf: prepared.sources[0]), Data([1, 2, 3]))
         XCTAssertEqual(prepared.manifest.totalBytes, 3)
+    }
+    func testPreparedSnapshotSurvivesSourceReplacementWithOutsideSymlinkAndCleansUp() throws {
+        let files = try TailnetFiles(root: root.appendingPathComponent("holding"))
+        let source = root.appendingPathComponent("original")
+        let outside = root.appendingPathComponent("outside")
+        let bytes = Data([1, 2, 3])
+        try bytes.write(to: source)
+        try Data([7, 8, 9]).write(to: outside)
+        let prepared = try files.prepare(ClipboardEntry(content: source.path, contentType: .filePath), backfill: false)
+        defer { prepared.cleanup() }
+        try FileManager.default.removeItem(at: source)
+        try FileManager.default.createSymbolicLink(at: source, withDestinationURL: outside)
+        XCTAssertEqual(try Data(contentsOf: prepared.sources[0]), bytes)
+        XCTAssertEqual(try TailnetFiles.hashFile(prepared.sources[0]), prepared.manifest.files[0].sha256)
+        prepared.cleanup()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: prepared.sources[0].path))
+        XCTAssertEqual(try Data(contentsOf: outside), Data([7, 8, 9]))
+    }
+    func testNestedSymlinksAndSpecialFilesFailWithoutLeavingSnapshots() throws {
+        let files = try TailnetFiles(root: root.appendingPathComponent("holding"))
+        let source = root.appendingPathComponent("selection")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try Data([1]).write(to: source.appendingPathComponent("first"))
+        let outside = root.appendingPathComponent("outside")
+        try Data([9]).write(to: outside)
+        let link = source.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+        let entry = ClipboardEntry(content: source.path, contentType: .filePath)
+        XCTAssertThrowsError(try files.prepare(entry, backfill: false))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: files.root.path), [])
+        try FileManager.default.removeItem(at: link)
+        let fifo = source.appendingPathComponent("pipe")
+        XCTAssertEqual(mkfifo(fifo.path, 0o600), 0)
+        XCTAssertThrowsError(try files.prepare(entry, backfill: false))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: files.root.path), [])
     }
     func testAggregateSizeEmptyFoldersAndSourceChange() throws {
         let files = try TailnetFiles(root: root.appendingPathComponent("holding"))

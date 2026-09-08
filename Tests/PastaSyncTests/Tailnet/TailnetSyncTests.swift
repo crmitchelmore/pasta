@@ -269,6 +269,35 @@ final class TailnetSyncTests: XCTestCase {
         XCTAssertEqual(try b.db.unsyncedCount(), 0)
     }
 
+    func testApprovedFileCannotChangeBetweenManifestAndFirstChunk() async throws {
+        let network = TailnetTestNetwork()
+        let a = try await TailnetTestNode(1, network: network, parent: root)
+        let b = try await TailnetTestNode(2, network: network, parent: root)
+        try await a.pair(b)
+        var policy = try a.peer(b); policy.approvalBytes = 10
+        try await a.engine.update(policy)
+        let source = root.appendingPathComponent("approved.txt")
+        let approvedBytes = Data(repeating: 7, count: 20)
+        try approvedBytes.write(to: source)
+        let entry = ClipboardEntry(content: source.path, contentType: .filePath)
+        try a.db.insert(entry); await a.tick()
+        let transfers = try await a.engine.snapshot().transfers
+        let approval = try XCTUnwrap(transfers.first { $0.state == .approval })
+        try await a.engine.decideTransfer(approval, approve: true)
+        await network.pauseOnResponse(.begin)
+        let sending = Task { await a.tick() }
+        await network.waitForPause()
+        // The receiver has accepted the approved manifest, but no bytes have
+        // been sent. In-place edits must not alter that approved payload.
+        let writer = try FileHandle(forWritingTo: source)
+        try writer.write(contentsOf: Data(repeating: 9, count: 20)); try writer.close()
+        await network.resume(); await sending.value
+        let transmitted = await network.lastChunk
+        XCTAssertEqual(transmitted, approvedBytes, "No unapproved bytes may cross the pairing, even if the receiver would reject their hash")
+        let received = try XCTUnwrap(b.db.fetch(id: entry.id))
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: received.filePaths[0])), approvedBytes)
+    }
+
     func testInterruptedChunksResumeAndHeldFilesFollowRetentionWithoutDeletingOriginals() async throws {
         let network = TailnetTestNetwork()
         let a = try await TailnetTestNode(1, network: network, parent: root)
