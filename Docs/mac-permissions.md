@@ -20,6 +20,7 @@ Alpha, Development and renamed copies. Non-bundled executables get a launch-a-bu
 fallback. The exact app path can be copied; the + button in System Settings is the
 keyboard alternative to dragging. Reduce Motion disables the decorative arrow.
 The standard Window menu, Return (Check Again), and Escape support keyboard use.
+Recheck feedback and action buttons stay visible while instructions scroll.
 Opening failures retain the full manual navigation path. A fresh Check Again
 reports success or the missing permission; follow a restart only when macOS asks.
 

@@ -28,7 +28,7 @@ public struct OnboardingView: View {
     private let onComplete: (Completion) -> Void
     
     /// Accessibility is the only permission pasting depends on; Input
-    /// Monitoring is surfaced as optional and never gates progress.
+    /// Monitoring is configured separately with optional snippet expansion.
     private var hasRequiredPermissions: Bool {
         hasAccessibility
     }

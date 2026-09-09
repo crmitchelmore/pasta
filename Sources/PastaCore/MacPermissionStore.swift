@@ -105,7 +105,10 @@ public final class PermissionDependentMonitor {
         self.stop = stop
     }
 
-    public func update(enabled: Bool, snapshot: MacPermissionSnapshot) {
+    public func update(enabled: Bool, snapshot: MacPermissionSnapshot, restart: Bool = false) {
+        // Access may have been revoked and granted while the app was inactive.
+        // The final OS snapshot can match even though the old monitor is unusable.
+        if restart { stopMonitoring() }
         if enabled && snapshot.allowsKeywordExpansion {
             if monitor == nil { monitor = start() }
         } else {

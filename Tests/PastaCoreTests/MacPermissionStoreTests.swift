@@ -103,5 +103,17 @@ final class MacPermissionStoreTests: XCTestCase {
         monitor = nil
         XCTAssertEqual(stops, 1)
     }
+
+    func testActivationRearmsMonitorEvenWhenFinalSnapshotIsUnchanged() {
+        var starts = 0
+        var stops = 0
+        let monitor = PermissionDependentMonitor(start: { starts += 1; return starts }, stop: { _ in stops += 1 })
+        let granted = MacPermissionSnapshot(accessibility: true, inputMonitoring: true)
+        monitor.update(enabled: true, snapshot: granted)
+        monitor.update(enabled: true, snapshot: granted, restart: true)
+        XCTAssertEqual(starts, 2)
+        XCTAssertEqual(stops, 1)
+        XCTAssertTrue(monitor.isRunning)
+    }
 }
 #endif

@@ -581,7 +581,7 @@ private struct AccessibilityPermissionBanner: View {
         HStack(spacing: PastaTheme.Spacing.md) {
             Image(systemName: "hand.raised.fill")
                 .foregroundStyle(.secondary)
-            Text("Grant Accessibility access so Pasta can paste into other apps.")
+            Text("Grant Accessibility access so \(PermissionAppIdentity.current.name) can paste into other apps.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

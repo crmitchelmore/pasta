@@ -23,7 +23,7 @@ final class SnippetExpansionController {
     init() {
         for name in [UserDefaults.didChangeNotification, .snippetsDidChange, NSApplication.didBecomeActiveNotification] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.refresh() }
+                Task { @MainActor in self?.refresh(restartMonitor: name == NSApplication.didBecomeActiveNotification) }
             })
         }
         permissionSubscription = MacPermissionStore.shared.$snapshot.removeDuplicates().sink { [weak self] _ in
@@ -33,14 +33,14 @@ final class SnippetExpansionController {
         refresh()
     }
 
-    private func refresh() {
+    private func refresh(restartMonitor: Bool = false) {
         generation += 1
         matcher.reset()
         MacPermissionStore.shared.refresh()
         let snapshot = MacPermissionStore.shared.snapshot
         let enabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
             && ProcessInfo.processInfo.environment["PASTA_CI"] == nil
-        monitor.update(enabled: enabled, snapshot: snapshot)
+        monitor.update(enabled: enabled, snapshot: snapshot, restart: restartMonitor)
         guard enabled && snapshot.allowsKeywordExpansion else {
             snippets = []
             return

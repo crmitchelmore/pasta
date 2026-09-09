@@ -1,14 +1,14 @@
 import AppKit
 import PastaCore
 
-struct PermissionAppIdentity: Equatable {
-    let bundleURL: URL
-    let name: String
+public struct PermissionAppIdentity: Equatable {
+    public let bundleURL: URL
+    public let name: String
     var isAppBundle: Bool { bundleURL.pathExtension.lowercased() == "app" }
 
-    static var current: Self { Self(bundleURL: Bundle.main.bundleURL) }
+    public static var current: Self { Self(bundleURL: Bundle.main.bundleURL) }
 
-    init(bundleURL: URL, displayName: String? = nil) {
+    public init(bundleURL: URL, displayName: String? = nil) {
         self.bundleURL = bundleURL
         let displayed = displayName ?? FileManager.default.displayName(atPath: bundleURL.path)
         name = displayed.hasSuffix(".app") ? String(displayed.dropLast(4)) : displayed
@@ -46,7 +46,7 @@ final class PermissionGuidanceModel: ObservableObject {
         store.refresh()
         feedback = store.snapshot.allows(permission)
             ? "\(permission.title) access is available for \(identity.name)."
-            : "\(permission.title) access is still missing for \(identity.name). Check the app and switch in System Settings. If macOS asks you to quit and reopen the app, follow that instruction."
+            : "\(permission.title) access is still missing for \(identity.name). Check its switch in System Settings."
         beginChecking()
     }
 

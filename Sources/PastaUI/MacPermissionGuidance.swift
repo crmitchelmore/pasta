@@ -88,22 +88,26 @@ private struct PermissionGuideView: View {
                 }
                 Text("Other builds and copies can have separate permissions. Check that the enabled app is this copy.")
                     .font(.caption).foregroundStyle(.secondary)
-                if !model.feedback.isEmpty {
-                    Text(model.feedback).font(.callout)
-                        .accessibilityLabel(model.feedback)
-                }
+                Text("If macOS asks you to quit and reopen the app, follow that instruction.")
+                    .font(.caption).foregroundStyle(.secondary)
 
             }
             .padding(20)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-        HStack {
-            Button("Open Settings") { model.openSettings() }
-            Button("Check Again") { model.checkAgain() }
-                .keyboardShortcut(.return, modifiers: [])
-            Spacer()
-            Button("Close", action: close).keyboardShortcut(.cancelAction)
-        }
+            VStack(alignment: .leading, spacing: 12) {
+                if !model.feedback.isEmpty {
+                    Text(model.feedback).font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    Button("Open Settings") { model.openSettings() }
+                    Button("Check Again") { model.checkAgain() }
+                        .keyboardShortcut(.return, modifiers: [])
+                    Spacer()
+                    Button("Close", action: close).keyboardShortcut(.cancelAction)
+                }
+            }
             .padding(16)
             .background(.regularMaterial)
         }
