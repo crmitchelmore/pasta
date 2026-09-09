@@ -27,18 +27,12 @@ struct AboutSettingsTab: View {
         Form {
             Section {
                 HStack(alignment: .top, spacing: 16) {
-                    if let appIcon = NSImage(named: "AppIcon") {
-                        Image(nsImage: appIcon)
-                            .resizable()
-                            .frame(width: 64, height: 64)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    } else {
-                        Image(systemName: "doc.on.clipboard.fill")
-                            .font(.system(size: 48))
-                            .foregroundStyle(PastaTheme.accent)
-                            .frame(width: 64, height: 64)
-                    }
-                    
+                    Image(nsImage: NSApplication.shared.applicationIconImage)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 64, height: 64)
+                        .accessibilityLabel("Pasta app icon")
+
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Pasta")
                             .font(.title2.bold())

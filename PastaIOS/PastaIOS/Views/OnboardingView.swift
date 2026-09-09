@@ -14,9 +14,12 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
 
             // Icon
-            Image(systemName: "clipboard.fill")
-                .font(.system(size: 72))
-                .foregroundColor(.accentColor)
+            Image("PastaMark")
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 96, height: 96)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .accessibilityLabel("Pasta app icon")
                 .padding(.bottom, 24)
 
             // Title

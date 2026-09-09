@@ -191,24 +191,11 @@ public struct OnboardingView: View {
         VStack(spacing: 24) {
             Spacer()
             
-            // App icon / logo area
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [PastaTheme.accent.opacity(0.3), PastaTheme.accent.opacity(0.05)],
-                            center: .center,
-                            startRadius: 0,
-                            endRadius: 60
-                        )
-                    )
-                    .frame(width: 120, height: 120)
-                
-                Image(systemName: "doc.on.clipboard")
-                    .font(.system(size: 48, weight: .light))
-                    .foregroundStyle(PastaTheme.accent)
-                    .symbolEffect(.bounce, value: appearAnimation)
-            }
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 120, height: 120)
+                .accessibilityLabel("Pasta app icon")
             .scaleEffect(appearAnimation ? 1 : 0.8)
             .opacity(appearAnimation ? 1 : 0)
             
