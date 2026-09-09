@@ -6,7 +6,7 @@ extension DatabaseManager {
     public func syncDiagnosticSnapshot() throws -> SyncLocalSnapshot {
         try dbWriter.read { db in
             let ids = try String.fetchAll(db, sql: "SELECT id FROM clipboard_entries")
-            let pending = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM clipboard_entries WHERE isSynced = 0") ?? 0
+            let pending = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM clipboard_entries WHERE isSynced = 0 AND cloudSyncAllowed = 1 AND contentType != 'filePath'") ?? 0
             let hasCheckpoint = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM sync_checkpoints WHERE name = 'cloudkit')") ?? false
             return SyncLocalSnapshot(recordIDs: Set(ids.map { $0.uppercased() }), pendingCount: pending, hasCheckpoint: hasCheckpoint)
         }
@@ -39,8 +39,8 @@ extension DatabaseManager {
                     sql: """
                     INSERT INTO \(ClipboardEntry.databaseTableName)
                     (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp,
-                     metadata, contentHash, parentEntryId, isPinned, contentTypeMask, isSynced)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1)
+                     metadata, contentHash, parentEntryId, isPinned, contentTypeMask, receivedViaTailnet, isSynced)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1)
                     ON CONFLICT(id) DO UPDATE SET
                         content = excluded.content,
                         contentType = excluded.contentType,
@@ -61,6 +61,7 @@ extension DatabaseManager {
                         contentHash = excluded.contentHash,
                         parentEntryId = excluded.parentEntryId,
                         contentTypeMask = excluded.contentTypeMask,
+                        receivedViaTailnet = MAX(clipboard_entries.receivedViaTailnet, excluded.receivedViaTailnet),
                         isSynced = 1
                     """,
                     arguments: [
@@ -76,6 +77,7 @@ extension DatabaseManager {
                         entry.contentHash,
                         entry.parentEntryId?.uuidString,
                         entry.contentTypeMask,
+                        entry.receivedViaTailnet,
                     ]
                 )
             }
@@ -162,7 +164,7 @@ extension DatabaseManager {
     public func fetchUnsynced(limit: Int? = nil) throws -> [ClipboardEntry] {
         try dbWriter.read { db in
             var request = ClipboardEntry
-                .filter(Column("isSynced") == false)
+                .filter(Column("isSynced") == false && Column("cloudSyncAllowed") == true && Column("contentType") != "filePath")
                 .order(Column("timestamp").desc)
 
             if let limit {
@@ -178,7 +180,7 @@ extension DatabaseManager {
         try dbWriter.read { db in
             try Int.fetchOne(
                 db,
-                sql: "SELECT COUNT(*) FROM \(ClipboardEntry.databaseTableName) WHERE isSynced = 0"
+                sql: "SELECT COUNT(*) FROM \(ClipboardEntry.databaseTableName) WHERE isSynced = 0 AND cloudSyncAllowed = 1 AND contentType != 'filePath'"
             ) ?? 0
         }
     }

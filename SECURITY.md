@@ -77,6 +77,10 @@ Pasta is designed with privacy and security in mind:
     - **Unconfigured builds:** if a build has no PostHog project key (all local and self-built
       binaries), analytics are a permanent no-op that opens no files and makes no requests.
 - ✅ **Optional iCloud sync** - CloudKit sync is opt-in and uses your private iCloud database. Disable it in Settings → iCloud if you prefer purely local storage.
+- ✅ **Optional Tailnet Sync** - Off by default. Enabling it discovers visible Tailscale Macs and accepts pairing requests; the target must explicitly approve before clipboard content is shared. Pasta listens only on its Tailscale IPv4 address (TCP 45873), checks the requesting node against the current peer inventory, and stores revocable 256-bit pairing secrets in the device-only login Keychain. It does not use a public Pasta sync service or a tailnet admin API key. Tailscale supplies transport encryption; tailnet policy still controls reachability.
+  - Each direction has independent sending/forwarding controls. Received-item forwarding, onward iCloud publication and automatic clipboard replacement default off. Existing capture exclusions apply; there is no additional tailnet secret filter.
+  - Selected files and folders are copied into a private holding area, never uploaded to iCloud. A selection over 50 MB needs sender approval by default; the receiver also imposes a configurable size limit. Paths and manifests are validated, symlinks/special files are rejected, chunks are bounded, and digests are checked before committing history. Received files are not opened or executed automatically.
+  - Removing a pairing revokes future transfers, not content already received. Deleting/expiring history removes held files. Small ID-only journal/receipt records survive history deletion to suppress loops and redelivery; they contain no clipboard payloads.
 - ✅ **Auto-updates via Sparkle** - Pasta checks for updates from the project's signed appcast. You can disable automatic checks in Settings → About.
 - ✅ **Sandboxed permissions** - Only requests necessary macOS permissions.
 
@@ -85,6 +89,7 @@ Pasta is designed with privacy and security in mind:
 Clipboard data is stored locally at:
 - Database: `~/Library/Application Support/Pasta/pasta.sqlite`
 - Images: `~/Library/Application Support/Pasta/Images/`
+- Received files and interrupted-transfer staging: `~/Library/Application Support/Pasta/Tailnet Files/`
 - Analytics state (only when opted in): `~/Library/Application Support/Pasta/analytics_state.json`
   (consent flag, random UUID, last daily-event date) and `analytics_queue.json` (undelivered
   events, pruned to 7 days / 1000 entries). Both are deleted when you opt out.

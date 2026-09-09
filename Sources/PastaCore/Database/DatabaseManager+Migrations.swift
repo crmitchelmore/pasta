@@ -227,6 +227,27 @@ extension DatabaseManager {
             }
         }
 
+        migrator.registerMigration("tailnetSyncV1") { db in
+            try db.alter(table: "clipboard_entries") { t in
+                t.add(column: "cloudSyncAllowed", .boolean).notNull().defaults(to: true)
+                t.add(column: "receivedViaTailnet", .boolean).notNull().defaults(to: false)
+            }
+            try db.execute(sql: """
+                CREATE TABLE tailnet_journal (sequence INTEGER PRIMARY KEY AUTOINCREMENT, entryID TEXT NOT NULL UNIQUE);
+                INSERT INTO tailnet_journal (entryID) SELECT id FROM clipboard_entries ORDER BY timestamp, rowid;
+                CREATE TRIGGER tailnet_journal_insert AFTER INSERT ON clipboard_entries BEGIN
+                    INSERT OR IGNORE INTO tailnet_journal (entryID) VALUES (new.id);
+                END;
+                CREATE TABLE tailnet_receipts (entryID TEXT PRIMARY KEY NOT NULL);
+                CREATE TABLE tailnet_peers (nodeID TEXT PRIMARY KEY NOT NULL, configuration BLOB NOT NULL);
+                CREATE TABLE tailnet_queue (
+                    nodeID TEXT NOT NULL, entryID TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
+                    backfill INTEGER NOT NULL DEFAULT 0, detail TEXT, approvedDigest TEXT,
+                    PRIMARY KEY (nodeID, entryID));
+                CREATE INDEX tailnet_queue_state ON tailnet_queue(nodeID, state);
+                """)
+        }
+
         return migrator
     }
 }

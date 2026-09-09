@@ -169,6 +169,7 @@ public final class SyncManager: ObservableObject {
     /// Throws (leaving the entry unsynced, so `fetchUnsynced` retries it
     /// later) when the record's temporary asset file cannot be written.
     public func pushEntry(_ entry: ClipboardEntry) async throws {
+        guard entry.allowsCloudUpload else { throw CocoaError(.fileReadNoPermission) }
         // Callers mark the entry synced on success. An unavailable transport
         // must fail so the local row remains queued for a later upload.
         guard resolveContainer(), let database else { throw CKError(.notAuthenticated) }
@@ -216,6 +217,8 @@ public final class SyncManager: ObservableObject {
         batchSize: Int = 200,
         onBatchSynced: (([UUID]) -> Void)? = nil
     ) async throws -> Int {
+        let entries = entries.filter(\.allowsCloudUpload)
+        guard !entries.isEmpty else { return 0 }
         guard resolveContainer(), let database else { throw CKError(.notAuthenticated) }
         let generation = try transferGeneration()
         syncCancelled = false

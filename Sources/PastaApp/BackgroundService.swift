@@ -22,6 +22,7 @@ final class BackgroundService: ObservableObject {
     
     let database: DatabaseManager
     let syncManager: SyncManager
+    private(set) var tailnetSync: TailnetSyncController?
     
     private let imageStorage: ImageStorageManager
     /// A dismissed error must not turn temporary fallback storage into healthy
@@ -122,6 +123,10 @@ final class BackgroundService: ObservableObject {
             CIReadiness.reportDegraded(reason: dbError != nil ? "in-memory-database" : "temporary-image-storage")
         }
         self.syncManager = SyncManager(containerIdentifier: "iCloud.com.pasta.ios")
+        if !CIReadiness.isEnabled && dbError == nil && storageError == nil {
+            do { self.tailnetSync = try TailnetSyncController(database: db) }
+            catch { PastaLogger.app.error("Tailnet storage unavailable; peer sync disabled") }
+        }
         
         self.clipboardMonitor = ClipboardMonitor()
         self.contentTypeDetector = ContentTypeDetector()
@@ -142,6 +147,7 @@ final class BackgroundService: ObservableObject {
     }
     
     func start() {
+        tailnetSync?.start()
         setupSync()
         let isPaused = UserDefaults.standard.bool(forKey: Defaults.pauseMonitoring)
         if isPaused {
@@ -213,6 +219,7 @@ final class BackgroundService: ObservableObject {
     }
     
     func stop() {
+        tailnetSync?.stop()
         syncReceiver.stop()
         clipboardMonitor.stop()
         screenshotMonitor.stop()

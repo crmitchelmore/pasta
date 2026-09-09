@@ -39,13 +39,15 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 PLIST
 codesign --force --deep --sign "${CODE_SIGN_IDENTITY:--}" "$APP_DIR"
 codesign --verify --deep --strict "$APP_DIR"
+# SwiftPM build caches may be redirected through a symlink on this machine.
+RUNNING_BINARY="$(cd "$APP_DIR/Contents/MacOS" && pwd -P)/PastaDevelopment"
 case "$MODE" in
   --build-only) echo "$APP_DIR" ;;
   --debug) lldb -- "$BINARY" ;;
   run|--verify|--logs|--telemetry)
     open -n "$APP_DIR"
     if [ "$MODE" = --verify ]; then
-      for _ in {1..20}; do pgrep -f "$BINARY" >/dev/null && exit 0; sleep 0.25; done
+      for _ in {1..20}; do pgrep -f "$RUNNING_BINARY" >/dev/null && exit 0; sleep 0.25; done
       echo 'Development app did not stay running' >&2; exit 1
     elif [ "$MODE" = --logs ] || [ "$MODE" = --telemetry ]; then
       log stream --info --style compact --predicate 'process == "PastaDevelopment"'

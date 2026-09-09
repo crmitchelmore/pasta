@@ -9,6 +9,7 @@ import AppKit
 public enum PasteboardContents: Equatable {
     case text(String)
     case rtf(String)
+    case richText(String, Data)
     case image(Data)
     case filePaths([String])
 }
@@ -65,6 +66,10 @@ public protocol WorkspaceProviding {
 }
 
 #if canImport(AppKit)
+public extension NSPasteboard.PasteboardType {
+    static let pastaTailnetReceived = Self("com.pasta.tailnet-received")
+}
+
 public struct SystemPasteboard: PasteboardProviding {
     private let pasteboard: NSPasteboard
     
@@ -82,6 +87,7 @@ public struct SystemPasteboard: PasteboardProviding {
     public var changeCount: Int { pasteboard.changeCount }
 
     public func readContents() -> PasteboardContents? {
+        if pasteboard.types?.contains(.pastaTailnetReceived) == true { return nil }
         // Check for file paths first (copying files in Finder)
         if let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !objects.isEmpty {
             return .filePaths(objects.map { $0.path })
@@ -92,7 +98,7 @@ public struct SystemPasteboard: PasteboardProviding {
         // alongside text, and we want to capture the text, not the preview image
         if let rtfData = pasteboard.data(forType: .rtf),
            let attributed = try? NSAttributedString(data: rtfData, options: [.documentType: NSAttributedString.DocumentType.rtf], documentAttributes: nil) {
-            return .rtf(attributed.string)
+            return .richText(attributed.string, rtfData)
         }
 
         if let string = pasteboard.string(forType: .string) {
@@ -162,6 +168,7 @@ public final class ClipboardMonitor {
             switch contents {
             case .text(let string): self = .text(string)
             case .rtf(let string): self = .rtf(string)
+            case .richText(let string, let data): self = .rtf(string + ClipboardEntry.sha256Hex(data))
             case .filePaths(let paths): self = .filePaths(paths)
             case .image(let data): self = .imageHash(ClipboardEntry.sha256Hex(data))
             }
@@ -327,7 +334,7 @@ public final class ClipboardMonitor {
 
     private func contentType(for contents: PasteboardContents, sourceApp: String?) -> ContentType {
         switch contents {
-        case .text, .rtf:
+        case .text, .rtf, .richText:
             return .text
         case .image:
             // Detect screenshots by source app
@@ -343,7 +350,7 @@ public final class ClipboardMonitor {
 
     private func contentString(for contents: PasteboardContents) -> String {
         switch contents {
-        case .text(let string), .rtf(let string):
+        case .text(let string), .rtf(let string), .richText(let string, _):
             return string
         case .image:
             return ""
@@ -356,7 +363,9 @@ public final class ClipboardMonitor {
         switch contents {
         case .image(let data):
             return data
-        case .text, .rtf, .filePaths:
+        case .richText(_, let data): return data
+        case .filePaths(let paths): return try? JSONEncoder().encode(paths)
+        case .text, .rtf:
             return nil
         }
     }

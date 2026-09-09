@@ -29,6 +29,9 @@ public struct SystemPasteboardWriter: PasteboardWriting {
         switch contents {
         case .text(let string):
             pasteboard.setString(string, forType: .string)
+        case .richText(let string, let data):
+            pasteboard.setString(string, forType: .string)
+            pasteboard.setData(data, forType: .rtf)
 
         case .imageTIFF(let data):
             pasteboard.setData(data, forType: .tiff)
@@ -113,6 +116,7 @@ public struct SystemPasteEventSimulator: PasteEventSimulating {
 public final class PasteService {
     public enum Contents: Equatable {
         case text(String)
+        case richText(String, Data)
         case imageTIFF(Data)
         case fileURLs([URL])
     }
@@ -242,15 +246,14 @@ public final class PasteService {
             return nil
 
         case .filePath:
-            let paths = entry.content
-                .split(separator: "\n")
-                .map(String.init)
-                .filter { !$0.isEmpty }
-
+            let paths = entry.filePaths
             let urls = paths.map { URL(fileURLWithPath: $0) }
             return urls.isEmpty ? nil : .fileURLs(urls)
 
         default:
+            if let data = entry.rawData, data.starts(with: Data("{\\rtf".utf8)) {
+                return .richText(entry.content, data)
+            }
             return .text(entry.content)
         }
     }

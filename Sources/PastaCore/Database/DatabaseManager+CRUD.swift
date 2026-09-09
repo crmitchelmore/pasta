@@ -71,8 +71,8 @@ extension DatabaseManager {
                 try db.execute(
                     sql: """
                     INSERT INTO \(ClipboardEntry.databaseTableName)
-                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isPinned, contentTypeMask, isSynced)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isPinned, contentTypeMask, isSynced, cloudSyncAllowed, receivedViaTailnet)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     arguments: [
                         entry.id.uuidString,
@@ -89,6 +89,8 @@ extension DatabaseManager {
                         entry.isPinned,
                         entry.contentTypeMask,
                         entry.isSynced,
+                        entry.cloudSyncAllowed,
+                        entry.receivedViaTailnet,
                     ]
                 )
                 PastaLogger.database.debug("Inserted new entry with type \(entry.contentType.rawValue)")
@@ -155,8 +157,8 @@ extension DatabaseManager {
                         try db.execute(
                             sql: """
                             INSERT INTO \(ClipboardEntry.databaseTableName)
-                            (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isPinned, contentTypeMask, isSynced)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isPinned, contentTypeMask, isSynced, cloudSyncAllowed, receivedViaTailnet)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                             arguments: [
                                 entry.id.uuidString,
@@ -173,6 +175,8 @@ extension DatabaseManager {
                                 entry.isPinned,
                                 entry.contentTypeMask,
                                 entry.isSynced,
+                                entry.cloudSyncAllowed,
+                                entry.receivedViaTailnet,
                             ]
                         )
                         inserted += 1
