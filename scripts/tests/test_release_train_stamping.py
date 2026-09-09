@@ -29,6 +29,7 @@ class ReleaseStampingTests(unittest.TestCase):
             project = (root/files[-1]).read_text()
             self.assertIn('PRODUCT_BUNDLE_IDENTIFIER = com.pasta.ios.alpha;', project)
             self.assertIn('Pasta Alpha iOS AppStore CI', project)
+            self.assertIn('ASSETCATALOG_COMPILER_APPICON_NAME = AppIconAlpha;', project)
             self.assertNotIn('PRODUCT_BUNDLE_IDENTIFIER = com.pasta.ios;', project)
             for name in files:
                 self.assertEqual((ROOT/name).read_bytes(), original[name])

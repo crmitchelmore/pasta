@@ -16,6 +16,14 @@ for key, value in {'CFBundleIdentifier':c['macBundleIdentifier' if surface == 'm
                    'CFBundleShortVersionString':i['version'],'CFBundleVersion':i['build']}.items():
     if info.get(key) != value: raise SystemExit(f'Archive {key} mismatch')
 if surface == 'mac-direct' and info.get('SUFeedURL') != c['feedURL']: raise SystemExit('Wrong Sparkle feed')
+if surface == 'mac-direct':
+    expected_icon = Path('Resources/DMG') / ('AppIconAlpha.icns' if m['train'] == 'alpha' else 'AppIcon.icns')
+    if (app / 'Contents/Resources/AppIcon.icns').read_bytes() != expected_icon.read_bytes():
+        raise SystemExit('Wrong release train icon')
+else:
+    expected_icon = 'AppIconAlpha' if m['train'] == 'alpha' else 'AppIcon'
+    if info.get('CFBundleIcons', {}).get('CFBundlePrimaryIcon', {}).get('CFBundleIconName') != expected_icon:
+        raise SystemExit('Wrong release train icon')
 e = plistlib.loads(subprocess.run(['codesign','-d','--entitlements',':-',str(app)],check=True,capture_output=True).stdout)
 if e.get('com.apple.developer.icloud-container-identifiers') != [c['cloudContainer']]: raise SystemExit('Cloud identity mismatch')
 if e.get('com.apple.developer.icloud-container-environment') != 'Production': raise SystemExit('Cloud environment mismatch')

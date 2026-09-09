@@ -116,7 +116,7 @@ if(command === 'allocate' || command === 'prepare') {
         DOWNLOAD_TAG:manifest.train === 'alpha' ? manifest.tag : `v${item.version}`,
         BUNDLE_ID:config[surface==='ios'?'iosBundleIdentifier':'macBundleIdentifier'],
         ICLOUD_CONTAINER:config.cloudContainer,FEED_URL:config.feedURL,TRAIN_DISPLAY_NAME:config.displayName,
-        DMG_NAME:config.displayName,APP_NAME:'PastaApp'};
+        DMG_NAME:config.displayName,APP_NAME:'PastaApp',ICON_PATH:manifest.train === 'alpha' ? 'Resources/DMG/AppIconAlpha.icns' : 'Resources/DMG/AppIcon.icns'};
     if(!process.env.GITHUB_ENV) throw Error('Configure runs inside a release job');
     for(const [key,value] of Object.entries(values)) writeFileSync(process.env.GITHUB_ENV,`${key}=${value}\n`,{flag:'a'});
     const cataloguePath='Sources/PastaCore/Resources/IOSReleaseNotes.json';

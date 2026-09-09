@@ -78,7 +78,7 @@ jobs:
         fi
 
         # Copy app icon to Resources
-        cp "Resources/DMG/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
+        cp "$ICON_PATH" "$APP_DIR/Contents/Resources/AppIcon.icns"
 
         # Copy Sparkle framework
         SPARKLE_PATH=$(find .build -name "Sparkle.framework" -type d | head -1)
@@ -252,7 +252,7 @@ jobs:
         echo "==> Creating DMG with custom background and layout"
         create-dmg \
           --volname "${DMG_NAME}" \
-          --volicon "Resources/DMG/AppIcon.icns" \
+          --volicon "$ICON_PATH" \
           --background "Resources/DMG/background@2x.png" \
           --window-pos 200 120 \
           --window-size 660 400 \

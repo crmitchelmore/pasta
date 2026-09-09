@@ -11,7 +11,7 @@ ditto .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sp
 for resource in "$BIN_DIR"/*.bundle; do
   [ ! -d "$resource" ] || ditto "$resource" "$APP_DIR/Contents/Resources/$(basename "$resource")"
 done
-cp -f Resources/DMG/AppIcon.icns "$APP_DIR/Contents/Resources/AppIcon.icns"
+cp -f Resources/DMG/AppIconAlpha.icns "$APP_DIR/Contents/Resources/AppIcon.icns"
 install_name_tool -add_rpath '@executable_path/../Frameworks' "$APP_DIR/Contents/MacOS/PastaApp"
 export APP_DIR
 python3 - <<'PY'

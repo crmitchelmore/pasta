@@ -26,6 +26,7 @@ s = path.read_text()
 s = s.replace('PRODUCT_BUNDLE_IDENTIFIER = com.pasta.ios;', f'PRODUCT_BUNDLE_IDENTIFIER = {config["iosBundleIdentifier"]};')
 s = s.replace('INFOPLIST_KEY_CFBundleDisplayName = Pasta;', f'INFOPLIST_KEY_CFBundleDisplayName = "{config["displayName"]}";')
 if train == 'alpha':
+    s = s.replace('ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;', 'ASSETCATALOG_COMPILER_APPICON_NAME = AppIconAlpha;')
     s = s.replace('PastaIOS AppStore CI', 'Pasta Alpha iOS AppStore CI')
 # Version settings are app/UITest project settings, never global SwiftPM flags.
 s = re.sub(r'MARKETING_VERSION = [^;]+;', f'MARKETING_VERSION = {version};', s)
