@@ -48,6 +48,11 @@ enum TailnetDiscovery {
             defer { try? FileManager.default.removeItem(at: output) }
             let handle = try FileHandle(forWritingTo: output); defer { try? handle.close() }
             let process = Process(); process.executableURL = URL(fileURLWithPath: executable)
+            // Finder-launched apps have no terminal environment. The macOS
+            // Tailscale executable otherwise selects GUI mode and emits non-JSON.
+            var environment = ProcessInfo.processInfo.environment
+            environment["TAILSCALE_BE_CLI"] = "1"
+            process.environment = environment
             process.arguments = ["status", "--json"]
             process.standardOutput = handle; process.standardError = FileHandle.nullDevice
             try process.run()
