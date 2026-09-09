@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseCommits } from './release-notes-lib.mjs';
-import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance } from './release-train-lib.mjs';
+import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/pasta';
 const run = (command, args) => execFileSync(command, args, {encoding:'utf8', stdio:['pipe','pipe','inherit']}).trim();
@@ -99,6 +99,7 @@ if(command === 'allocate' || command === 'prepare') {
         manifest.surfaces[surface]={build:surface === "mac-direct" ? allocation.build : String(1000 + allocation.ordinal),version:versions[platform],baseline:base,notes,notesHash:digest(notes),storeNotes,storeNotesHash:digest(storeNotes)};
     }
     validateManifest(manifest);
+    if(train === 'stable') assertStableVersionAdvance(versions.mac, all.filter(r=>!r.draft && !r.prerelease && /^v\d+\.\d+\.\d+$/.test(r.tag_name)).map(r=>r.tag_name.slice(1)));
     git('config','user.name','github-actions[bot]'); git('config','user.email','github-actions[bot]@users.noreply.github.com');
     git('tag','-a',tag,source,'-F',save('allocation.json',manifest)); git('push','origin',`refs/tags/${tag}`);
     ensureRelease(manifest,all);
@@ -192,6 +193,7 @@ if(command === 'allocate' || command === 'prepare') {
     if(!Object.keys(direct.assets).some(a=>a.endsWith('.dmg')) || !direct.assets['appcast.xml']) throw Error('Missing verified DMG or appcast');
     const tag=`v${manifest.surfaces['mac-direct'].version}`;
     const prior=all.find(r=>r.tag_name===tag);
+    assertStableVersionAdvance(manifest.surfaces['mac-direct'].version, all.filter(r=>!r.draft && !r.prerelease && /^v\d+\.\d+\.\d+$/.test(r.tag_name)).map(r=>r.tag_name.slice(1)), !!prior);
     if(prior && git('rev-parse',`${tag}^{commit}`) !== manifest.source) throw Error('Stable version already belongs to different source');
     upload(manifest.tag,'approval.json',{manifestHash:digest(bytes),actor:process.env.GITHUB_ACTOR,run:process.env.GITHUB_RUN_ID,approvedAt:new Date().toISOString()},true);
     if(!prior) {
