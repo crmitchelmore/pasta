@@ -23,7 +23,7 @@ env:
 jobs:
   build-and-release:
     name: Build, Sign, Notarize & Release
-    runs-on: macos-15
+    runs-on: pasta-local
 
     steps:
       # ============================================================================
@@ -51,13 +51,13 @@ jobs:
       - name: Resolve Swift dependencies
         run: |
           python3 scripts/ci-verify-dependency-locks.py
-          swift package resolve --force-resolved-versions
+          swift package --cache-path "$RUNNER_TEMP/swiftpm-cache" resolve --force-resolved-versions
       
       - name: Build release binary (arm64)
-        run: swift build --force-resolved-versions -c release --arch arm64
+        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release --arch arm64
       
       - name: Build release binary (x86_64)
-        run: swift build --force-resolved-versions -c release --arch x86_64
+        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release --arch x86_64
       
       - name: Create universal binary
         run: |
@@ -211,6 +211,7 @@ jobs:
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
           
           echo "==> Creating temporary keychain"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
@@ -224,7 +225,7 @@ jobs:
             -T /usr/bin/productsign
           
           # Set keychain search list
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          python3 scripts/ci-keychain-search.py add "$RUNNER_TEMP/keychain-search.json" "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           
           # Clean up certificate file
@@ -702,7 +703,9 @@ jobs:
       - name: Cleanup keychain
         if: always()
         run: |
-          if [ -f "$KEYCHAIN_PATH" ]; then
+          python3 scripts/ci-keychain-search.py restore "$RUNNER_TEMP/keychain-search.json"
+          rm -f certificate.p12
+          if [ -n "${KEYCHAIN_PATH:-}" ] && [ -f "$KEYCHAIN_PATH" ]; then
             echo "==> Cleaning up keychain"
             security delete-keychain "$KEYCHAIN_PATH" || true
           fi
@@ -742,7 +745,7 @@ jobs:
   verify-release:
     name: Verify published release (live appcast + DMG)
     needs: build-and-release
-    runs-on: macos-15
+    runs-on: pasta-local
     timeout-minutes: 20
     permissions:
       contents: write  # gh release edit --draft on failure

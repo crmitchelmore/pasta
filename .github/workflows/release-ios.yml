@@ -67,7 +67,7 @@ jobs:
   # ============================================================================
   preflight:
     name: Preflight — iOS E2E (XCUITest)
-    runs-on: macos-15
+    runs-on: pasta-local
     timeout-minutes: 45
     env:
       DERIVED_DATA: .build/ios-derived
@@ -80,6 +80,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Select Xcode
+        if: runner.name != 'bravo-mini-pasta'
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: '26.3'
@@ -132,7 +133,7 @@ jobs:
   testflight:
     name: Archive, Export & Upload to TestFlight
     needs: preflight
-    runs-on: macos-15
+    runs-on: pasta-local
     timeout-minutes: 90
 
     steps:
@@ -146,6 +147,7 @@ jobs:
           fetch-depth: 0
 
       - name: Select Xcode
+        if: runner.name != 'bravo-mini-pasta'
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: '26.3'
@@ -250,8 +252,9 @@ jobs:
           APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
         run: |
           set -euo pipefail
-          # ~/.appstoreconnect/private_keys is where xcodebuild/altool look by default.
-          KEY_DIR="$HOME/.appstoreconnect/private_keys"
+          # xcodebuild receives this explicit path; leave personal keys untouched.
+          umask 077
+          KEY_DIR="$RUNNER_TEMP/asc-private-keys"
           mkdir -p "$KEY_DIR"
           KEY_PATH="$KEY_DIR/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
           if ! printf '%s' "$APP_STORE_CONNECT_API_KEY" | base64 --decode > "$KEY_PATH" 2>/dev/null; then
@@ -278,10 +281,11 @@ jobs:
           echo "==> Creating temporary keychain"
           KEYCHAIN_PATH="$RUNNER_TEMP/ios-signing.keychain-db"
           KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          python3 scripts/ci-keychain-search.py add "$RUNNER_TEMP/keychain-search.json" "$KEYCHAIN_PATH"
           echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
           echo "==> Importing Apple Distribution certificate"
@@ -342,6 +346,10 @@ jobs:
             exit 1
           fi
 
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
+          if [ -f "$PROFILE_DIR/${PROFILE_UUID}.mobileprovision" ]; then
+            cp -p "$PROFILE_DIR/${PROFILE_UUID}.mobileprovision" "$RUNNER_TEMP/original.mobileprovision"
+          fi
           cp "$PROFILE_TMP" "$PROFILE_DIR/${PROFILE_UUID}.mobileprovision"
           rm -f "$PROFILE_TMP"
           echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
@@ -594,10 +602,16 @@ jobs:
       - name: Clean up credentials
         if: always()
         run: |
-          rm -rf "$HOME/.appstoreconnect/private_keys" || true
+          python3 scripts/ci-keychain-search.py restore "$RUNNER_TEMP/keychain-search.json"
+          rm -rf "$RUNNER_TEMP/asc-private-keys"
+          rm -f "$RUNNER_TEMP/ios-distribution.p12"
           if [ -n "${KEYCHAIN_PATH:-}" ] && [ -f "$KEYCHAIN_PATH" ]; then
             security delete-keychain "$KEYCHAIN_PATH" || true
           fi
           if [ -n "${PROFILE_UUID:-}" ]; then
-            rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision" || true
+            if [ -f "$RUNNER_TEMP/original.mobileprovision" ]; then
+              mv -f "$RUNNER_TEMP/original.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision"
+            else
+              rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision"
+            fi
           fi
