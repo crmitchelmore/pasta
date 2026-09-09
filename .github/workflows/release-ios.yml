@@ -346,10 +346,10 @@ jobs:
             exit 1
           fi
 
-          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
           if [ -f "$PROFILE_DIR/${PROFILE_UUID}.mobileprovision" ]; then
             cp -p "$PROFILE_DIR/${PROFILE_UUID}.mobileprovision" "$RUNNER_TEMP/original.mobileprovision"
           fi
+          echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
           cp "$PROFILE_TMP" "$PROFILE_DIR/${PROFILE_UUID}.mobileprovision"
           rm -f "$PROFILE_TMP"
           echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
