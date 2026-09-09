@@ -133,7 +133,7 @@ jobs:
 
       - name: Install Chromium
         working-directory: landing-page
-        run: npx playwright install --with-deps chromium
+        run: ../scripts/ci-install-playwright.sh
 
       - name: Run Playwright smoke suite
         working-directory: landing-page
@@ -190,7 +190,7 @@ jobs:
 
   test:
     name: Build & Test
-    runs-on: macos-15
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'pasta-local' || 'macos-15' }}
     
     steps:
       - name: Checkout code
@@ -199,13 +199,13 @@ jobs:
       - name: Resolve Swift dependencies
         run: |
           python3 scripts/ci-verify-dependency-locks.py
-          swift package resolve --force-resolved-versions
+          swift package --cache-path "$RUNNER_TEMP/swiftpm-cache" resolve --force-resolved-versions
       
       - name: Build
-        run: swift build --force-resolved-versions -c debug
+        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c debug
       
       - name: Run tests
-        run: swift test --force-resolved-versions --parallel
+        run: swift test --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions --parallel
 
       - name: Test release-notes generator
         run: node --test Tests/ReleaseNotesTests/*.test.mjs
@@ -214,7 +214,7 @@ jobs:
         run: scripts/tests/ci-verify-eddsa.test.sh
       
       - name: Build release
-        run: swift build --force-resolved-versions -c release
+        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release
       
       - name: Create test app bundle (mirrors release workflow)
         id: bundle
@@ -391,7 +391,7 @@ jobs:
   # upload. Change the script, not the steps, so the two cannot drift.
   ios-e2e:
     name: iOS E2E (XCUITest)
-    runs-on: macos-15
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'pasta-local' || 'macos-15' }}
     timeout-minutes: 45
     env:
       PROJECT: PastaIOS/PastaIOS.xcodeproj
@@ -406,6 +406,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Select Xcode
+        if: runner.name != 'bravo-mini-pasta'
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: '26.3'

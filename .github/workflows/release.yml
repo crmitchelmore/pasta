@@ -23,7 +23,7 @@ env:
 jobs:
   build-and-release:
     name: Build, Sign, Notarize & Release
-    runs-on: macos-15
+    runs-on: pasta-local
 
     steps:
       # ============================================================================
@@ -51,13 +51,13 @@ jobs:
       - name: Resolve Swift dependencies
         run: |
           python3 scripts/ci-verify-dependency-locks.py
-          swift package resolve --force-resolved-versions
+          swift package --cache-path "$RUNNER_TEMP/swiftpm-cache" resolve --force-resolved-versions
       
       - name: Build release binary (arm64)
-        run: swift build --force-resolved-versions -c release --arch arm64
+        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release --arch arm64
       
       - name: Build release binary (x86_64)
-        run: swift build --force-resolved-versions -c release --arch x86_64
+        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release --arch x86_64
       
       - name: Create universal binary
         run: |
@@ -211,6 +211,7 @@ jobs:
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
           
           echo "==> Creating temporary keychain"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
@@ -224,8 +225,8 @@ jobs:
             -T /usr/bin/productsign
           
           # Set keychain search list
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          python3 scripts/ci-keychain-search.py add "$RUNNER_TEMP/keychain-search.json" "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
           
           # Clean up certificate file
           rm certificate.p12
@@ -290,7 +291,7 @@ jobs:
           find "${APP_DIR}/Contents/Frameworks" -type f -perm +111 | while read binary; do
             if file "$binary" | grep -q "Mach-O"; then
               echo "  Signing: $binary"
-              codesign --force \
+              codesign --force --keychain "$KEYCHAIN_PATH" \
                 --sign "$IDENTITY" \
                 --options runtime \
                 --timestamp \
@@ -302,7 +303,7 @@ jobs:
           find "${APP_DIR}/Contents/Frameworks" -name "*.xpc" -o -name "*.app" | while read bundle; do
             if [ -d "$bundle" ]; then
               echo "  Signing bundle: $bundle"
-              codesign --force \
+              codesign --force --keychain "$KEYCHAIN_PATH" \
                 --sign "$IDENTITY" \
                 --options runtime \
                 --timestamp \
@@ -313,7 +314,7 @@ jobs:
           # Sign the framework itself
           find "${APP_DIR}/Contents/Frameworks" -name "*.framework" | while read fw; do
             echo "  Signing framework: $fw"
-            codesign --force \
+            codesign --force --keychain "$KEYCHAIN_PATH" \
               --sign "$IDENTITY" \
               --options runtime \
               --timestamp \
@@ -322,7 +323,7 @@ jobs:
           
           # Sign the main app binary WITH entitlements
           echo "==> Signing main binary with entitlements..."
-          codesign --force \
+          codesign --force --keychain "$KEYCHAIN_PATH" \
             --sign "$IDENTITY" \
             --options runtime \
             --timestamp \
@@ -331,7 +332,7 @@ jobs:
           
           # Sign the app bundle (top-level, with entitlements)
           echo "==> Signing app bundle..."
-          codesign --force \
+          codesign --force --keychain "$KEYCHAIN_PATH" \
             --sign "$IDENTITY" \
             --options runtime \
             --timestamp \
@@ -377,13 +378,14 @@ jobs:
           chmod +x create-background.sh
           ./create-background.sh
       
-      - name: Create fancy DMG
+      - name: Create DMG
         id: dmg
         run: |
           DMG_FILE="${DMG_NAME}-${{ steps.version.outputs.version }}.dmg"
           
-          echo "==> Creating DMG with custom background and layout"
+          echo "==> Creating DMG without interactive Finder automation"
           create-dmg \
+            --skip-jenkins \
             --volname "${DMG_NAME}" \
             --volicon "Resources/DMG/AppIcon.icns" \
             --background "Resources/DMG/background@2x.png" \
@@ -702,7 +704,9 @@ jobs:
       - name: Cleanup keychain
         if: always()
         run: |
-          if [ -f "$KEYCHAIN_PATH" ]; then
+          python3 scripts/ci-keychain-search.py restore "$RUNNER_TEMP/keychain-search.json"
+          rm -f certificate.p12
+          if [ -n "${KEYCHAIN_PATH:-}" ] && [ -f "$KEYCHAIN_PATH" ]; then
             echo "==> Cleaning up keychain"
             security delete-keychain "$KEYCHAIN_PATH" || true
           fi
@@ -742,7 +746,7 @@ jobs:
   verify-release:
     name: Verify published release (live appcast + DMG)
     needs: build-and-release
-    runs-on: macos-15
+    runs-on: pasta-local
     timeout-minutes: 20
     permissions:
       contents: write  # gh release edit --draft on failure
