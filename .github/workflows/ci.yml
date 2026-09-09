@@ -190,7 +190,7 @@ jobs:
 
   test:
     name: Build & Test
-    runs-on: macos-15
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'pasta-local' || 'macos-15' }}
     
     steps:
       - name: Checkout code
@@ -391,7 +391,7 @@ jobs:
   # upload. Change the script, not the steps, so the two cannot drift.
   ios-e2e:
     name: iOS E2E (XCUITest)
-    runs-on: macos-15
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'pasta-local' || 'macos-15' }}
     timeout-minutes: 45
     env:
       PROJECT: PastaIOS/PastaIOS.xcodeproj
@@ -406,6 +406,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Select Xcode
+        if: runner.name != 'bravo-mini-pasta'
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: '26.3'
