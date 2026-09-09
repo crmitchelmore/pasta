@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import Combine
 import PastaCore
 
 /// Opt-in keyword expansion. Secure input, focus changes, pointer activity and
@@ -7,7 +8,12 @@ import PastaCore
 @MainActor
 final class SnippetExpansionController {
     static let enabledKey = "pasta.snippetKeywordExpansionEnabled"
-    private var monitor: Any?
+    private var permissionSubscription: AnyCancellable?
+    private lazy var monitor = PermissionDependentMonitor(start: { [weak self] in
+        NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { [weak self] event in
+            Task { @MainActor in self?.handle(event) }
+        }
+    }, stop: { NSEvent.removeMonitor($0) })
     private var snippets: [Snippet] = []
     private var matcher = SnippetKeywordMatcher()
     private var targetPID: pid_t?
@@ -15,10 +21,14 @@ final class SnippetExpansionController {
     private var observers: [NSObjectProtocol] = []
 
     init() {
-        for name in [UserDefaults.didChangeNotification, .snippetsDidChange] {
+        for name in [UserDefaults.didChangeNotification, .snippetsDidChange, NSApplication.didBecomeActiveNotification] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in self?.refresh() }
             })
+        }
+        permissionSubscription = MacPermissionStore.shared.$snapshot.removeDuplicates().sink { [weak self] _ in
+            // @Published emits before assignment; refresh on the next main-actor turn.
+            Task { @MainActor [weak self] in self?.refresh() }
         }
         refresh()
     }
@@ -26,19 +36,17 @@ final class SnippetExpansionController {
     private func refresh() {
         generation += 1
         matcher.reset()
+        MacPermissionStore.shared.refresh()
+        let snapshot = MacPermissionStore.shared.snapshot
         let enabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
-            && AccessibilityPermission.isTrusted() && AccessibilityPermission.hasInputMonitoring() && ProcessInfo.processInfo.environment["PASTA_CI"] == nil
-        guard enabled else {
-            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+            && ProcessInfo.processInfo.environment["PASTA_CI"] == nil
+        monitor.update(enabled: enabled, snapshot: snapshot)
+        guard enabled && snapshot.allowsKeywordExpansion else {
             snippets = []
             return
         }
         do { snippets = try SnippetStore(database: BackgroundService.shared.database).list() }
         catch { snippets = []; PastaLogger.logError(error, logger: PastaLogger.app, context: "Could not load snippet keywords") }
-        guard monitor == nil else { return }
-        monitor = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { [weak self] event in
-            Task { @MainActor in self?.handle(event) }
-        }
     }
 
     private func handle(_ event: NSEvent) {
@@ -46,7 +54,7 @@ final class SnippetExpansionController {
         generation += 1
         let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier
         if pid != targetPID { matcher.reset(); targetPID = pid }
-        guard UserDefaults.standard.bool(forKey: Self.enabledKey), AccessibilityPermission.isTrusted(),
+        guard UserDefaults.standard.bool(forKey: Self.enabledKey), MacPermissionSnapshot.readSystem().allowsKeywordExpansion,
               !IsSecureEventInputEnabled(), event.type == .keyDown,
               ![123, 124, 125, 126, 115, 119, 116, 121, 53].contains(event.keyCode),
               event.modifierFlags.intersection([.command, .control]).isEmpty,
@@ -64,6 +72,7 @@ final class SnippetExpansionController {
                 // leave their text alone. Never erase text based on stale input.
                 guard let rendered, version == generation, !IsSecureEventInputEnabled(),
                       UserDefaults.standard.bool(forKey: Self.enabledKey),
+                      MacPermissionSnapshot.readSystem().allowsKeywordExpansion,
                       NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
                       let source = CGEventSource(stateID: .combinedSessionState) else { return }
                 _ = PasteService().copy(ClipboardEntry(content: rendered.text, contentType: .text))
@@ -78,7 +87,7 @@ final class SnippetExpansionController {
                 if rendered.cursorMoveCount > 0 {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         guard self.generation == version, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
-                              !IsSecureEventInputEnabled() else { return }
+                              !IsSecureEventInputEnabled(), MacPermissionSnapshot.readSystem().allowsKeywordExpansion else { return }
                         SystemPasteEventSimulator().moveCursorLeft(by: rendered.cursorMoveCount)
                     }
                 }
@@ -87,7 +96,6 @@ final class SnippetExpansionController {
     }
 
     deinit {
-        if let monitor { NSEvent.removeMonitor(monitor) }
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
     }
 }

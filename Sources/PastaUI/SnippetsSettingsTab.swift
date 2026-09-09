@@ -124,6 +124,7 @@ private struct SnippetEditorView: View {
     let onSave: () -> Void
     let onDelete: () -> Void
     @AppStorage("pasta.snippetKeywordExpansionEnabled") private var keywordExpansion = false
+    @ObservedObject private var permissions = MacPermissionStore.shared
 
     var body: some View {
         Form {
@@ -143,13 +144,23 @@ private struct SnippetEditorView: View {
 
             Section("Keyword expansion") {
                 Toggle("Expand keywords while typing in other apps", isOn: $keywordExpansion)
+                    .onChange(of: keywordExpansion) { _, enabled in
+                        permissions.refresh()
+                        if enabled && !permissions.snapshot.allowsKeywordExpansion {
+                            MacPermissionGuidance.shared.show(permissions.snapshot.accessibility ? .inputMonitoring : .accessibility)
+                        }
+                    }
                 Text("Off by default. Requires Accessibility and Input Monitoring permissions. Type an exact, unique keyword followed by Space. Only the current word is kept in memory; secure password fields are excluded.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if keywordExpansion && (!AccessibilityPermission.isTrusted() || !AccessibilityPermission.hasInputMonitoring()) {
-                    Text("Grant Pasta Accessibility and Input Monitoring access in System Settings, then restart Pasta to activate expansion.")
+                if keywordExpansion {
+                    MacPermissionSetupRow(.accessibility)
+                    MacPermissionSetupRow(.inputMonitoring)
+                    Text(permissions.snapshot.allowsKeywordExpansion
+                         ? "Access is available. Expansion activates automatically."
+                         : "Complete setup for both permissions. Expansion activates when access is available.")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.secondary)
                 }
             }
 

@@ -19,9 +19,9 @@ public struct OnboardingView: View {
 
     @State private var step: Step = .welcome
     @State private var featureTipIndex: Int = 0
-    @State private var hasAccessibility: Bool = AccessibilityPermission.isTrusted()
-    @State private var hasInputMonitoring: Bool = AccessibilityPermission.hasInputMonitoring()
-    @State private var pollTimer: Timer? = nil
+    @ObservedObject private var permissions = MacPermissionStore.shared
+    @State private var permissionSession: UUID?
+    private var hasAccessibility: Bool { permissions.snapshot.accessibility }
     @State private var appearAnimation: Bool = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -114,11 +114,14 @@ public struct OnboardingView: View {
             withAnimation(.easeOut(duration: 0.5)) {
                 appearAnimation = true
             }
-            refreshTrust()
-            startPolling()
+            permissions.refresh()
+        }
+        .onChange(of: step) { _, step in
+            if let permissionSession { permissions.endSession(permissionSession) }
+            permissionSession = step == .permissions ? permissions.beginSession(for: .accessibility) : nil
         }
         .onDisappear {
-            stopPolling()
+            if let permissionSession { permissions.endSession(permissionSession) }
         }
     }
     
@@ -200,7 +203,7 @@ public struct OnboardingView: View {
             .opacity(appearAnimation ? 1 : 0)
             
             VStack(spacing: 12) {
-                Text("Welcome to Pasta")
+                Text("Welcome to \(PermissionAppIdentity.current.name)")
                     .font(.system(size: 28, weight: .semibold, design: .rounded))
                     .foregroundStyle(.primary)
                 
@@ -300,7 +303,7 @@ public struct OnboardingView: View {
                 Text("Quick Setup")
                     .font(.system(size: 22, weight: .semibold, design: .rounded))
                 
-                Text("Accessibility is required to paste. Input Monitoring is optional.")
+                Text("Allow direct pasting into other apps. You can skip this and copy clips to paste yourself.")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
             }
@@ -311,20 +314,13 @@ public struct OnboardingView: View {
                     subtitle: "Paste into any app",
                     granted: hasAccessibility,
                     action: { 
-                        AccessibilityPermission.requestPrompt()
-                        AccessibilityPermission.openAccessibilitySettings()
+                        MacPermissionGuidance.shared.show(.accessibility)
                     }
                 )
                 
-                permissionRow(
-                    title: "Input Monitoring",
-                    subtitle: "Optional — not needed for the default hotkey",
-                    granted: hasInputMonitoring,
-                    action: { 
-                        AccessibilityPermission.requestInputMonitoring()
-                        openInputMonitoringSettings() 
-                    }
-                )
+                Text("Automatic snippet expansion has its own optional setup in Settings → Snippets.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 20)
             
@@ -340,7 +336,7 @@ public struct OnboardingView: View {
                 .padding(.horizontal, 16)
                 .background(PastaTheme.success.opacity(0.1), in: Capsule())
             } else {
-                Text("Tip: You may need to restart Pasta after granting permissions")
+                Text("Setup identifies this copy of the app and checks access when you return.")
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
                     .multilineTextAlignment(.center)
@@ -375,7 +371,7 @@ public struct OnboardingView: View {
             Spacer()
             
             if !granted {
-                Button("Enable") {
+                Button("Set Up…") {
                     action()
                 }
                 .buttonStyle(PillButtonStyle(color: .orange))
@@ -525,7 +521,7 @@ public struct OnboardingView: View {
         case .welcome: return "Get Started"
         case .features: return "Continue"
         case .permissions: return hasRequiredPermissions ? "Continue" : "Skip for now"
-        case .ready: return "Start Using Pasta"
+        case .ready: return "Start Using \(PermissionAppIdentity.current.name)"
         }
     }
     
@@ -544,32 +540,7 @@ public struct OnboardingView: View {
         }
     }
     
-    // MARK: - Helpers
-    
-    private func refreshTrust() {
-        hasAccessibility = AccessibilityPermission.isTrusted()
-        hasInputMonitoring = AccessibilityPermission.hasInputMonitoring()
-    }
 
-    private func startPolling() {
-        guard pollTimer == nil else { return }
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-            Task { @MainActor in
-                refreshTrust()
-            }
-        }
-    }
-
-    private func stopPolling() {
-        pollTimer?.invalidate()
-        pollTimer = nil
-    }
-
-    private func openInputMonitoringSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
-            NSWorkspace.shared.open(url)
-        }
-    }
 }
 
 // MARK: - Feature Tip Model
