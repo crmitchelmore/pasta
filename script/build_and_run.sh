@@ -19,6 +19,7 @@ ditto .build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sp
 for resource in "$BUILD_DIR"/*.bundle; do
   [ ! -d "$resource" ] || cp -rf "$resource" "$APP_DIR/Contents/Resources/"
 done
+cp -f "$ROOT_DIR/Resources/DMG/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 install_name_tool -add_rpath '@executable_path/../Frameworks' "$BINARY"
 cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -27,6 +28,7 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>com.pasta.clipboard.development</string>
 <key>CFBundleName</key><string>Pasta Development</string>
 <key>CFBundleExecutable</key><string>PastaDevelopment</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>CFBundleShortVersionString</key><string>0.0.0</string>

@@ -9,12 +9,12 @@
   <meta property="og:description" content="Local-first clipboard history with smart detection, snippets, command mode, and optional iCloud sync. Free & open source.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://pasta-app.com">
-  <meta property="og:image" content="https://pasta-app.com/images/screenshot-main.png">
+  <meta property="og:image" content="https://pasta-app.com/images/screenshot-quicksearch-v2.jpg">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="theme-color" content="#eef2f6">
-  <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32x32.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="images/favicon-16x16.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="images/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32x32-v2.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="images/favicon-16x16-v2.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="images/apple-touch-icon-v2.png">
   
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@500,700,900&amp;f[]=general-sans@400,500,600&amp;display=swap" rel="stylesheet">
@@ -23,7 +23,7 @@
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
   <nav class="nav" aria-label="Main navigation">
-    <a href="/" class="nav__logo"><img src="images/app-icon.png" width="40" height="40" alt="Pasta icon">Pasta</a>
+    <a href="/" class="nav__logo"><img src="images/app-icon-v2.png" width="40" height="40" alt="Pasta icon">Pasta</a>
     <ul class="nav__links">
       <li><a href="#features">Features</a></li>
       <li><a href="#whats-new">What’s cooking</a></li>
@@ -44,27 +44,16 @@
         <p class="hero__meta">Free &amp; open source. macOS 14 or later.</p>
         <a class="hero__release" href="#whats-new"><span class="release-dot" aria-hidden="true"></span>Fresh from the kitchen: the 1.6 releases</a>
       </div>
-      <div class="hero__visual">
-        <div class="pasta-loop" aria-hidden="true"></div>
-        <div class="clipboard-demo" aria-label="Illustration of clipboard search with example items">
-          <div class="demo-toolbar"><span class="demo-mark">Pasta</span><span>Clipboard history</span><span aria-hidden="true">⌃⌘V</span></div>
-          <div class="demo-search"><span aria-hidden="true">⌕</span> Everything you copied, right here.</div>
-          <div class="demo-filters"><span class="selected">All</span><span>Text</span><span>Links</span><span>Images</span><span>Code</span></div>
-          <div class="clip clip--selected"><span class="clip-icon" aria-hidden="true">↗</span><div><strong>That place for dinner</strong><small>Link <span>Safari</span></small></div><kbd>⌘1</kbd></div>
-          <div class="clip"><span class="clip-icon" aria-hidden="true">Aa</span><div><strong>A thought worth keeping.</strong><small>Text <span>Notes</span></small></div><kbd>⌘2</kbd></div>
-          <div class="clip"><span class="clip-icon clip-icon--colour" aria-hidden="true"></span><div><strong>#F2CD63</strong><small>Colour <span>Design notes</span></small></div><kbd>⌘3</kbd></div>
-          <div class="clip"><span class="clip-icon" aria-hidden="true">{ }</span><div><strong>const goodThings = await pasta();</strong><small>Code <span>Editor</span></small></div><kbd>⌘4</kbd></div>
-          <div class="demo-bottom"><span>↑ ↓ to browse</span><span>↵ to paste</span><span>esc to close</span></div>
-        </div>
-        <p class="visual-caption">Copy. Find. Paste. Carry on.</p>
-      </div>
+      <figure class="hero__visual app-capture">
+        <img src="images/screenshot-quicksearch-v2.jpg" width="680" height="464" fetchpriority="high" alt="Real Pasta Quick Search with sample links, notes, colour and code, content filters and numbered paste shortcuts">
+        <figcaption>Quick Search on macOS. Real app, sample clipboard.</figcaption>
+      </figure>
     </section>
     <div class="promise-strip"><p>Lives on your Mac</p><p>Ready at <kbd>⌃</kbd> <kbd>⌘</kbd> <kbd>V</kbd></p><p>No account needed</p><p>Yours to keep</p></div>
 
     <section class="section features" id="features">
       <div class="section-heading"><h2>For the things you<br>just had a second ago.</h2><p>The link you closed. The sentence you rewrote. The colour you finally got right. Copy as usual; Pasta keeps the useful bits within reach.</p></div>
       <div class="feature-layout">
-        <figure class="product-shot"><img src="images/screenshot-main.png" width="1360" height="1000" loading="lazy" alt="Pasta Quick Search showing clipboard history, content filters and numbered paste shortcuts"><figcaption>The native macOS Quick Search panel.</figcaption></figure>
         <div class="feature-list">
           <article><h3>Find it without the hunt.</h3><p>Search your history as you type. Filter by content type and paste straight back into the app you’re using.</p></article>
           <article><h3>More than a wall of text.</h3><p>Links, images, code, colours and more get their own previews. Pasta recognises what you copied so you don’t have to.</p></article>
@@ -75,12 +64,7 @@
 
     <section class="section tools" id="snippets">
       <div class="tools__copy"><h2>Less typing.<br>More getting on with it.</h2><p>Turn your repeat replies into snippets. Fill in dates, clipboard content and other placeholders when you paste. Open the snippet picker with <code>!snippet</code>.</p><p>Prefer the keyboard? Command Mode lets you pause capture, filter history and change settings from the search field.</p><a href="#shortcuts">See the keyboard shortcuts</a></div>
-      <div class="snippet-demo"><div class="snippet-demo__title">A small shortcut to your next reply <span>Snippet example</span></div><pre>Hi there,
-
-Thanks for sending this over.
-I’ll take a look on <span class="token">{date}</span>.
-
-<span class="token">{cursor}</span></pre><div class="snippet-demo__footer">Your words, with the details filled in.</div></div>
+      <figure class="app-capture snippet-capture"><img src="images/screenshot-snippets-v2.jpg" width="680" height="400" loading="lazy" alt="Real Pasta snippet picker with reusable follow-up, meeting notes and stand-up templates"><figcaption>Your saved snippets, from Quick Search.</figcaption></figure>
     </section>
 
     <section class="section everyday">
@@ -102,7 +86,7 @@ I’ll take a look on <span class="token">{date}</span>.
           <a class="text-link" href="https://github.com/crmitchelmore/pasta/releases">Read all release notes</a>
         </div>
         <div class="roadmap" id="roadmap"><h3>On the simmer</h3><p class="updates__date">Roadmap, without the promises</p>
-          <details><summary><span>Sharing beyond one iCloud account<small>Exploring</small></span></summary><p>We’re working through plans for sharing between Pasta instances on different iCloud accounts, starting over a private tailnet. Pairing, sharing controls and supported devices are still being scoped. This isn’t available yet.</p></details>
+          <details><summary><span>Sharing beyond one iCloud account<small>In development</small></span></summary><p>Work is underway on sharing between personal Macs on different iCloud accounts over a private Tailscale network, with device pairing and sharing controls. This isn’t available yet.</p></details>
           <details><summary><span>More confidence across devices<small>Planned verification</small></span></summary><p>Broader real-device checks for sync, offline recovery and app updates. The aim is to make everyday hand-offs easier to trust.</p><a href="https://github.com/crmitchelmore/pasta/issues/110">Follow the reliability work</a></details>
           <p class="roadmap__note">Plans can change. No release dates until they’re ready.</p><a class="text-link" href="https://github.com/crmitchelmore/pasta/issues">Have a suggestion?</a>
         </div>
@@ -111,7 +95,7 @@ I’ll take a look on <span class="token">{date}</span>.
 
     <section class="section shortcuts" id="shortcuts"><details><summary><span>The short way round.<small>A few keyboard shortcuts worth keeping.</small></span></summary><dl><div><dt>Show or hide Pasta</dt><dd><kbd>⌃</kbd> <kbd>⌘</kbd> <kbd>V</kbd></dd></div><div><dt>Navigate history</dt><dd><kbd>↑</kbd> <kbd>↓</kbd></dd></div><div><dt>Paste selected item</dt><dd><kbd>↵</kbd></dd></div><div><dt>Paste as plain text</dt><dd><kbd>⇧</kbd> <kbd>↵</kbd></dd></div><div><dt>Quick-paste by position</dt><dd><kbd>⌘</kbd> <kbd>1–9</kbd></dd></div><div><dt>Pin or unpin</dt><dd><kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>P</kbd></dd></div><div><dt>Command Mode</dt><dd><kbd>!</kbd></dd></div><div><dt>Close the panel</dt><dd><kbd>Esc</kbd></dd></div></dl></details></section>
 
-    <section class="download" id="download"><img src="images/app-icon.png" width="72" height="72" loading="lazy" alt="Pasta app icon"><h2>Keep a good thing going.</h2><p>Your next copy deserves a second helping.</p><div class="download__buttons"><a href="https://github.com/crmitchelmore/pasta/releases/latest" class="btn btn--primary">Download for Mac <span aria-hidden="true">↓</span></a><a href="https://github.com/crmitchelmore/pasta" class="btn btn--secondary">View Source</a></div><p class="download__requirements">Free. Requires macOS 14.0 (Sonoma) or later.</p></section>
+    <section class="download" id="download"><img src="images/app-icon-v2.png" width="72" height="72" loading="lazy" alt="Pasta app icon"><h2>Keep a good thing going.</h2><p>Your next copy deserves a second helping.</p><div class="download__buttons"><a href="https://github.com/crmitchelmore/pasta/releases/latest" class="btn btn--primary">Download for Mac <span aria-hidden="true">↓</span></a><a href="https://github.com/crmitchelmore/pasta" class="btn btn--secondary">View Source</a></div><p class="download__requirements">Free. Requires macOS 14.0 (Sonoma) or later.</p></section>
   </main>
   <footer class="footer"><div><a class="footer__brand" href="/">Pasta</a><p>Made by Chris Mitchelmore.<br>© 2024–2026. MIT License.</p></div><div class="footer__support"><p>A small app, made with care.</p><a href="https://github.com/sponsors/crmitchelmore">Sponsor Pasta</a><a href="https://ko-fi.com/crmitchelmore">Buy me a coffee</a></div><ul class="footer__links"><li><a href="https://github.com/crmitchelmore/pasta">GitHub</a></li><li><a href="https://github.com/crmitchelmore/pasta/releases">Releases</a></li><li><a href="https://github.com/crmitchelmore/pasta/issues">Issues</a></li><li><a href="#roadmap">Roadmap</a></li></ul></footer>
 </body>
