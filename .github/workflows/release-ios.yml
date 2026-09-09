@@ -364,7 +364,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/ci-verify-dependency-locks.py
-          xcodebuild -resolvePackageDependencies \
+          scripts/ci-xcodebuild.sh -resolvePackageDependencies \
             -onlyUsePackageVersionsFromResolvedFile \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -400,7 +400,7 @@ jobs:
           # The host passes this approval explicitly into the shared SyncManager;
           # SwiftPM targets do not inherit app compilation conditions.
           # scripts/ci-ios-e2e.sh asserts the app flag is present before upload.
-          xcodebuild archive \
+          scripts/ci-xcodebuild.sh archive \
             -onlyUsePackageVersionsFromResolvedFile \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -488,7 +488,7 @@ jobs:
           # if App Store Connect rejects it. With destination=export (dry run) the
           # IPA is written to $EXPORT_PATH instead. The API key is only needed for
           # the upload but is harmless for a dry run.
-          xcodebuild -exportArchive \
+          scripts/ci-xcodebuild.sh -exportArchive \
             -archivePath "$ARCHIVE_PATH" \
             -exportOptionsPlist "$BUILD_DIR/ExportOptions.plist" \
             -exportPath "$EXPORT_PATH" \
