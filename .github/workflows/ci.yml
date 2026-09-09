@@ -134,22 +134,7 @@ jobs:
 
       - name: Install Chromium
         working-directory: landing-page
-        # Package mirrors can briefly serve mismatched indexes during updates.
-        # Retry setup only; never retry a failing browser test into a pass.
-        run: |
-          # Chromium is downloaded by Playwright; the unrelated preinstalled
-          # Google Chrome repository must not block Ubuntu dependency updates.
-          { sudo grep -rlZ 'dl.google.com/linux/chrome' /etc/apt/sources.list.d || test "$?" -eq 1; } | xargs -0 -r sudo rm -f
-          for attempt in 1 2 3; do
-            if npx playwright install --with-deps chromium; then
-              exit 0
-            fi
-            if [ "$attempt" -eq 3 ]; then
-              echo "::error::Chromium dependency installation failed after three attempts"
-              exit 1
-            fi
-            sleep 20
-          done
+        run: ../scripts/ci-install-playwright.sh
 
       - name: Run Playwright smoke suite
         working-directory: landing-page
@@ -206,8 +191,7 @@ jobs:
 
   test:
     name: Build & Test
-    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
-    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 131 && github.event.pull_request.head.repo.full_name == github.repository) && '["pasta-local","macos-arm64"]' || '["macos-15"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'pasta-local' || 'macos-15' }}
     
     steps:
       - name: Checkout code
@@ -216,13 +200,13 @@ jobs:
       - name: Resolve Swift dependencies
         run: |
           python3 scripts/ci-verify-dependency-locks.py
-          swift package resolve --force-resolved-versions
+          swift package --cache-path "$RUNNER_TEMP/swiftpm-cache" resolve --force-resolved-versions
       
       - name: Build
-        run: swift build --force-resolved-versions -c debug
+        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c debug
       
       - name: Run tests
-        run: swift test --force-resolved-versions --parallel
+        run: swift test --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions --parallel
 
       - name: Test release-notes generator
         run: node --test Tests/ReleaseNotesTests/*.test.mjs
@@ -231,7 +215,7 @@ jobs:
         run: scripts/tests/ci-verify-eddsa.test.sh
       
       - name: Build release
-        run: swift build --force-resolved-versions -c release
+        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release
       
       - name: Create test app bundle (mirrors release workflow)
         id: bundle
@@ -408,8 +392,7 @@ jobs:
   # upload. Change the script, not the steps, so the two cannot drift.
   ios-e2e:
     name: iOS E2E (XCUITest)
-    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
-    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 131 && github.event.pull_request.head.repo.full_name == github.repository) && '["pasta-local","macos-arm64"]' || '["macos-15"]') }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'pasta-local' || 'macos-15' }}
     timeout-minutes: 45
     env:
       PROJECT: PastaIOS/PastaIOS.xcodeproj
@@ -424,7 +407,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Select Xcode
-        if: runner.environment != 'self-hosted'
+        if: runner.name != 'bravo-mini-pasta'
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: '26.3'

@@ -89,7 +89,9 @@ class PastaUITestCase: XCTestCase {
     func openTab(_ title: String, expecting identifier: String, file: StaticString = #filePath, line: UInt = #line) {
         let button = tabButton(title)
         XCTAssertTrue(button.waitForExistence(timeout: Self.uiTimeout), "Tab '\(title)' not found", file: file, line: line)
-        button.tap()
+        // Re-selecting the current iOS tab starts its scroll-to-top interaction.
+        // Opening an already selected tab should only verify its content.
+        if !button.isSelected { button.tap() }
         XCTAssertTrue(
             element(identifier).waitForExistence(timeout: Self.uiTimeout),
             "Tab '\(title)' did not show '\(identifier)'",

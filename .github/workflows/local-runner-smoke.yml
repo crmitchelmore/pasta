@@ -1,0 +1,37 @@
+name: Local runner verification
+on:
+  pull_request:
+    paths:
+      - .github/workflows/local-runner-smoke.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: pasta-local
+    timeout-minutes: 5
+    steps:
+      - name: Verify local toolchain and update signing credentials
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          xcodebuild -version
+          swift --version
+          /opt/homebrew/bin/python3 - <<'PY'
+          import base64, os, plistlib
+          from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+          from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+          raw = base64.b64decode(os.environ['SPARKLE_PRIVATE_KEY'], validate=True)
+          key = Ed25519PrivateKey.from_private_bytes(raw[:32])
+          actual = key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+          expected = base64.b64decode(os.environ['SPARKLE_PUBLIC_KEY'], validate=True)
+          installed = base64.b64decode(plistlib.load(open('/Applications/Pasta.app/Contents/Info.plist', 'rb'))['SUPublicEDKey'])
+          assert actual == expected == installed, 'Sparkle key does not match installed Pasta'
+          message = b'Pasta local runner signing verification'
+          key.public_key().verify(key.sign(message), message)
+          print('Original Sparkle key verified against installed Pasta; signing round trip passed.')
+          PY

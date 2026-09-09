@@ -21,6 +21,10 @@
 
 set -euo pipefail
 
+xcodebuild() {
+  bash "$(dirname "${BASH_SOURCE[0]}")/ci-xcodebuild.sh" "$@"
+}
+
 PROJECT="${PROJECT:-PastaIOS/PastaIOS.xcodeproj}"
 SCHEME="${SCHEME:-PastaIOS}"
 DERIVED_DATA="${DERIVED_DATA:-.build/ios-derived}"

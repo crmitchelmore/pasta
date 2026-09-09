@@ -14,7 +14,7 @@ env:
 jobs:
   build-and-release:
     name: Build, Sign, Notarize & Release
-    runs-on: macos-15
+    runs-on: pasta-local
     steps:
     - name: Checkout code
       uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -31,79 +31,37 @@ jobs:
       id: version
       run: echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
     - name: Resolve Swift dependencies
-      run: |
-        python3 scripts/ci-verify-dependency-locks.py
-        swift package resolve --force-resolved-versions
+      run: 'python3 scripts/ci-verify-dependency-locks.py
+
+        swift package --cache-path "$RUNNER_TEMP/swiftpm-cache" resolve --force-resolved-versions
+
+        '
     - name: Build release binary (arm64)
-      run: swift build --force-resolved-versions -c release --arch arm64
+      run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release --arch arm64
     - name: Build release binary (x86_64)
-      run: swift build --force-resolved-versions -c release --arch x86_64
+      run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release --arch x86_64
     - name: Create universal binary
-      run: |
-        mkdir -p .build/universal
-        lipo -create \
-          .build/arm64-apple-macosx/release/PastaApp \
-          .build/x86_64-apple-macosx/release/PastaApp \
-          -output .build/universal/PastaApp
-
-        echo "==> Retaining symbols before stripping"
-        dsymutil .build/universal/PastaApp -o .build/universal/PastaApp.dSYM
-        python3 scripts/ci-verify-symbols.py .build/universal/PastaApp .build/universal/PastaApp.dSYM
-        ditto -c -k --keepParent .build/universal/PastaApp.dSYM .build/universal/PastaApp.dSYM.zip
-
-        echo "==> Stripping debug symbols"
-        strip -x .build/universal/PastaApp
-
-        echo "==> Created universal binary"
-        file .build/universal/PastaApp
-        ls -lh .build/universal/PastaApp
+      run: "mkdir -p .build/universal\nlipo -create \\\n  .build/arm64-apple-macosx/release/PastaApp \\\n  .build/x86_64-apple-macosx/release/PastaApp\
+        \ \\\n  -output .build/universal/PastaApp\n\necho \"==> Retaining symbols before stripping\"\ndsymutil .build/universal/PastaApp\
+        \ -o .build/universal/PastaApp.dSYM\npython3 scripts/ci-verify-symbols.py .build/universal/PastaApp .build/universal/PastaApp.dSYM\n\
+        ditto -c -k --keepParent .build/universal/PastaApp.dSYM .build/universal/PastaApp.dSYM.zip\n\necho \"==> Stripping\
+        \ debug symbols\"\nstrip -x .build/universal/PastaApp\n\necho \"==> Created universal binary\"\nfile .build/universal/PastaApp\n\
+        ls -lh .build/universal/PastaApp\n"
     - name: Create app bundle structure
-      run: |
-        BUILD_DIR=".build/universal"
-        # App bundle is named "Pasta.app" but executable inside is still "PastaApp"
-        APP_DIR="${BUILD_DIR}/${DMG_NAME}.app"
-
-        echo "==> Creating app bundle at $APP_DIR"
-        rm -rf "$APP_DIR"
-        mkdir -p "$APP_DIR/Contents/MacOS"
-        mkdir -p "$APP_DIR/Contents/Resources"
-        mkdir -p "$APP_DIR/Contents/Frameworks"
-
-        # Copy the universal binary (keep internal name as PastaApp)
-        cp ".build/universal/${APP_NAME}" "$APP_DIR/Contents/MacOS/${APP_NAME}"
-
-        # Copy resources
-        if [ -d "Sources/PastaApp/Resources" ]; then
-          cp -R Sources/PastaApp/Resources/* "$APP_DIR/Contents/Resources/" || true
-        fi
-
-        # Copy app icon to Resources
-        cp "$ICON_PATH" "$APP_DIR/Contents/Resources/AppIcon.icns"
-
-        # Copy Sparkle framework
-        SPARKLE_PATH=$(find .build -name "Sparkle.framework" -type d | head -1)
-        if [ -n "$SPARKLE_PATH" ]; then
-          echo "==> Copying Sparkle framework from $SPARKLE_PATH"
-          cp -R "$SPARKLE_PATH" "$APP_DIR/Contents/Frameworks/"
-        else
-          echo "ERROR: Sparkle.framework not found!"
-          exit 1
-        fi
-
-        # Fix rpath to find frameworks in Contents/Frameworks
-        echo "==> Fixing rpath for Sparkle framework"
-        install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/${APP_NAME}"
-
-        # Verify rpath
-        echo "==> Verifying rpath:"
-        otool -l "$APP_DIR/Contents/MacOS/${APP_NAME}" | grep -A2 LC_RPATH
-
-        # Make executable
-        chmod +x "$APP_DIR/Contents/MacOS/${APP_NAME}"
-
-        echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
-
-        find .build/arm64-apple-macosx/release -maxdepth 1 -name "*.bundle" -exec cp -R {} "$APP_DIR/Contents/Resources/" \;
+      run: "BUILD_DIR=\".build/universal\"\n# App bundle is named \"Pasta.app\" but executable inside is still \"PastaApp\"\
+        \nAPP_DIR=\"${BUILD_DIR}/${DMG_NAME}.app\"\n\necho \"==> Creating app bundle at $APP_DIR\"\nrm -rf \"$APP_DIR\"\n\
+        mkdir -p \"$APP_DIR/Contents/MacOS\"\nmkdir -p \"$APP_DIR/Contents/Resources\"\nmkdir -p \"$APP_DIR/Contents/Frameworks\"\
+        \n\n# Copy the universal binary (keep internal name as PastaApp)\ncp \".build/universal/${APP_NAME}\" \"$APP_DIR/Contents/MacOS/${APP_NAME}\"\
+        \n\n# Copy resources\nif [ -d \"Sources/PastaApp/Resources\" ]; then\n  cp -R Sources/PastaApp/Resources/* \"$APP_DIR/Contents/Resources/\"\
+        \ || true\nfi\n\n# Copy app icon to Resources\ncp \"$ICON_PATH\" \"$APP_DIR/Contents/Resources/AppIcon.icns\"\n\n\
+        # Copy Sparkle framework\nSPARKLE_PATH=$(find .build -name \"Sparkle.framework\" -type d | head -1)\nif [ -n \"$SPARKLE_PATH\"\
+        \ ]; then\n  echo \"==> Copying Sparkle framework from $SPARKLE_PATH\"\n  cp -R \"$SPARKLE_PATH\" \"$APP_DIR/Contents/Frameworks/\"\
+        \nelse\n  echo \"ERROR: Sparkle.framework not found!\"\n  exit 1\nfi\n\n# Fix rpath to find frameworks in Contents/Frameworks\n\
+        echo \"==> Fixing rpath for Sparkle framework\"\ninstall_name_tool -add_rpath \"@executable_path/../Frameworks\" \"\
+        $APP_DIR/Contents/MacOS/${APP_NAME}\"\n\n# Verify rpath\necho \"==> Verifying rpath:\"\notool -l \"$APP_DIR/Contents/MacOS/${APP_NAME}\"\
+        \ | grep -A2 LC_RPATH\n\n# Make executable\nchmod +x \"$APP_DIR/Contents/MacOS/${APP_NAME}\"\n\necho \"APP_DIR=$APP_DIR\"\
+        \ >> \"$GITHUB_ENV\"\n\nfind .build/arm64-apple-macosx/release -maxdepth 1 -name \"*.bundle\" -exec cp -R {} \"$APP_DIR/Contents/Resources/\"\
+        \ \\;\n"
     - name: Generate Info.plist with version
       env:
         SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
@@ -131,74 +89,47 @@ jobs:
       env:
         CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
         CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_PASSWORD }}
-      run: |
-        # Create temporary keychain
-        KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-        KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-
-        echo "==> Creating temporary keychain"
-        security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-        security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-        security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-        echo "==> Importing certificate"
-        echo "$CERTIFICATE_BASE64" | base64 --decode > certificate.p12
-        security import certificate.p12 \
-          -k "$KEYCHAIN_PATH" \
-          -P "$CERTIFICATE_PASSWORD" \
-          -T /usr/bin/codesign \
-          -T /usr/bin/productsign
-
-        # Set keychain search list
-        security list-keychain -d user -s "$KEYCHAIN_PATH"
-        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-        # Clean up certificate file
-        rm certificate.p12
-
-        echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
-        echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> "$GITHUB_ENV"
-
-        echo "==> Certificate imported successfully"
+      run: "# Create temporary keychain\nKEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db\nKEYCHAIN_PASSWORD=$(openssl rand\
+        \ -base64 32)\n\necho \"==> Creating temporary keychain\"\necho \"KEYCHAIN_PATH=$KEYCHAIN_PATH\" >> \"$GITHUB_ENV\"\
+        \nsecurity create-keychain -p \"$KEYCHAIN_PASSWORD\" \"$KEYCHAIN_PATH\"\nsecurity set-keychain-settings -lut 21600\
+        \ \"$KEYCHAIN_PATH\"\nsecurity unlock-keychain -p \"$KEYCHAIN_PASSWORD\" \"$KEYCHAIN_PATH\"\n\necho \"==> Importing\
+        \ certificate\"\necho \"$CERTIFICATE_BASE64\" | base64 --decode > certificate.p12\nsecurity import certificate.p12\
+        \ \\\n  -k \"$KEYCHAIN_PATH\" \\\n  -P \"$CERTIFICATE_PASSWORD\" \\\n  -T /usr/bin/codesign \\\n  -T /usr/bin/productsign\n\
+        \n# Set keychain search list\npython3 scripts/ci-keychain-search.py add \"$RUNNER_TEMP/keychain-search.json\" \"$KEYCHAIN_PATH\"\
+        \nsecurity set-key-partition-list -S apple-tool:,apple:,codesign: -s -k \"$KEYCHAIN_PASSWORD\" \"$KEYCHAIN_PATH\"\
+        \ >/dev/null\n\n# Clean up certificate file\nrm certificate.p12\n\necho \"KEYCHAIN_PATH=$KEYCHAIN_PATH\" >> \"$GITHUB_ENV\"\
+        \necho \"KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD\" >> \"$GITHUB_ENV\"\n\necho \"==> Certificate imported successfully\"\
+        \n"
     - name: Find signing identity
       id: signing
-      run: |
-        # Find the Developer ID Application certificate
-        IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application" | head -1 | grep -o '".*"' | tr -d '"')
-
-        if [ -z "$IDENTITY" ]; then
-          echo "ERROR: No Developer ID Application certificate found!"
-          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
-          exit 1
-        fi
-
-        echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
-        echo "==> Found signing identity: $IDENTITY"
+      run: "# Find the Developer ID Application certificate\nIDENTITY=$(security find-identity -v -p codesigning \"$KEYCHAIN_PATH\"\
+        \ | grep \"Developer ID Application\" | head -1 | grep -o '\".*\"' | tr -d '\"')\n\nif [ -z \"$IDENTITY\" ]; then\n\
+        \  echo \"ERROR: No Developer ID Application certificate found!\"\n  security find-identity -v -p codesigning \"$KEYCHAIN_PATH\"\
+        \n  exit 1\nfi\n\necho \"identity=$IDENTITY\" >> \"$GITHUB_OUTPUT\"\necho \"==> Found signing identity: $IDENTITY\"\
+        \n"
     - name: Prepare entitlements file
-      run: |
-        cp Resources/release.entitlements entitlements.plist
-        echo "==> Entitlements file:"
-        cat entitlements.plist
-    - name: Validate entitlements (no restricted keys without profile)
-      run: |
-        # These entitlements require specific provisioning profile capabilities.
-        # Adding one without updating the profile will cause SIGKILL on launch.
-        RESTRICTED_KEYS="aps-environment get-task-allow com.apple.developer.team-identifier"
+      run: 'cp Resources/release.entitlements entitlements.plist
 
-        for key in $RESTRICTED_KEYS; do
-          if grep -q "$key" entitlements.plist; then
-            echo "ERROR: entitlements.plist contains restricted key '$key'."
-            echo "This requires a matching provisioning profile capability."
-            echo "Remove it or update the profile before releasing."
-            exit 1
-          fi
-        done
-        echo "==> Entitlements validation passed (no unexpected restricted keys)"
+        echo "==> Entitlements file:"
+
+        cat entitlements.plist
+
+        '
+    - name: Validate entitlements (no restricted keys without profile)
+      run: "# These entitlements require specific provisioning profile capabilities.\n# Adding one without updating the profile\
+        \ will cause SIGKILL on launch.\nRESTRICTED_KEYS=\"aps-environment get-task-allow com.apple.developer.team-identifier\"\
+        \n\nfor key in $RESTRICTED_KEYS; do\n  if grep -q \"$key\" entitlements.plist; then\n    echo \"ERROR: entitlements.plist\
+        \ contains restricted key '$key'.\"\n    echo \"This requires a matching provisioning profile capability.\"\n    echo\
+        \ \"Remove it or update the profile before releasing.\"\n    exit 1\n  fi\ndone\necho \"==> Entitlements validation\
+        \ passed (no unexpected restricted keys)\"\n"
     - name: Embed provisioning profile
-      run: |
-        echo "$TRAIN_PROFILE" | base64 -D -o "${APP_DIR}/Contents/embedded.provisionprofile"
+      run: 'echo "$TRAIN_PROFILE" | base64 -D -o "${APP_DIR}/Contents/embedded.provisionprofile"
+
         echo "==> Provisioning profile embedded"
+
         ls -la "${APP_DIR}/Contents/embedded.provisionprofile"
+
+        '
       env:
         TRAIN_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_MACOS_PROVISIONING_PROFILE || secrets.MACOS_PROVISIONING_PROFILE
           }}
@@ -207,20 +138,21 @@ jobs:
         # Sign framework internals first (WITHOUT app entitlements)\n# Applying iCloud/CloudKit entitlements to framework\
         \ binaries causes\n# dyld signature rejection at launch.\necho \"==> Signing framework binaries (no app entitlements)...\"\
         \nfind \"${APP_DIR}/Contents/Frameworks\" -type f -perm +111 | while read -r binary; do\n  if file \"$binary\" | grep\
-        \ -q \"Mach-O\"; then\n    echo \"  Signing: $binary\"\n    codesign --force \\\n      --sign \"$IDENTITY\" \\\n \
-        \     --options runtime \\\n      --timestamp \\\n      \"$binary\" || true\n  fi\ndone\n\n# Sign framework bundles\
-        \ (XPC services, apps inside frameworks)\nfind \"${APP_DIR}/Contents/Frameworks\" -name \"*.xpc\" -o -name \"*.app\"\
-        \ | while read -r bundle; do\n  if [ -d \"$bundle\" ]; then\n    echo \"  Signing bundle: $bundle\"\n    codesign\
-        \ --force \\\n      --sign \"$IDENTITY\" \\\n      --options runtime \\\n      --timestamp \\\n      \"$bundle\" ||\
-        \ true\n  fi\ndone\n\n# Sign the framework itself\nfind \"${APP_DIR}/Contents/Frameworks\" -name \"*.framework\" |\
-        \ while read -r fw; do\n  echo \"  Signing framework: $fw\"\n  codesign --force \\\n    --sign \"$IDENTITY\" \\\n\
-        \    --options runtime \\\n    --timestamp \\\n    \"$fw\" || true\ndone\n\n# Sign the main app binary WITH entitlements\n\
-        echo \"==> Signing main binary with entitlements...\"\ncodesign --force \\\n  --sign \"$IDENTITY\" \\\n  --options\
+        \ -q \"Mach-O\"; then\n    echo \"  Signing: $binary\"\n    codesign --force --keychain \"$KEYCHAIN_PATH\" \\\n  \
+        \    --sign \"$IDENTITY\" \\\n      --options runtime \\\n      --timestamp \\\n      \"$binary\" || true\n  fi\n\
+        done\n\n# Sign framework bundles (XPC services, apps inside frameworks)\nfind \"${APP_DIR}/Contents/Frameworks\" -name\
+        \ \"*.xpc\" -o -name \"*.app\" | while read -r bundle; do\n  if [ -d \"$bundle\" ]; then\n    echo \"  Signing bundle:\
+        \ $bundle\"\n    codesign --force --keychain \"$KEYCHAIN_PATH\" \\\n      --sign \"$IDENTITY\" \\\n      --options\
+        \ runtime \\\n      --timestamp \\\n      \"$bundle\" || true\n  fi\ndone\n\n# Sign the framework itself\nfind \"\
+        ${APP_DIR}/Contents/Frameworks\" -name \"*.framework\" | while read -r fw; do\n  echo \"  Signing framework: $fw\"\
+        \n  codesign --force --keychain \"$KEYCHAIN_PATH\" \\\n    --sign \"$IDENTITY\" \\\n    --options runtime \\\n   \
+        \ --timestamp \\\n    \"$fw\" || true\ndone\n\n# Sign the main app binary WITH entitlements\necho \"==> Signing main\
+        \ binary with entitlements...\"\ncodesign --force --keychain \"$KEYCHAIN_PATH\" \\\n  --sign \"$IDENTITY\" \\\n  --options\
         \ runtime \\\n  --timestamp \\\n  --entitlements entitlements.plist \\\n  \"${APP_DIR}/Contents/MacOS/PastaApp\"\n\
-        \n# Sign the app bundle (top-level, with entitlements)\necho \"==> Signing app bundle...\"\ncodesign --force \\\n\
-        \  --sign \"$IDENTITY\" \\\n  --options runtime \\\n  --timestamp \\\n  --entitlements entitlements.plist \\\n  \"\
-        ${APP_DIR}\"\n\necho \"==> Verifying signature\"\ncodesign --verify --verbose=4 \"${APP_DIR}\"\n\n# Verify entitlements\
-        \ are NOT on framework binaries\necho \"==> Checking framework entitlements are clean...\"\nSPARKLE_ENTS=$(codesign\
+        \n# Sign the app bundle (top-level, with entitlements)\necho \"==> Signing app bundle...\"\ncodesign --force --keychain\
+        \ \"$KEYCHAIN_PATH\" \\\n  --sign \"$IDENTITY\" \\\n  --options runtime \\\n  --timestamp \\\n  --entitlements entitlements.plist\
+        \ \\\n  \"${APP_DIR}\"\n\necho \"==> Verifying signature\"\ncodesign --verify --verbose=4 \"${APP_DIR}\"\n\n# Verify\
+        \ entitlements are NOT on framework binaries\necho \"==> Checking framework entitlements are clean...\"\nSPARKLE_ENTS=$(codesign\
         \ -d --entitlements - \"${APP_DIR}/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle\" 2>&1 || true)\nif echo\
         \ \"$SPARKLE_ENTS\" | grep -q \"icloud\"; then\n  echo \"ERROR: Sparkle binary has iCloud entitlements \u2014 this\
         \ will crash at launch!\"\n  exit 1\nfi\necho \"\u2713 Framework entitlements are clean\"\n"
@@ -234,65 +166,53 @@ jobs:
     - name: Add pinned create-dmg to PATH
       run: echo "$GITHUB_WORKSPACE/.build/tools/create-dmg" >> "$GITHUB_PATH"
     - name: Generate DMG assets
-      run: |
-        cd Resources/DMG
+      run: 'cd Resources/DMG
+
 
         echo "==> Generating app icon (icns)"
+
         chmod +x create-icns.sh
+
         ./create-icns.sh
 
+
         echo "==> Generating background image"
+
         chmod +x create-background.sh
+
         ./create-background.sh
+
+        '
     - name: Create fancy DMG
       id: dmg
-      run: |
-        DMG_FILE="${DMG_NAME}-${{ steps.version.outputs.version }}.dmg"
-
-        echo "==> Creating DMG with custom background and layout"
-        create-dmg \
-          --volname "${DMG_NAME}" \
-          --volicon "$ICON_PATH" \
-          --background "Resources/DMG/background@2x.png" \
-          --window-pos 200 120 \
-          --window-size 660 400 \
-          --icon-size 100 \
-          --icon "${DMG_NAME}.app" 180 200 \
-          --app-drop-link 480 200 \
-          --hide-extension "${DMG_NAME}.app" \
-          --no-internet-enable \
-          "${DMG_FILE}" \
-          "${APP_DIR}"
-
-        echo "dmg_file=$DMG_FILE" >> "$GITHUB_OUTPUT"
-        echo "==> DMG created: $DMG_FILE"
-        ls -lh "$DMG_FILE"
+      run: "DMG_FILE=\"${DMG_NAME}-${{ steps.version.outputs.version }}.dmg\"\n\necho \"==> Creating DMG with custom background\
+        \ and layout\"\ncreate-dmg \\\n  --volname \"${DMG_NAME}\" \\\n  --volicon \"$ICON_PATH\" \\\n  --background \"Resources/DMG/background@2x.png\"\
+        \ \\\n  --window-pos 200 120 \\\n  --window-size 660 400 \\\n  --icon-size 100 \\\n  --icon \"${DMG_NAME}.app\" 180\
+        \ 200 \\\n  --app-drop-link 480 200 \\\n  --hide-extension \"${DMG_NAME}.app\" \\\n  --no-internet-enable \\\n  \"\
+        ${DMG_FILE}\" \\\n  \"${APP_DIR}\"\n\necho \"dmg_file=$DMG_FILE\" >> \"$GITHUB_OUTPUT\"\necho \"==> DMG created: $DMG_FILE\"\
+        \nls -lh \"$DMG_FILE\"\n"
     - name: Notarize DMG
       env:
         APPLE_ID: ${{ secrets.APPLE_ID }}
         APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
         APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      run: |
-        DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
-
-        echo "==> Submitting DMG for notarization"
-        xcrun notarytool submit "$DMG_FILE" \
-          --apple-id "$APPLE_ID" \
-          --password "$APPLE_ID_PASSWORD" \
-          --team-id "$APPLE_TEAM_ID" \
-          --wait \
-          --timeout 60m
-
-        echo "==> Notarization successful"
+      run: "DMG_FILE=\"${{ steps.dmg.outputs.dmg_file }}\"\n\necho \"==> Submitting DMG for notarization\"\nxcrun notarytool\
+        \ submit \"$DMG_FILE\" \\\n  --apple-id \"$APPLE_ID\" \\\n  --password \"$APPLE_ID_PASSWORD\" \\\n  --team-id \"$APPLE_TEAM_ID\"\
+        \ \\\n  --wait \\\n  --timeout 60m\n\necho \"==> Notarization successful\"\n"
     - name: Staple notarization ticket
-      run: |
-        DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
+      run: 'DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
+
 
         echo "==> Stapling notarization ticket to DMG"
+
         xcrun stapler staple "$DMG_FILE"
 
+
         echo "==> Verifying stapled ticket"
+
         xcrun stapler validate "$DMG_FILE"
+
+        '
     - name: Verify signed and notarized DMG
       run: "DMG_FILE=\"${{ steps.dmg.outputs.dmg_file }}\"\n\necho \"==> Verifying DMG\"\n\n# Mount DMG\nhdiutil attach \"\
         $DMG_FILE\" -mountpoint /tmp/pasta-verify\n\n# Verify signature\necho \"==> Checking code signature\"\ncodesign --verify\
@@ -300,42 +220,44 @@ jobs:
         \ on the DMG already verified this)\necho \"==> Checking notarization\"\nxcrun stapler validate \"$DMG_FILE\"\n\n\
         # Unmount\nhdiutil detach /tmp/pasta-verify\n\necho \"==> \u2705 All verifications passed!\"\n"
     - name: Launch readiness smoke test (notarized DMG contents)
-      run: |
-        set -euo pipefail
+      run: 'set -euo pipefail
+
         DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
+
         MOUNTPOINT="$RUNNER_TEMP/pasta-smoke-mnt"
+
         INSTALL_DIR="$RUNNER_TEMP/pasta-smoke-Applications"
+
         mkdir -p "$MOUNTPOINT" "$INSTALL_DIR"
+
         hdiutil attach "$DMG_FILE" -mountpoint "$MOUNTPOINT" -nobrowse -readonly -noautoopen
+
         # Copy out exactly as a user dragging to /Applications would (ditto keeps
+
         # the signature and resource forks intact), then release the DMG.
+
         ditto "$MOUNTPOINT/${DMG_NAME}.app" "$INSTALL_DIR/${DMG_NAME}.app"
+
         hdiutil detach "$MOUNTPOINT"
+
         scripts/ci-launch-smoke.sh "$INSTALL_DIR/${DMG_NAME}.app"
+
+        '
     - name: Generate Appcast for Sparkle Updates
       env:
         SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-      run: |
-        VERSION="${RELEASE_VERSION}"
-        DMG_PATH="${{ steps.dmg.outputs.dmg_file }}"
-
-        chmod +x scripts/generate-appcast.sh
-        ./scripts/generate-appcast.sh \
-          "$VERSION" \
-          "$BUILD_NUMBER" \
-          "$DMG_PATH" \
-          "$SPARKLE_PRIVATE_KEY" \
-          "$RUNNER_TEMP/release-notes.html" > "$RUNNER_TEMP/appcast.xml"
-
-        echo "APPCAST_PATH=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_ENV"
-        echo "Generated appcast.xml:"
-        cat "$RUNNER_TEMP/appcast.xml"
+      run: "VERSION=\"${RELEASE_VERSION}\"\nDMG_PATH=\"${{ steps.dmg.outputs.dmg_file }}\"\n\nchmod +x scripts/generate-appcast.sh\n\
+        ./scripts/generate-appcast.sh \\\n  \"$VERSION\" \\\n  \"$BUILD_NUMBER\" \\\n  \"$DMG_PATH\" \\\n  \"$SPARKLE_PRIVATE_KEY\"\
+        \ \\\n  \"$RUNNER_TEMP/release-notes.html\" > \"$RUNNER_TEMP/appcast.xml\"\n\necho \"APPCAST_PATH=$RUNNER_TEMP/appcast.xml\"\
+        \ >> \"$GITHUB_ENV\"\necho \"Generated appcast.xml:\"\ncat \"$RUNNER_TEMP/appcast.xml\"\n"
     - name: Require every surface gate before publishing the release
       uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
       with:
-        script: |
-          const { verifyManifestPublication } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
+        script: 'const { verifyManifestPublication } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
+
           await verifyManifestPublication({ github, ...context.repo, sha: process.env.RELEASE_SHA });
+
+          '
     - name: Verify signed train identity and frozen notes
       run: python3 scripts/verify-release-train-archive.py "$APP_DIR" "$RUNNER_TEMP/release-manifest.json" mac-direct
     - name: Stage immutable candidate assets
@@ -349,12 +271,15 @@ jobs:
       if: env.RELEASE_TRAIN == 'alpha'
       env:
         DMG_FILE: ${{ steps.dmg.outputs.dmg_file }}
-      run: |-
-        export APPCAST_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/appcast.xml"
+      run: 'export APPCAST_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/appcast.xml"
+
         export EXPECTED_FEED_URL="$FEED_URL"
-        ENCODED_DMG=$(python3 -c 'import os,urllib.parse;print(urllib.parse.quote(os.environ["DMG_FILE"]))')
+
+        ENCODED_DMG=$(python3 -c ''import os,urllib.parse;print(urllib.parse.quote(os.environ["DMG_FILE"]))'')
+
         export EXPECTED_DMG_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$ENCODED_DMG"
-        scripts/ci-verify-release.sh "$RELEASE_VERSION"
+
+        scripts/ci-verify-release.sh "$RELEASE_VERSION"'
     - name: Record verified candidate assets
       env:
         DMG_FILE: ${{ steps.dmg.outputs.dmg_file }}
@@ -365,26 +290,27 @@ jobs:
       run: node scripts/release-train.mjs publish-alpha --tag "$RELEASE_TAG"
     - name: Cleanup keychain
       if: always()
-      run: |
-        if [ -f "$KEYCHAIN_PATH" ]; then
-          echo "==> Cleaning up keychain"
-          security delete-keychain "$KEYCHAIN_PATH" || true
-        fi
+      run: "python3 scripts/ci-keychain-search.py restore \"$RUNNER_TEMP/keychain-search.json\"\nrm -f certificate.p12\nif\
+        \ [ -n \"${KEYCHAIN_PATH:-}\" ] && [ -f \"$KEYCHAIN_PATH\" ]; then\n  echo \"==> Cleaning up keychain\"\n  security\
+        \ delete-keychain \"$KEYCHAIN_PATH\" || true\nfi\n"
     - name: Upload build artifacts (for debugging)
       if: failure()
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: failed-build-artifacts
-        path: |
-          .build/
+        path: '.build/
+
           entitlements.plist
+
           release_notes.md
+
+          '
         retention-days: 7
     - name: Withdraw failed Alpha build
       if: always() && (failure() || cancelled()) && env.RELEASE_TRAIN == 'alpha'
-      run: |-
-        node scripts/release-train.mjs receipt --tag "$RELEASE_TAG" --surface mac-direct --status failed
-        gh release edit "$RELEASE_TAG" --draft=true
+      run: 'node scripts/release-train.mjs receipt --tag "$RELEASE_TAG" --surface mac-direct --status failed
+
+        gh release edit "$RELEASE_TAG" --draft=true'
 'on':
   workflow_call:
     inputs:

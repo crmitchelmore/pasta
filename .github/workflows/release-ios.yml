@@ -19,7 +19,7 @@ env:
 jobs:
   preflight:
     name: "Preflight \u2014 iOS E2E (XCUITest)"
-    runs-on: macos-15
+    runs-on: pasta-local
     timeout-minutes: 45
     env:
       DERIVED_DATA: .build/ios-derived
@@ -39,19 +39,23 @@ jobs:
     - name: Stamp isolated release configuration
       run: python3 scripts/configure-release-train.py
     - name: Select Xcode
+      if: runner.name != 'bravo-mini-pasta'
       uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90
       with:
         xcode-version: '26.3'
     - name: Cache SwiftPM checkouts and build intermediates
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
       with:
-        path: |
-          .build/ios-derived/SourcePackages
+        path: '.build/ios-derived/SourcePackages
+
           .build/ios-derived/Build/Intermediates.noindex
+
+          '
         key: ios-e2e-${{ runner.os }}-${{ hashFiles('Package.resolved', 'PastaIOS/PastaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved',
           'Package.swift', 'PastaIOS/PastaIOS.xcodeproj/project.pbxproj') }}
-        restore-keys: |
-          ios-e2e-${{ runner.os }}-
+        restore-keys: 'ios-e2e-${{ runner.os }}-
+
+          '
     - name: Create iPhone simulator
       run: scripts/ci-ios-e2e.sh create-simulator
     - name: Resolve Swift packages
@@ -71,9 +75,11 @@ jobs:
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: release-ios-preflight-diagnostics
-        path: |
-          .build/ios-e2e/PastaIOSUITests.xcresult
+        path: '.build/ios-e2e/PastaIOSUITests.xcresult
+
           .build/ios-e2e/diagnostics
+
+          '
         if-no-files-found: warn
         retention-days: 14
     - name: Shut down simulator
@@ -82,7 +88,7 @@ jobs:
   testflight:
     name: Archive, Export & Upload to TestFlight
     needs: preflight
-    runs-on: macos-15
+    runs-on: pasta-local
     timeout-minutes: 90
     steps:
     - name: Checkout code
@@ -97,6 +103,7 @@ jobs:
     - name: Stamp isolated release configuration
       run: python3 scripts/configure-release-train.py
     - name: Select Xcode
+      if: runner.name != 'bravo-mini-pasta'
       uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90
       with:
         xcode-version: '26.3'
@@ -110,30 +117,15 @@ jobs:
         IOS_DISTRIBUTION_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_PASSWORD }}
         IOS_APPSTORE_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_IOS_APPSTORE_PROFILE || secrets.IOS_APPSTORE_PROFILE
           }}
-      run: |
-        set -euo pipefail
-        missing=()
-        for name in APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_API_KEY \
-                    APPLE_TEAM_ID IOS_DISTRIBUTION_P12 IOS_DISTRIBUTION_PASSWORD IOS_APPSTORE_PROFILE; do
-          [ -n "${!name}" ] || missing+=("$name")
-        done
-        if [ ${#missing[@]} -gt 0 ]; then
-          echo "::error::Missing required repository secret(s): ${missing[*]}. See PastaIOS/DEPLOY.md for what each one is and how to create it."
-          exit 1
-        fi
-        if [[ ! "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
-          echo "::error::APPLE_TEAM_ID must be a 10-character Apple Team ID."
-          exit 1
-        fi
-        if [[ ! "$APP_STORE_CONNECT_KEY_ID" =~ ^[A-Z0-9]{10}$ ]]; then
-          echo "::error::APP_STORE_CONNECT_KEY_ID must be the 10-character key id shown in App Store Connect."
-          exit 1
-        fi
-        if [[ ! "$APP_STORE_CONNECT_ISSUER_ID" =~ ^[0-9a-fA-F-]{36}$ ]]; then
-          echo "::error::APP_STORE_CONNECT_ISSUER_ID must be the issuer UUID shown in App Store Connect."
-          exit 1
-        fi
-        echo "==> All required secrets present"
+      run: "set -euo pipefail\nmissing=()\nfor name in APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_API_KEY\
+        \ \\\n            APPLE_TEAM_ID IOS_DISTRIBUTION_P12 IOS_DISTRIBUTION_PASSWORD IOS_APPSTORE_PROFILE; do\n  [ -n \"\
+        ${!name}\" ] || missing+=(\"$name\")\ndone\nif [ ${#missing[@]} -gt 0 ]; then\n  echo \"::error::Missing required\
+        \ repository secret(s): ${missing[*]}. See PastaIOS/DEPLOY.md for what each one is and how to create it.\"\n  exit\
+        \ 1\nfi\nif [[ ! \"$APPLE_TEAM_ID\" =~ ^[A-Z0-9]{10}$ ]]; then\n  echo \"::error::APPLE_TEAM_ID must be a 10-character\
+        \ Apple Team ID.\"\n  exit 1\nfi\nif [[ ! \"$APP_STORE_CONNECT_KEY_ID\" =~ ^[A-Z0-9]{10}$ ]]; then\n  echo \"::error::APP_STORE_CONNECT_KEY_ID\
+        \ must be the 10-character key id shown in App Store Connect.\"\n  exit 1\nfi\nif [[ ! \"$APP_STORE_CONNECT_ISSUER_ID\"\
+        \ =~ ^[0-9a-fA-F-]{36}$ ]]; then\n  echo \"::error::APP_STORE_CONNECT_ISSUER_ID must be the issuer UUID shown in App\
+        \ Store Connect.\"\n  exit 1\nfi\necho \"==> All required secrets present\"\n"
     - name: Use frozen marketing version
       id: version
       run: echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
@@ -147,23 +139,13 @@ jobs:
       env:
         APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
         APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
-      run: |
-        set -euo pipefail
-        # ~/.appstoreconnect/private_keys is where xcodebuild/altool look by default.
-        KEY_DIR="$HOME/.appstoreconnect/private_keys"
-        mkdir -p "$KEY_DIR"
-        KEY_PATH="$KEY_DIR/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
-        if ! printf '%s' "$APP_STORE_CONNECT_API_KEY" | base64 --decode > "$KEY_PATH" 2>/dev/null; then
-          echo "::error::APP_STORE_CONNECT_API_KEY is not valid base64. Store it with: base64 -i AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8 | pbcopy"
-          exit 1
-        fi
-        chmod 600 "$KEY_PATH"
-        if ! grep -q 'BEGIN PRIVATE KEY' "$KEY_PATH"; then
-          echo "::error::Decoded APP_STORE_CONNECT_API_KEY is not a PEM private key (.p8). Re-export it from App Store Connect."
-          exit 1
-        fi
-        echo "ASC_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
-        echo "==> API key installed at $KEY_PATH"
+      run: "set -euo pipefail\n# xcodebuild receives this explicit path; leave personal keys untouched.\numask 077\nKEY_DIR=\"\
+        $RUNNER_TEMP/asc-private-keys\"\nmkdir -p \"$KEY_DIR\"\nKEY_PATH=\"$KEY_DIR/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8\"\
+        \nif ! printf '%s' \"$APP_STORE_CONNECT_API_KEY\" | base64 --decode > \"$KEY_PATH\" 2>/dev/null; then\n  echo \"::error::APP_STORE_CONNECT_API_KEY\
+        \ is not valid base64. Store it with: base64 -i AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8 | pbcopy\"\n  exit 1\nfi\n\
+        chmod 600 \"$KEY_PATH\"\nif ! grep -q 'BEGIN PRIVATE KEY' \"$KEY_PATH\"; then\n  echo \"::error::Decoded APP_STORE_CONNECT_API_KEY\
+        \ is not a PEM private key (.p8). Re-export it from App Store Connect.\"\n  exit 1\nfi\necho \"ASC_KEY_PATH=$KEY_PATH\"\
+        \ >> \"$GITHUB_ENV\"\necho \"==> API key installed at $KEY_PATH\"\n"
     - name: Reuse existing manifest upload
       id: existing
       env:
@@ -177,93 +159,49 @@ jobs:
         IOS_DISTRIBUTION_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_PASSWORD }}
         IOS_APPSTORE_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_IOS_APPSTORE_PROFILE || secrets.IOS_APPSTORE_PROFILE
           }}
-      run: |
-        set -euo pipefail
-
-        echo "==> Creating temporary keychain"
-        KEYCHAIN_PATH="$RUNNER_TEMP/ios-signing.keychain-db"
-        KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
-        security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-        security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-        security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-        EXISTING_KEYCHAINS=()
-        while IFS= read -r existing; do EXISTING_KEYCHAINS+=("$existing"); done < <(security list-keychains -d user | sed 's/^ *"//; s/"$//')
-        security list-keychains -d user -s "$KEYCHAIN_PATH" "${EXISTING_KEYCHAINS[@]}"
-        echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
-
-        echo "==> Importing Apple Distribution certificate"
-        CERT_PATH="$RUNNER_TEMP/ios-distribution.p12"
-        if ! printf '%s' "$IOS_DISTRIBUTION_P12" | base64 --decode > "$CERT_PATH" 2>/dev/null; then
-          echo "::error::IOS_DISTRIBUTION_P12 is not valid base64."
-          exit 1
-        fi
-        security import "$CERT_PATH" -k "$KEYCHAIN_PATH" -P "$IOS_DISTRIBUTION_PASSWORD" \
-          -T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/productbuild
-        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
-        rm -f "$CERT_PATH"
-        if ! security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -q "Apple Distribution"; then
-          echo "::error::IOS_DISTRIBUTION_P12 does not contain an 'Apple Distribution' identity (see PastaIOS/DEPLOY.md for how to export one)."
-          security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
-          exit 1
-        fi
-
-        echo "==> Installing App Store provisioning profile"
-        PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
-        mkdir -p "$PROFILE_DIR"
-        PROFILE_TMP="$RUNNER_TEMP/ios-appstore.mobileprovision"
-        if ! printf '%s' "$IOS_APPSTORE_PROFILE" | base64 --decode > "$PROFILE_TMP" 2>/dev/null; then
-          echo "::error::IOS_APPSTORE_PROFILE is not valid base64."
-          exit 1
-        fi
-        PROFILE_PLIST="$RUNNER_TEMP/ios-appstore.plist"
-        security cms -D -i "$PROFILE_TMP" > "$PROFILE_PLIST"
-        PROFILE_UUID="$(plutil -extract UUID raw -o - "$PROFILE_PLIST")"
-        PROFILE_NAME="$(plutil -extract Name raw -o - "$PROFILE_PLIST")"
-        PROFILE_TEAM="$(plutil -extract TeamIdentifier.0 raw -o - "$PROFILE_PLIST")"
-        PROFILE_APP_ID="$(plutil -extract Entitlements.application-identifier raw -o - "$PROFILE_PLIST")"
-        PROFILE_EXPIRY="$(plutil -extract ExpirationDate raw -o - "$PROFILE_PLIST")"
-
-        if [ "$PROFILE_TEAM" != "$APPLE_TEAM_ID" ]; then
-          echo "::error::IOS_APPSTORE_PROFILE belongs to team '$PROFILE_TEAM', but APPLE_TEAM_ID is '$APPLE_TEAM_ID'."
-          exit 1
-        fi
-        if [ "$PROFILE_APP_ID" != "${APPLE_TEAM_ID}.${BUNDLE_ID}" ]; then
-          echo "::error::IOS_APPSTORE_PROFILE is for '$PROFILE_APP_ID', expected '${APPLE_TEAM_ID}.${BUNDLE_ID}'."
-          exit 1
-        fi
-        if plutil -extract ProvisionedDevices raw -o - "$PROFILE_PLIST" >/dev/null 2>&1; then
-          echo "::error::IOS_APPSTORE_PROFILE lists provisioned devices, so it is a development/ad-hoc profile, not an App Store profile."
-          exit 1
-        fi
-        EXPIRY_EPOCH="$(date -j -f '%Y-%m-%dT%H:%M:%SZ' "$PROFILE_EXPIRY" +%s 2>/dev/null || echo 0)"
-        if [ "$EXPIRY_EPOCH" -gt 0 ] && [ "$EXPIRY_EPOCH" -lt "$(date +%s)" ]; then
-          echo "::error::IOS_APPSTORE_PROFILE '$PROFILE_NAME' expired on $PROFILE_EXPIRY. Regenerate it in the Apple Developer portal."
-          exit 1
-        fi
-        if ! plutil -extract Entitlements xml1 -o - "$PROFILE_PLIST" | grep -q "<string>${ICLOUD_CONTAINER}</string>"; then
-          echo "::error::Profile '$PROFILE_NAME' does not grant the ${ICLOUD_CONTAINER} iCloud container. Enable iCloud/CloudKit on the ${BUNDLE_ID} App ID, regenerate the App Store profile and update IOS_APPSTORE_PROFILE."
-          exit 1
-        fi
-        if ! plutil -extract Entitlements.aps-environment raw -o - "$PROFILE_PLIST" >/dev/null 2>&1; then
-          echo "::error::Profile '$PROFILE_NAME' does not grant aps-environment. Enable Push Notifications on the ${BUNDLE_ID} App ID and regenerate the profile."
-          exit 1
-        fi
-
-        cp "$PROFILE_TMP" "$PROFILE_DIR/${PROFILE_UUID}.mobileprovision"
-        rm -f "$PROFILE_TMP"
-        echo "PROFILE_UUID=$PROFILE_UUID" >> "$GITHUB_ENV"
-        echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
-        echo "==> Installed profile '$PROFILE_NAME' ($PROFILE_UUID), expires $PROFILE_EXPIRY"
+      run: "set -euo pipefail\n\necho \"==> Creating temporary keychain\"\nKEYCHAIN_PATH=\"$RUNNER_TEMP/ios-signing.keychain-db\"\
+        \nKEYCHAIN_PASSWORD=\"$(openssl rand -base64 32)\"\necho \"KEYCHAIN_PATH=$KEYCHAIN_PATH\" >> \"$GITHUB_ENV\"\nsecurity\
+        \ create-keychain -p \"$KEYCHAIN_PASSWORD\" \"$KEYCHAIN_PATH\"\nsecurity set-keychain-settings -lut 21600 \"$KEYCHAIN_PATH\"\
+        \nsecurity unlock-keychain -p \"$KEYCHAIN_PASSWORD\" \"$KEYCHAIN_PATH\"\npython3 scripts/ci-keychain-search.py add\
+        \ \"$RUNNER_TEMP/keychain-search.json\" \"$KEYCHAIN_PATH\"\necho \"KEYCHAIN_PATH=$KEYCHAIN_PATH\" >> \"$GITHUB_ENV\"\
+        \n\necho \"==> Importing Apple Distribution certificate\"\nCERT_PATH=\"$RUNNER_TEMP/ios-distribution.p12\"\nif ! printf\
+        \ '%s' \"$IOS_DISTRIBUTION_P12\" | base64 --decode > \"$CERT_PATH\" 2>/dev/null; then\n  echo \"::error::IOS_DISTRIBUTION_P12\
+        \ is not valid base64.\"\n  exit 1\nfi\nsecurity import \"$CERT_PATH\" -k \"$KEYCHAIN_PATH\" -P \"$IOS_DISTRIBUTION_PASSWORD\"\
+        \ \\\n  -T /usr/bin/codesign -T /usr/bin/security -T /usr/bin/productbuild\nsecurity set-key-partition-list -S apple-tool:,apple:,codesign:\
+        \ -s -k \"$KEYCHAIN_PASSWORD\" \"$KEYCHAIN_PATH\" >/dev/null\nrm -f \"$CERT_PATH\"\nif ! security find-identity -v\
+        \ -p codesigning \"$KEYCHAIN_PATH\" | grep -q \"Apple Distribution\"; then\n  echo \"::error::IOS_DISTRIBUTION_P12\
+        \ does not contain an 'Apple Distribution' identity (see PastaIOS/DEPLOY.md for how to export one).\"\n  security\
+        \ find-identity -v -p codesigning \"$KEYCHAIN_PATH\" || true\n  exit 1\nfi\n\necho \"==> Installing App Store provisioning\
+        \ profile\"\nPROFILE_DIR=\"$HOME/Library/MobileDevice/Provisioning Profiles\"\nmkdir -p \"$PROFILE_DIR\"\nPROFILE_TMP=\"\
+        $RUNNER_TEMP/ios-appstore.mobileprovision\"\nif ! printf '%s' \"$IOS_APPSTORE_PROFILE\" | base64 --decode > \"$PROFILE_TMP\"\
+        \ 2>/dev/null; then\n  echo \"::error::IOS_APPSTORE_PROFILE is not valid base64.\"\n  exit 1\nfi\nPROFILE_PLIST=\"\
+        $RUNNER_TEMP/ios-appstore.plist\"\nsecurity cms -D -i \"$PROFILE_TMP\" > \"$PROFILE_PLIST\"\nPROFILE_UUID=\"$(plutil\
+        \ -extract UUID raw -o - \"$PROFILE_PLIST\")\"\nPROFILE_NAME=\"$(plutil -extract Name raw -o - \"$PROFILE_PLIST\"\
+        )\"\nPROFILE_TEAM=\"$(plutil -extract TeamIdentifier.0 raw -o - \"$PROFILE_PLIST\")\"\nPROFILE_APP_ID=\"$(plutil -extract\
+        \ Entitlements.application-identifier raw -o - \"$PROFILE_PLIST\")\"\nPROFILE_EXPIRY=\"$(plutil -extract ExpirationDate\
+        \ raw -o - \"$PROFILE_PLIST\")\"\n\nif [ \"$PROFILE_TEAM\" != \"$APPLE_TEAM_ID\" ]; then\n  echo \"::error::IOS_APPSTORE_PROFILE\
+        \ belongs to team '$PROFILE_TEAM', but APPLE_TEAM_ID is '$APPLE_TEAM_ID'.\"\n  exit 1\nfi\nif [ \"$PROFILE_APP_ID\"\
+        \ != \"${APPLE_TEAM_ID}.${BUNDLE_ID}\" ]; then\n  echo \"::error::IOS_APPSTORE_PROFILE is for '$PROFILE_APP_ID', expected\
+        \ '${APPLE_TEAM_ID}.${BUNDLE_ID}'.\"\n  exit 1\nfi\nif plutil -extract ProvisionedDevices raw -o - \"$PROFILE_PLIST\"\
+        \ >/dev/null 2>&1; then\n  echo \"::error::IOS_APPSTORE_PROFILE lists provisioned devices, so it is a development/ad-hoc\
+        \ profile, not an App Store profile.\"\n  exit 1\nfi\nEXPIRY_EPOCH=\"$(date -j -f '%Y-%m-%dT%H:%M:%SZ' \"$PROFILE_EXPIRY\"\
+        \ +%s 2>/dev/null || echo 0)\"\nif [ \"$EXPIRY_EPOCH\" -gt 0 ] && [ \"$EXPIRY_EPOCH\" -lt \"$(date +%s)\" ]; then\n\
+        \  echo \"::error::IOS_APPSTORE_PROFILE '$PROFILE_NAME' expired on $PROFILE_EXPIRY. Regenerate it in the Apple Developer\
+        \ portal.\"\n  exit 1\nfi\nif ! plutil -extract Entitlements xml1 -o - \"$PROFILE_PLIST\" | grep -q \"<string>${ICLOUD_CONTAINER}</string>\"\
+        ; then\n  echo \"::error::Profile '$PROFILE_NAME' does not grant the ${ICLOUD_CONTAINER} iCloud container. Enable\
+        \ iCloud/CloudKit on the ${BUNDLE_ID} App ID, regenerate the App Store profile and update IOS_APPSTORE_PROFILE.\"\n\
+        \  exit 1\nfi\nif ! plutil -extract Entitlements.aps-environment raw -o - \"$PROFILE_PLIST\" >/dev/null 2>&1; then\n\
+        \  echo \"::error::Profile '$PROFILE_NAME' does not grant aps-environment. Enable Push Notifications on the ${BUNDLE_ID}\
+        \ App ID and regenerate the profile.\"\n  exit 1\nfi\n\nif [ -f \"$PROFILE_DIR/${PROFILE_UUID}.mobileprovision\" ];\
+        \ then\n  cp -p \"$PROFILE_DIR/${PROFILE_UUID}.mobileprovision\" \"$RUNNER_TEMP/original.mobileprovision\"\nfi\necho\
+        \ \"PROFILE_UUID=$PROFILE_UUID\" >> \"$GITHUB_ENV\"\ncp \"$PROFILE_TMP\" \"$PROFILE_DIR/${PROFILE_UUID}.mobileprovision\"\
+        \nrm -f \"$PROFILE_TMP\"\necho \"PROFILE_UUID=$PROFILE_UUID\" >> \"$GITHUB_ENV\"\necho \"PROFILE_NAME=$PROFILE_NAME\"\
+        \ >> \"$GITHUB_ENV\"\necho \"==> Installed profile '$PROFILE_NAME' ($PROFILE_UUID), expires $PROFILE_EXPIRY\"\n"
       if: steps.existing.outputs.skip_upload != 'true'
     - name: Resolve Swift packages
-      run: |
-        set -euo pipefail
-        python3 scripts/ci-verify-dependency-locks.py
-        xcodebuild -resolvePackageDependencies \
-          -onlyUsePackageVersionsFromResolvedFile \
-          -project "$PROJECT" \
-          -scheme "$SCHEME" \
-          -derivedDataPath "$BUILD_DIR/DerivedData"
+      run: "set -euo pipefail\npython3 scripts/ci-verify-dependency-locks.py\nscripts/ci-xcodebuild.sh -resolvePackageDependencies\
+        \ \\\n  -onlyUsePackageVersionsFromResolvedFile \\\n  -project \"$PROJECT\" \\\n  -scheme \"$SCHEME\" \\\n  -derivedDataPath\
+        \ \"$BUILD_DIR/DerivedData\"\n"
       if: steps.existing.outputs.skip_upload != 'true'
     - name: Use frozen notes
       run: test -s "$RUNNER_TEMP/release-notes.md"
@@ -273,62 +211,68 @@ jobs:
         VERSION: ${{ steps.version.outputs.version }}
         BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
         APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      run: |
-        set -euo pipefail
-        echo "==> Archiving $SCHEME $VERSION ($BUILD_NUMBER) signed with project profile $PROFILE_NAME"
-        # Archive SIGNED so CODE_SIGN_ENTITLEMENTS (iCloud, push) are baked in.
-        # Do NOT pass target-specific settings on the command line: a CLI
-        # override applies to every target, including SwiftPM package targets.
-        #   - PROVISIONING_PROFILE_SPECIFIER would hit GRDB_GRDB, which rejects
-        #     provisioning profiles.
-        #   - SWIFT_ACTIVE_COMPILATION_CONDITIONS would replace the SWIFT_PACKAGE
-        #     define GRDB needs to import its SQLite shim (v1.5.9 failed with
-        #     "cannot find '_registerErrorLogCallback' in scope").
-        # The project's Release configuration owns Manual / Apple Distribution,
-        # the "PastaIOS AppStore CI" profile name and the
-        # PASTA_IOS_CLOUDKIT_PROVISIONED compile flag on the app target only;
-        # The host passes this approval explicitly into the shared SyncManager;
-        # SwiftPM targets do not inherit app compilation conditions.
-        # scripts/ci-ios-e2e.sh asserts the app flag is present before upload.
-        xcodebuild archive \
-          -onlyUsePackageVersionsFromResolvedFile \
-          -project "$PROJECT" \
-          -scheme "$SCHEME" \
-          -configuration Release \
-          -destination 'generic/platform=iOS' \
-          -archivePath "$ARCHIVE_PATH" \
-          -derivedDataPath "$BUILD_DIR/DerivedData" \
-          DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
-          MARKETING_VERSION="$VERSION" \
-          CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-          OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
-          2>&1 | tee "$BUILD_DIR/archive.log"
+      run: "set -euo pipefail\necho \"==> Archiving $SCHEME $VERSION ($BUILD_NUMBER) signed with project profile $PROFILE_NAME\"\
+        \n# Archive SIGNED so CODE_SIGN_ENTITLEMENTS (iCloud, push) are baked in.\n# Do NOT pass target-specific settings\
+        \ on the command line: a CLI\n# override applies to every target, including SwiftPM package targets.\n#   - PROVISIONING_PROFILE_SPECIFIER\
+        \ would hit GRDB_GRDB, which rejects\n#     provisioning profiles.\n#   - SWIFT_ACTIVE_COMPILATION_CONDITIONS would\
+        \ replace the SWIFT_PACKAGE\n#     define GRDB needs to import its SQLite shim (v1.5.9 failed with\n#     \"cannot\
+        \ find '_registerErrorLogCallback' in scope\").\n# The project's Release configuration owns Manual / Apple Distribution,\n\
+        # the \"PastaIOS AppStore CI\" profile name and the\n# PASTA_IOS_CLOUDKIT_PROVISIONED compile flag on the app target\
+        \ only;\n# The host passes this approval explicitly into the shared SyncManager;\n# SwiftPM targets do not inherit\
+        \ app compilation conditions.\n# scripts/ci-ios-e2e.sh asserts the app flag is present before upload.\nscripts/ci-xcodebuild.sh\
+        \ archive \\\n  -onlyUsePackageVersionsFromResolvedFile \\\n  -project \"$PROJECT\" \\\n  -scheme \"$SCHEME\" \\\n\
+        \  -configuration Release \\\n  -destination 'generic/platform=iOS' \\\n  -archivePath \"$ARCHIVE_PATH\" \\\n  -derivedDataPath\
+        \ \"$BUILD_DIR/DerivedData\" \\\n  DEVELOPMENT_TEAM=\"$APPLE_TEAM_ID\" \\\n  MARKETING_VERSION=\"$VERSION\" \\\n \
+        \ CURRENT_PROJECT_VERSION=\"$BUILD_NUMBER\" \\\n  OTHER_CODE_SIGN_FLAGS=\"--keychain $KEYCHAIN_PATH\" \\\n  2>&1 |\
+        \ tee \"$BUILD_DIR/archive.log\"\n"
       if: steps.existing.outputs.skip_upload != 'true'
     - name: Verify archive metadata
       env:
         VERSION: ${{ steps.version.outputs.version }}
         BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
-      run: |
-        set -euo pipefail
+      run: 'set -euo pipefail
+
         APP_PATH="$ARCHIVE_PATH/Products/Applications/PastaIOS.app"
+
         [ -d "$APP_PATH" ] || { echo "::error::Archive did not produce $APP_PATH"; exit 1; }
 
-        ACTUAL_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")"
-        ACTUAL_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist")"
-        ACTUAL_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")"
-        [ "$ACTUAL_ID" = "$BUNDLE_ID" ] || { echo "::error::Bundle id mismatch: expected $BUNDLE_ID, got $ACTUAL_ID"; exit 1; }
-        [ "$ACTUAL_VERSION" = "$VERSION" ] || { echo "::error::Version mismatch: expected $VERSION, got $ACTUAL_VERSION"; exit 1; }
-        [ "$ACTUAL_BUILD" = "$BUILD_NUMBER" ] || { echo "::error::Build mismatch: expected $BUILD_NUMBER, got $ACTUAL_BUILD"; exit 1; }
+
+        ACTUAL_ID="$(/usr/libexec/PlistBuddy -c ''Print :CFBundleIdentifier'' "$APP_PATH/Info.plist")"
+
+        ACTUAL_VERSION="$(/usr/libexec/PlistBuddy -c ''Print :CFBundleShortVersionString'' "$APP_PATH/Info.plist")"
+
+        ACTUAL_BUILD="$(/usr/libexec/PlistBuddy -c ''Print :CFBundleVersion'' "$APP_PATH/Info.plist")"
+
+        [ "$ACTUAL_ID" = "$BUNDLE_ID" ] || { echo "::error::Bundle id mismatch: expected $BUNDLE_ID, got $ACTUAL_ID"; exit
+        1; }
+
+        [ "$ACTUAL_VERSION" = "$VERSION" ] || { echo "::error::Version mismatch: expected $VERSION, got $ACTUAL_VERSION";
+        exit 1; }
+
+        [ "$ACTUAL_BUILD" = "$BUILD_NUMBER" ] || { echo "::error::Build mismatch: expected $BUILD_NUMBER, got $ACTUAL_BUILD";
+        exit 1; }
+
 
         node scripts/verify-ios-release-notes.mjs "$APP_PATH" "$VERSION" "$BUILD_NUMBER" "$(git rev-parse HEAD)"
 
-        codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/archive-entitlements.plist"
-        python3 scripts/ci-verify-cloudkit-entitlements.py "$RUNNER_TEMP/archive-entitlements.plist"
-        CONTAINER="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-identifiers:0' "$RUNNER_TEMP/archive-entitlements.plist" 2>/dev/null || true)"
-        [ "$CONTAINER" = "$ICLOUD_CONTAINER" ] || { echo "::error::iCloud container mismatch in archive: expected $ICLOUD_CONTAINER, got '${CONTAINER:-missing}'"; exit 1; }
 
-        [ -d "$ARCHIVE_PATH/dSYMs/PastaIOS.app.dSYM" ] || echo "::warning::No dSYM found in archive; crash symbolication will be unavailable."
+        codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/archive-entitlements.plist"
+
+        python3 scripts/ci-verify-cloudkit-entitlements.py "$RUNNER_TEMP/archive-entitlements.plist"
+
+        CONTAINER="$(/usr/libexec/PlistBuddy -c ''Print :com.apple.developer.icloud-container-identifiers:0'' "$RUNNER_TEMP/archive-entitlements.plist"
+        2>/dev/null || true)"
+
+        [ "$CONTAINER" = "$ICLOUD_CONTAINER" ] || { echo "::error::iCloud container mismatch in archive: expected $ICLOUD_CONTAINER,
+        got ''${CONTAINER:-missing}''"; exit 1; }
+
+
+        [ -d "$ARCHIVE_PATH/dSYMs/PastaIOS.app.dSYM" ] || echo "::warning::No dSYM found in archive; crash symbolication will
+        be unavailable."
+
         echo "==> Archive OK: $ACTUAL_ID $ACTUAL_VERSION ($ACTUAL_BUILD), container $CONTAINER"
+
+        '
       if: steps.existing.outputs.skip_upload != 'true'
     - name: Verify signed train archive
       run: python3 scripts/verify-release-train-archive.py "$ARCHIVE_PATH/Products/Applications/PastaIOS.app" "$RUNNER_TEMP/release-manifest.json"
@@ -338,21 +282,12 @@ jobs:
       env:
         UPLOAD: ${{ steps.upload.outputs.enabled }}
         APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      run: |
-        set -euo pipefail
-        OPTIONS="$BUILD_DIR/ExportOptions.plist"
-        cp PastaIOS/ExportOptions.plist "$OPTIONS"
-        /usr/libexec/PlistBuddy -c "Set :teamID $APPLE_TEAM_ID" "$OPTIONS"
-        /usr/libexec/PlistBuddy -c "Delete :provisioningProfiles" "$OPTIONS"
-        /usr/libexec/PlistBuddy -c "Add :provisioningProfiles dict" "$OPTIONS"
-        /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:$BUNDLE_ID string $PROFILE_UUID" "$OPTIONS"
-        if [ "$UPLOAD" = "true" ]; then
-          /usr/libexec/PlistBuddy -c "Set :destination upload" "$OPTIONS"
-        else
-          /usr/libexec/PlistBuddy -c "Set :destination export" "$OPTIONS"
-        fi
-        echo "==> ExportOptions.plist:"
-        plutil -p "$OPTIONS"
+      run: "set -euo pipefail\nOPTIONS=\"$BUILD_DIR/ExportOptions.plist\"\ncp PastaIOS/ExportOptions.plist \"$OPTIONS\"\n\
+        /usr/libexec/PlistBuddy -c \"Set :teamID $APPLE_TEAM_ID\" \"$OPTIONS\"\n/usr/libexec/PlistBuddy -c \"Delete :provisioningProfiles\"\
+        \ \"$OPTIONS\"\n/usr/libexec/PlistBuddy -c \"Add :provisioningProfiles dict\" \"$OPTIONS\"\n/usr/libexec/PlistBuddy\
+        \ -c \"Add :provisioningProfiles:$BUNDLE_ID string $PROFILE_UUID\" \"$OPTIONS\"\nif [ \"$UPLOAD\" = \"true\" ]; then\n\
+        \  /usr/libexec/PlistBuddy -c \"Set :destination upload\" \"$OPTIONS\"\nelse\n  /usr/libexec/PlistBuddy -c \"Set :destination\
+        \ export\" \"$OPTIONS\"\nfi\necho \"==> ExportOptions.plist:\"\nplutil -p \"$OPTIONS\"\n"
       if: steps.existing.outputs.skip_upload != 'true'
     - name: Resolve the exact upload commit
       if: steps.existing.outputs.skip_upload != 'true' && (steps.upload.outputs.enabled == 'true')
@@ -361,36 +296,25 @@ jobs:
       if: steps.upload.outputs.enabled == 'true'
       uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
       with:
-        script: |
-          const { verifyManifestPublication } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
+        script: 'const { verifyManifestPublication } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
+
           await verifyManifestPublication({ github, ...context.repo, sha: process.env.RELEASE_SHA });
+
+          '
     - name: Export IPA and upload to App Store Connect
       env:
         UPLOAD: ${{ steps.upload.outputs.enabled }}
         APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
         APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-      run: |
-        set -euo pipefail
-        # With destination=upload, xcodebuild signs the IPA, uploads it together
-        # with its dSYMs (uploadSymbols) to App Store Connect and fails the step
-        # if App Store Connect rejects it. With destination=export (dry run) the
-        # IPA is written to $EXPORT_PATH instead. The API key is only needed for
-        # the upload but is harmless for a dry run.
-        xcodebuild -exportArchive \
-          -archivePath "$ARCHIVE_PATH" \
-          -exportOptionsPlist "$BUILD_DIR/ExportOptions.plist" \
-          -exportPath "$EXPORT_PATH" \
-          -authenticationKeyPath "$ASC_KEY_PATH" \
-          -authenticationKeyID "$APP_STORE_CONNECT_KEY_ID" \
-          -authenticationKeyIssuerID "$APP_STORE_CONNECT_ISSUER_ID" \
-          2>&1 | tee "$BUILD_DIR/export.log"
-
-        if [ "$UPLOAD" = "true" ]; then
-          echo "==> Uploaded to App Store Connect. The build appears in TestFlight once Apple finishes processing (typically 5-30 minutes)."
-        else
-          echo "==> Dry run: exported IPA(s):"
-          ls -la "$EXPORT_PATH"
-        fi
+      run: "set -euo pipefail\n# With destination=upload, xcodebuild signs the IPA, uploads it together\n# with its dSYMs\
+        \ (uploadSymbols) to App Store Connect and fails the step\n# if App Store Connect rejects it. With destination=export\
+        \ (dry run) the\n# IPA is written to $EXPORT_PATH instead. The API key is only needed for\n# the upload but is harmless\
+        \ for a dry run.\nscripts/ci-xcodebuild.sh -exportArchive \\\n  -archivePath \"$ARCHIVE_PATH\" \\\n  -exportOptionsPlist\
+        \ \"$BUILD_DIR/ExportOptions.plist\" \\\n  -exportPath \"$EXPORT_PATH\" \\\n  -authenticationKeyPath \"$ASC_KEY_PATH\"\
+        \ \\\n  -authenticationKeyID \"$APP_STORE_CONNECT_KEY_ID\" \\\n  -authenticationKeyIssuerID \"$APP_STORE_CONNECT_ISSUER_ID\"\
+        \ \\\n  2>&1 | tee \"$BUILD_DIR/export.log\"\n\nif [ \"$UPLOAD\" = \"true\" ]; then\n  echo \"==> Uploaded to App\
+        \ Store Connect. The build appears in TestFlight once Apple finishes processing (typically 5-30 minutes).\"\nelse\n\
+        \  echo \"==> Dry run: exported IPA(s):\"\n  ls -la \"$EXPORT_PATH\"\nfi\n"
       if: steps.existing.outputs.skip_upload != 'true'
     - name: Wait for App Store Connect processing
       if: steps.existing.outputs.skip_upload != 'true' && (steps.upload.outputs.enabled == 'true')
@@ -407,58 +331,42 @@ jobs:
       env:
         VERSION: ${{ steps.version.outputs.version }}
         BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
-      run: |
-        set -euo pipefail
-        IPA="$(find "$EXPORT_PATH" -maxdepth 1 -name '*.ipa' -print -quit)"
-        [ -n "$IPA" ] || { echo "::error::No .ipa produced in $EXPORT_PATH"; exit 1; }
-        UNPACK="$RUNNER_TEMP/ipa"
-        rm -rf "$UNPACK" && mkdir -p "$UNPACK"
-        unzip -q "$IPA" -d "$UNPACK"
-        APP_PATH="$(find "$UNPACK/Payload" -maxdepth 1 -name '*.app' -print -quit)"
-
-        node scripts/verify-ios-release-notes.mjs "$APP_PATH" "$VERSION" "$BUILD_NUMBER" "$(git rev-parse HEAD)"
-        codesign --verify --verbose=2 "$APP_PATH"
-        codesign -d --entitlements - --xml "$APP_PATH" > "$RUNNER_TEMP/ipa-entitlements.plist"
-        python3 scripts/ci-verify-cloudkit-entitlements.py "$RUNNER_TEMP/ipa-entitlements.plist"
-        APS="$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' "$RUNNER_TEMP/ipa-entitlements.plist" 2>/dev/null || echo missing)"
-        if [ "$APS" != "production" ]; then
-          echo "::warning::aps-environment is '$APS' in the exported IPA; App Store builds are expected to carry 'production'. Check the App Store profile grants Push Notifications."
-        fi
-        CONTAINER="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-identifiers:0' "$RUNNER_TEMP/ipa-entitlements.plist" 2>/dev/null || echo missing)"
-        [ "$CONTAINER" = "$ICLOUD_CONTAINER" ] || { echo "::error::iCloud container mismatch in exported IPA: expected $ICLOUD_CONTAINER, got '$CONTAINER'"; exit 1; }
-        security cms -D -i "$APP_PATH/embedded.mobileprovision" > "$RUNNER_TEMP/ipa-profile.plist"
-        if plutil -extract ProvisionedDevices raw -o - "$RUNNER_TEMP/ipa-profile.plist" >/dev/null 2>&1; then
-          echo "::error::Exported IPA embeds a device-limited profile; this is not an App Store build."
-          exit 1
-        fi
-        echo "==> IPA OK: $(basename "$IPA"), aps-environment=$APS, profile $(plutil -extract Name raw -o - "$RUNNER_TEMP/ipa-profile.plist")"
+      run: "set -euo pipefail\nIPA=\"$(find \"$EXPORT_PATH\" -maxdepth 1 -name '*.ipa' -print -quit)\"\n[ -n \"$IPA\" ] ||\
+        \ { echo \"::error::No .ipa produced in $EXPORT_PATH\"; exit 1; }\nUNPACK=\"$RUNNER_TEMP/ipa\"\nrm -rf \"$UNPACK\"\
+        \ && mkdir -p \"$UNPACK\"\nunzip -q \"$IPA\" -d \"$UNPACK\"\nAPP_PATH=\"$(find \"$UNPACK/Payload\" -maxdepth 1 -name\
+        \ '*.app' -print -quit)\"\n\nnode scripts/verify-ios-release-notes.mjs \"$APP_PATH\" \"$VERSION\" \"$BUILD_NUMBER\"\
+        \ \"$(git rev-parse HEAD)\"\ncodesign --verify --verbose=2 \"$APP_PATH\"\ncodesign -d --entitlements - --xml \"$APP_PATH\"\
+        \ > \"$RUNNER_TEMP/ipa-entitlements.plist\"\npython3 scripts/ci-verify-cloudkit-entitlements.py \"$RUNNER_TEMP/ipa-entitlements.plist\"\
+        \nAPS=\"$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' \"$RUNNER_TEMP/ipa-entitlements.plist\" 2>/dev/null\
+        \ || echo missing)\"\nif [ \"$APS\" != \"production\" ]; then\n  echo \"::warning::aps-environment is '$APS' in the\
+        \ exported IPA; App Store builds are expected to carry 'production'. Check the App Store profile grants Push Notifications.\"\
+        \nfi\nCONTAINER=\"$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.icloud-container-identifiers:0' \"$RUNNER_TEMP/ipa-entitlements.plist\"\
+        \ 2>/dev/null || echo missing)\"\n[ \"$CONTAINER\" = \"$ICLOUD_CONTAINER\" ] || { echo \"::error::iCloud container\
+        \ mismatch in exported IPA: expected $ICLOUD_CONTAINER, got '$CONTAINER'\"; exit 1; }\nsecurity cms -D -i \"$APP_PATH/embedded.mobileprovision\"\
+        \ > \"$RUNNER_TEMP/ipa-profile.plist\"\nif plutil -extract ProvisionedDevices raw -o - \"$RUNNER_TEMP/ipa-profile.plist\"\
+        \ >/dev/null 2>&1; then\n  echo \"::error::Exported IPA embeds a device-limited profile; this is not an App Store\
+        \ build.\"\n  exit 1\nfi\necho \"==> IPA OK: $(basename \"$IPA\"), aps-environment=$APS, profile $(plutil -extract\
+        \ Name raw -o - \"$RUNNER_TEMP/ipa-profile.plist\")\"\n"
     - name: Write job summary
       if: always()
       env:
         VERSION: ${{ steps.version.outputs.version }}
         BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
         UPLOAD: ${{ steps.upload.outputs.enabled }}
-      run: |
-        {
-          echo "### PastaIOS TestFlight build"
-          echo ""
-          echo "| | |"
-          echo "|---|---|"
-          echo "| Bundle id | \`$BUNDLE_ID\` |"
-          echo "| Version | \`${VERSION:-?}\` |"
-          echo "| Build | \`${BUILD_NUMBER:-?}\` |"
-          echo "| Profile | ${PROFILE_NAME:-?} |"
-          echo "| Uploaded | ${UPLOAD:-false} |"
-          echo "| Commit | \`${GITHUB_SHA::7}\` |"
-        } >> "$GITHUB_STEP_SUMMARY"
+      run: "{\n  echo \"### PastaIOS TestFlight build\"\n  echo \"\"\n  echo \"| | |\"\n  echo \"|---|---|\"\n  echo \"| Bundle\
+        \ id | \\`$BUNDLE_ID\\` |\"\n  echo \"| Version | \\`${VERSION:-?}\\` |\"\n  echo \"| Build | \\`${BUILD_NUMBER:-?}\\\
+        ` |\"\n  echo \"| Profile | ${PROFILE_NAME:-?} |\"\n  echo \"| Uploaded | ${UPLOAD:-false} |\"\n  echo \"| Commit\
+        \ | \\`${GITHUB_SHA::7}\\` |\"\n} >> \"$GITHUB_STEP_SUMMARY\"\n"
     - name: Upload IPA and dSYMs (dry run)
       if: steps.upload.outputs.enabled != 'true' && success()
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: PastaIOS-${{ steps.version.outputs.version }}-${{ steps.build_number.outputs.build }}
-        path: |
-          build/export/*.ipa
+        path: 'build/export/*.ipa
+
           build/PastaIOS.xcarchive/dSYMs
+
+          '
         retention-days: 14
         if-no-files-found: error
     - name: Upload logs (on failure)
@@ -466,11 +374,15 @@ jobs:
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
       with:
         name: release-ios-logs
-        path: |
-          build/*.log
+        path: 'build/*.log
+
           build/ExportOptions.plist
+
           build/export/*.log
+
           build/export/*.plist
+
+          '
         retention-days: 7
         if-no-files-found: ignore
     - name: Verify TestFlight group delivery
@@ -480,14 +392,11 @@ jobs:
       run: ruby scripts/release-apple.rb distribute "$RUNNER_TEMP/release-manifest.json" ios
     - name: Clean up credentials
       if: always()
-      run: |
-        rm -rf "$HOME/.appstoreconnect/private_keys" || true
-        if [ -n "${KEYCHAIN_PATH:-}" ] && [ -f "$KEYCHAIN_PATH" ]; then
-          security delete-keychain "$KEYCHAIN_PATH" || true
-        fi
-        if [ -n "${PROFILE_UUID:-}" ]; then
-          rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision" || true
-        fi
+      run: "python3 scripts/ci-keychain-search.py restore \"$RUNNER_TEMP/keychain-search.json\"\nrm -rf \"$RUNNER_TEMP/asc-private-keys\"\
+        \nrm -f \"$RUNNER_TEMP/ios-distribution.p12\"\nif [ -n \"${KEYCHAIN_PATH:-}\" ] && [ -f \"$KEYCHAIN_PATH\" ]; then\n\
+        \  security delete-keychain \"$KEYCHAIN_PATH\" || true\nfi\nif [ -n \"${PROFILE_UUID:-}\" ]; then\n  if [ -f \"$RUNNER_TEMP/original.mobileprovision\"\
+        \ ]; then\n    mv -f \"$RUNNER_TEMP/original.mobileprovision\" \"$HOME/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision\"\
+        \n  else\n    rm -f \"$HOME/Library/MobileDevice/Provisioning Profiles/${PROFILE_UUID}.mobileprovision\"\n  fi\nfi\n"
 'on':
   workflow_call:
     inputs:
