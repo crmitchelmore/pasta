@@ -207,7 +207,7 @@ jobs:
   test:
     name: Build & Test
     # Fork PRs stay on hosted runners; trusted repository jobs use this Mac.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","macOS","ARM64"]' || '["macos-15"]') }}
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["pasta-local","macos-arm64"]' || '["macos-15"]') }}
     
     steps:
       - name: Checkout code
@@ -409,7 +409,7 @@ jobs:
   ios-e2e:
     name: iOS E2E (XCUITest)
     # Fork PRs stay on hosted runners; trusted repository jobs use this Mac.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","macOS","ARM64"]' || '["macos-15"]') }}
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["pasta-local","macos-arm64"]' || '["macos-15"]') }}
     timeout-minutes: 45
     env:
       PROJECT: PastaIOS/PastaIOS.xcodeproj
