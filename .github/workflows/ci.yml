@@ -139,7 +139,7 @@ jobs:
         run: |
           # Chromium is downloaded by Playwright; the unrelated preinstalled
           # Google Chrome repository must not block Ubuntu dependency updates.
-          sudo grep -rlZ 'dl.google.com/linux/chrome' /etc/apt/sources.list.d | xargs -0 -r sudo rm -f
+          { sudo grep -rlZ 'dl.google.com/linux/chrome' /etc/apt/sources.list.d || test "$?" -eq 1; } | xargs -0 -r sudo rm -f
           for attempt in 1 2 3; do
             if npx playwright install --with-deps chromium; then
               exit 0
