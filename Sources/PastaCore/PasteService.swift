@@ -129,16 +129,19 @@ public final class PasteService {
     private let pasteboard: PasteboardWriting
     private let simulator: PasteEventSimulating
     private let restoreClipboard: Bool
+    private let isAccessibilityTrusted: () -> Bool
     private static let restoreDelayMs = 300
 
     public init(
         pasteboard: PasteboardWriting = SystemPasteboardWriter(),
         simulator: PasteEventSimulating = SystemPasteEventSimulator(),
-        restoreClipboard: Bool = false
+        restoreClipboard: Bool = false,
+        isAccessibilityTrusted: @escaping () -> Bool = AccessibilityPermission.isTrusted
     ) {
         self.pasteboard = pasteboard
         self.simulator = simulator
         self.restoreClipboard = restoreClipboard
+        self.isAccessibilityTrusted = isAccessibilityTrusted
     }
 
     /// Copies the entry to the system pasteboard without simulating Cmd+V.
@@ -209,7 +212,7 @@ public final class PasteService {
         
         pasteboard.write(contents)
 
-        if AccessibilityPermission.isTrusted() {
+        if isAccessibilityTrusted() {
             simulator.simulateCommandV()
             
             // Schedule clipboard restore if enabled
