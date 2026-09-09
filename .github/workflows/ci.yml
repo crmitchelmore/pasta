@@ -134,7 +134,19 @@ jobs:
 
       - name: Install Chromium
         working-directory: landing-page
-        run: npx playwright install --with-deps chromium
+        # Package mirrors can briefly serve mismatched indexes during updates.
+        # Retry setup only; never retry a failing browser test into a pass.
+        run: |
+          for attempt in 1 2 3; do
+            if npx playwright install --with-deps chromium; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Chromium dependency installation failed after three attempts"
+              exit 1
+            fi
+            sleep 20
+          done
 
       - name: Run Playwright smoke suite
         working-directory: landing-page
