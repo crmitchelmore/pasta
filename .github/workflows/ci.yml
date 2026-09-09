@@ -133,7 +133,7 @@ jobs:
 
       - name: Install Chromium
         working-directory: landing-page
-        run: npx playwright install --with-deps chromium
+        run: ../scripts/ci-install-playwright.sh
 
       - name: Run Playwright smoke suite
         working-directory: landing-page
