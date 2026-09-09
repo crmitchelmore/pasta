@@ -20,8 +20,11 @@ work directory; this registration cannot receive another repository's jobs.
 
 Release jobs retain the original keychain search list, use temporary API keys,
 and restore any pre-existing provisioning profile. SwiftPM gets an internal
-job cache because the personal cache points at removable storage. The simulator
-uses internal storage; the former external CoreSimulator symlink was preserved
+job cache because the large personal cache directories live on removable storage.
+Xcode's package-collection database is kept internally; the other SwiftPM cache
+entries remain symlinks to their original external locations. The former cache
+root symlink is preserved as `~/Library/Caches/org.swift.swiftpm.external-backup-20260909`.
+The simulator uses internal storage; the former external CoreSimulator symlink was preserved
 as `~/Library/Developer/CoreSimulator.external-backup-20260909`.
 
 `Local runner verification` checks the toolchain and proves the GitHub Sparkle
