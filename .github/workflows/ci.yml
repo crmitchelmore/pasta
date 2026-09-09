@@ -51,6 +51,7 @@ jobs:
         run: |
           python3 -B -m unittest discover -s scripts/tests -p 'test_*.py' -v
           node --test scripts/tests/*.test.mjs
+          ruby scripts/tests/release_apple_test.rb
 
       # A tag is created before its release is built and published, so the
       # freshness reference is the newest PUBLISHED release, not the newest
@@ -61,7 +62,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
-          LATEST=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // empty' 2>/dev/null || true)
+          LATEST=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 100 --json tagName --jq '[.[] | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0].tagName // empty' 2>/dev/null || true)
           if [ -n "$LATEST" ]; then
             echo "APPCAST_LATEST_PUBLISHED=${LATEST#v}" >> "$GITHUB_ENV"
             echo "Newest published release: $LATEST"
@@ -267,7 +268,7 @@ jobs:
           </plist>
           PLIST
           
-          echo "APP_DIR=$APP_DIR" >> $GITHUB_OUTPUT
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_OUTPUT"
           echo "==> Test bundle created"
       
       - name: Validate release entitlements
@@ -310,21 +311,21 @@ jobs:
           "
           
           echo "==> Signing framework binaries (no app entitlements)..."
-          find "$APP_DIR/Contents/Frameworks" -type f -perm +111 | while read binary; do
+          find "$APP_DIR/Contents/Frameworks" -type f -perm +111 | while read -r binary; do
             if file "$binary" | grep -q "Mach-O"; then
               echo "  Signing: $binary"
               codesign --force --sign - --options runtime --timestamp=none "$binary" || true
             fi
           done
           
-          find "$APP_DIR/Contents/Frameworks" -name "*.xpc" -o -name "*.app" | while read bundle; do
+          find "$APP_DIR/Contents/Frameworks" -name "*.xpc" -o -name "*.app" | while read -r bundle; do
             if [ -d "$bundle" ]; then
               echo "  Signing bundle: $bundle"
               codesign --force --sign - --options runtime --timestamp=none "$bundle" || true
             fi
           done
           
-          find "$APP_DIR/Contents/Frameworks" -name "*.framework" | while read fw; do
+          find "$APP_DIR/Contents/Frameworks" -name "*.framework" | while read -r fw; do
             echo "  Signing framework: $fw"
             codesign --force --sign - --options runtime --timestamp=none "$fw" || true
           done
@@ -513,109 +514,4 @@ jobs:
   # EVERY suite on every surface. A red, cancelled or missing result on any of
   # them fails `ci-gate`, so this job never runs and no release.yml /
   # release-ios.yml run is triggered.
-  auto-release:
-    name: Auto Version & Release
-    needs: [ci-gate]
-    # `always()` is REQUIRED here: without it GitHub skips this job whenever any
-    # transitive dependency was skipped (landing-e2e is path-filtered and skips
-    # on most pushes), even though ci-gate itself ran and succeeded. That
-    # silently stopped tagging on 2026-09-05. `!cancelled()` prevents a tag from
-    # being pushed after an operator cancels the workflow; the explicit result
-    # check keeps the aggregate gate authoritative.
-    if: ${{ always() && !cancelled() && needs.ci-gate.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    # Pure git + shell (version bump from conventional commits, tag push): no
-    # Xcode needed. Keeping this off macOS spares every release a second wait in
-    # the account-wide macOS runner queue, which can run to an hour or more.
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.AUTO_RELEASE_TOKEN }}
-      
-      - name: Determine version bump from conventional commits
-        id: bump
-        run: |
-          set -e
-          
-          # Get latest tag
-          LATEST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -1)
-          if [ -z "$LATEST_TAG" ]; then
-            LATEST_TAG="v0.0.0"
-          fi
-          echo "Latest tag: $LATEST_TAG"
-          
-          # Get commit messages since last tag (subject lines only)
-          COMMITS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s" --no-merges)
-          
-          if [ -z "$COMMITS" ]; then
-            echo "No new commits since $LATEST_TAG"
-            echo "skip=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          echo "Commits since $LATEST_TAG:"
-          echo "$COMMITS"
-          echo "---"
-          
-          # Also check commit bodies for BREAKING CHANGE
-          BODIES=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%b" --no-merges)
-          
-          # Determine bump type from conventional commits
-          BUMP="none"
-          
-          # Check for breaking changes: "type!:" prefix or "BREAKING CHANGE:" in body
-          if echo "$COMMITS" | grep -qE "^[a-z]+(\(.+\))?!:"; then
-            BUMP="major"
-          elif echo "$BODIES" | grep -qE "^BREAKING CHANGE:"; then
-            BUMP="major"
-          # Check for features
-          elif echo "$COMMITS" | grep -qE "^feat(\(.+\))?:"; then
-            BUMP="minor"
-          # Check for fixes and performance improvements
-          elif echo "$COMMITS" | grep -qE "^(fix|perf)(\(.+\))?:"; then
-            BUMP="patch"
-          fi
-          
-          if [ "$BUMP" = "none" ]; then
-            echo "No releasable conventional commits (feat/fix/perf/breaking) found"
-            echo "skip=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          # Parse current version and apply bump
-          VERSION="${LATEST_TAG#v}"
-          MAJOR=$(echo "$VERSION" | cut -d. -f1)
-          MINOR=$(echo "$VERSION" | cut -d. -f2)
-          PATCH=$(echo "$VERSION" | cut -d. -f3)
-          
-          case $BUMP in
-            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
-            patch) PATCH=$((PATCH + 1)) ;;
-          esac
-          
-          NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
-          echo "Version bump: $BUMP ($LATEST_TAG → $NEW_TAG)"
-          echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
-          echo "skip=false" >> $GITHUB_OUTPUT
-      
-      - name: Create and push tag
-        if: steps.bump.outputs.skip != 'true'
-        run: |
-          NEW_TAG="${{ steps.bump.outputs.new_tag }}"
-          
-          # Check if tag already exists
-          if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
-            echo "Tag $NEW_TAG already exists, skipping"
-            exit 0
-          fi
-          
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "$NEW_TAG" -m "Release $NEW_TAG"
-          git push origin "$NEW_TAG"
+  # Alpha Release consumes completed successful main CI; Stable is owner-approved.

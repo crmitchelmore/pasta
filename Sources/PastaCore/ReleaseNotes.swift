@@ -20,7 +20,11 @@ public struct ReleaseNotesCatalog: Codable, Equatable, Sendable {
     public let entries: [ReleaseNoteEntry]
 
     public static let bundled: ReleaseNotesCatalog = {
-        guard let url = Bundle.module.url(forResource: "IOSReleaseNotes", withExtension: "json"),
+        // SwiftPM's generated macOS accessor only searches the app root. Signed
+        // bundles keep resources in Contents/Resources instead.
+        let packaged = Bundle.main.resourceURL.flatMap { Bundle(url: $0.appendingPathComponent("Pasta_PastaCore.bundle")) }
+        let resources = packaged ?? Bundle.module
+        guard let url = resources.url(forResource: "IOSReleaseNotes", withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let catalog = try? JSONDecoder().decode(Self.self, from: data)
         else { return Self(entries: []) }

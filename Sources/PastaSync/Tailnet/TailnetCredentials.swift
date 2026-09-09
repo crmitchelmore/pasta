@@ -1,6 +1,7 @@
 #if os(macOS)
 import Foundation
 import Security
+import PastaCore
 
 protocol TailnetCredentials: Sendable {
     func read(_ id: UUID) throws -> String?
@@ -10,7 +11,7 @@ protocol TailnetCredentials: Sendable {
 struct TailnetKeychain: TailnetCredentials {
     private func query(_ id: UUID) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: "com.pasta.tailnet.pairing",
+         kSecAttrService as String: ReleaseTrain.current.namespace("com.pasta.tailnet.pairing"),
          kSecAttrAccount as String: id.uuidString]
     }
     func read(_ id: UUID) throws -> String? {

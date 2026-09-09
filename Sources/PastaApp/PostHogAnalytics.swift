@@ -30,7 +30,7 @@ enum AnalyticsEnvironment {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first ?? FileManager.default.homeDirectoryForCurrentUser
-        return base.appendingPathComponent("Pasta", isDirectory: true)
+        return base.appendingPathComponent(PastaStorageLocation.directoryName, isDirectory: true)
     }
 
     static func buildContext(bundle: Bundle = .main) -> ProductAnalyticsContext {

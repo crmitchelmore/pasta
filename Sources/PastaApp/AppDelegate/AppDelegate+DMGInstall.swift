@@ -47,7 +47,7 @@ extension AppDelegate {
 
             for volume in volumes {
                 let volumePath = "/Volumes/\(volume)"
-                let appPath = "\(volumePath)/Pasta.app"
+                let appPath = "\(volumePath)/\(ReleaseTrain.current.displayName).app"
 
                 // Check if this looks like our Pasta DMG
                 if volume.lowercased().contains("pasta") || fileManager.fileExists(atPath: appPath) {

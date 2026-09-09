@@ -26,7 +26,13 @@ brew install --cask pasta
 
 ### Download
 
-Download the latest DMG from [Releases](https://github.com/crmitchelmore/pasta/releases).
+Download the latest Stable DMG from [Releases](https://github.com/crmitchelmore/pasta/releases/latest).
+
+### Alpha testing
+
+Alpha installs alongside Stable with separate app data. Use [Pasta Alpha for Mac](https://pasta-app.com/alpha/download) or [Pasta Alpha on TestFlight](https://testflight.apple.com/join/ehBWvANT). Builds become available after commissioning and Apple beta approval. Choose a separate Alpha keyboard shortcut in Settings. Most users should stay on Stable.
+
+[Release channels and Stable promotion](Docs/release-trains.md).
 
 ### Build from Source
 

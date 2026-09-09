@@ -65,7 +65,8 @@ if [ -z "$SIGNATURE" ]; then
 fi
 
 # GitHub release download URL
-DOWNLOAD_URL="https://github.com/crmitchelmore/pasta/releases/download/v${VERSION}/${DMG_NAME}"
+ENCODED_DMG_NAME=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$DMG_NAME")
+DOWNLOAD_URL="https://github.com/crmitchelmore/pasta/releases/download/${DOWNLOAD_TAG:-v${VERSION}}/${ENCODED_DMG_NAME}"
 
 # Generate appcast XML
 # IMPORTANT: sparkle:version MUST match CFBundleVersion (the build number)

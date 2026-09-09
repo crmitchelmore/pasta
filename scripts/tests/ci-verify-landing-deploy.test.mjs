@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { verifyLandingDeploy, verifyReleasePublication } from '../ci-verify-landing-deploy.mjs';
+import { verifyLandingDeploy, verifyReleasePublication, verifyManifestPublication } from '../ci-verify-landing-deploy.mjs';
 
 const sha = 'a'.repeat(40);
 function fixture() {
@@ -168,67 +168,42 @@ test('release uses latest evidence and rejects main advancing to unverified sour
 });
 
 
-test('release wires mandatory prepublish gates, shared publisher queue and failure cleanup', async () => {
-  const release = await readFile(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
-  const landing = await readFile(new URL('../../.github/workflows/deploy-landing-page.yml', import.meta.url), 'utf8');
-  const job = release.split('  build-and-release:')[1].split('  verify-release:')[0];
-  const steps = job.split('      - name: ');
-  const find = (name) => {
-    const matches = steps.filter((step) => step.startsWith(name + '\n'));
-    assert.equal(matches.length, 1, `missing/duplicate release step: ${name}`);
-    return matches[0];
-  };
-  const gate = find('Require every surface gate before publishing the release');
-  const publish = find('Create GitHub Release');
-  const source = find('Refuse superseded release landing source');
-  const deploy = find('Deploy landing page with updated appcast');
-  for (const step of [gate, source]) {
-    assert.doesNotMatch(step, /\n        (?:if|continue-on-error):/);
+test('historical manifest still requires every successful native surface', async () => {
+  const {args,jobs,run}=fixture();
+  args.github.rest.git.getRef=async()=>{throw Error('Historical source does not depend on moving main');};
+  await verifyManifestPublication(args);
+  for(const job of jobs) {
+    job.conclusion='failure';
+    await assert.rejects(verifyManifestPublication(args));
+    job.conclusion='success';
   }
-  assert.match(gate, /await verifyReleasePublication\(.*sha: process.env.RELEASE_SHA/);
-  assert.match(source, /await verifyCurrentLandingSource\(.*sha: process.env.RELEASE_SHA/);
-  assert.ok(job.indexOf('Launch readiness smoke test (notarized DMG contents)') < job.indexOf(gate));
-  assert.ok(job.indexOf(gate) < job.indexOf(publish));
-  assert.ok(job.indexOf(source) < job.indexOf(deploy));
-  for (const workflow of [release, landing]) {
-    assert.match(workflow.split('\njobs:')[0], /\nconcurrency:\n +group: landing-page-deploy\n +cancel-in-progress: false/);
-  }
-  assert.doesNotMatch(job, /\n    concurrency:/);
-  assert.match(publish, /\n        id: publish\n/);
-  const attempt = find('Mark publication attempt');
-  assert.match(attempt, /id: publication_attempt/);
-  assert.match(attempt, /started=true/);
-  assert.ok(job.indexOf(gate) < job.indexOf(attempt));
-  assert.ok(job.indexOf(attempt) < job.indexOf(publish));
-  const cleanup = find('Draft release after publication failure');
-  assert.match(cleanup, /always\(\) && \(failure\(\) \|\| cancelled\(\)\) && steps.publication_attempt.outputs.started == 'true'/);
-  assert.match(cleanup, /await draftAttemptedRelease\(/);
-  assert.ok(job.indexOf(deploy) < job.indexOf(cleanup));
+  run.status='in_progress';
+  await assert.rejects(verifyManifestPublication(args));
 });
 
-test('TestFlight upload requires shared exact-commit evidence after native preflight; dry runs can export', async () => {
-  const workflow = await readFile(new URL('../../.github/workflows/release-ios.yml', import.meta.url), 'utf8');
-  const job = workflow.split('  testflight:')[1];
-  assert.match(job, /needs: preflight/);
-  assert.match(workflow.split('\njobs:')[0], /actions: read/);
-  const resolve = job.indexOf('name: Resolve the exact upload commit');
-  const gate = job.indexOf('name: Require every surface gate before TestFlight upload');
-  const upload = job.indexOf('name: Export IPA and upload to App Store Connect');
-  assert.ok(resolve > 0 && gate > resolve && upload > gate);
-  assert.match(job.slice(resolve, gate), /git rev-parse HEAD/);
-  assert.match(job.slice(gate, upload), /if: steps.upload.outputs.enabled == 'true'/);
-  assert.match(job.slice(gate, upload), /await verifyReleasePublication\(.*sha: process.env.RELEASE_SHA/);
-  assert.doesNotMatch(job.slice(gate, upload), /continue-on-error:/);
-  assert.match((await readFile(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8')),
-    /bash "\$GITHUB_WORKSPACE\/scripts\/ci-commit-homebrew.sh" "\$VERSION"/);
+test('workers stage only after native checks and immutable archive verification', async () => {
+  const mac=await readFile(new URL('../../.github/workflows/release.yml',import.meta.url),'utf8');
+  const ios=await readFile(new URL('../../.github/workflows/release-ios.yml',import.meta.url),'utf8');
+  for(const worker of [mac,ios]) {
+    assert.match(worker,/workflow_call:/);
+    assert.match(worker,/ref: \$\{\{ inputs.manifest \}\}/);
+    assert.match(worker,/await verifyManifestPublication/);
+    assert.match(worker,/verify-release-train-archive.py/);
+    assert.doesNotMatch(worker,/continue-on-error/);
+  }
+  assert.ok(mac.indexOf('Launch readiness smoke test') < mac.indexOf('Stage immutable candidate assets'));
+  assert.ok(mac.indexOf('Verify Alpha download') < mac.indexOf('Publish Alpha prerelease only'));
+  assert.match(ios,/needs: preflight/);
+  assert.ok(ios.indexOf('Require every surface gate before TestFlight upload') < ios.indexOf('Export IPA and upload'));
 });
 
-
-test('release rollback also covers verifier setup failure and cancellation', async () => {
-  const release = await readFile(new URL('../../.github/workflows/release.yml', import.meta.url), 'utf8');
-  const verification = release.split('  verify-release:')[1];
-  const rollback = verification.split('      - name: Pull the release back to draft')[1];
-  assert.match(rollback, /always\(\) && \(failure\(\) \|\| cancelled\(\)\)/);
-  assert.doesNotMatch(rollback, /steps\.verify\.outcome/);
-  assert.match(rollback, /gh release edit/);
+test('Stable approval, website publication and failure recovery remain serial', async () => {
+  const publish=await readFile(new URL('../../.github/workflows/publish-stable.yml',import.meta.url),'utf8');
+  assert.match(publish,/group: landing-page-deploy/);
+  assert.match(publish,/cancel-in-progress: false/);
+  assert.match(publish,/approved_manifest_sha256/);
+  assert.match(publish,/github.actor == github.repository_owner/);
+  assert.match(publish,/always\(\) && \(failure\(\) \|\| cancelled\(\)\)/);
+  assert.match(publish,/release-train.mjs withdraw/);
+  assert.match(publish,/ci-verify-release.sh/);
 });
