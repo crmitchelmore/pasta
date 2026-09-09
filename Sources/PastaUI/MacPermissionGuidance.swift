@@ -32,12 +32,14 @@ public final class MacPermissionGuidance: NSObject, NSWindowDelegate {
                                          y: max(area.minY, area.midY - panel.frame.height / 2)))
         }
         self.panel = panel
+        NSApp.addWindowsItem(panel, title: panel.title, filename: false)
         panel.orderFrontRegardless()
         model.openSettings()
     }
 
     public func close() {
         model?.stopChecking()
+        if let panel { NSApp.removeWindowsItem(panel) }
         panel?.delegate = nil
         panel?.close()
         panel = nil
@@ -90,15 +92,20 @@ private struct PermissionGuideView: View {
                     Text(model.feedback).font(.callout)
                         .accessibilityLabel(model.feedback)
                 }
-                HStack {
-                    Button("Open Settings") { model.openSettings() }
-                    Button("Check Again") { model.checkAgain() }
-                        .keyboardShortcut(.return, modifiers: [])
-                    Spacer()
-                    Button("Close", action: close).keyboardShortcut(.cancelAction)
-                }
+
             }
             .padding(20)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+        HStack {
+            Button("Open Settings") { model.openSettings() }
+            Button("Check Again") { model.checkAgain() }
+                .keyboardShortcut(.return, modifiers: [])
+            Spacer()
+            Button("Close", action: close).keyboardShortcut(.cancelAction)
+        }
+            .padding(16)
+            .background(.regularMaterial)
         }
         .frame(width: 390, height: 480)
         .onChange(of: store.snapshot) { _, _ in
