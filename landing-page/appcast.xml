@@ -6,31 +6,30 @@
     <description>Most recent updates to Pasta</description>
     <language>en</language>
     <item>
-      <title>Version 1.7.0</title>
-      <sparkle:version>164</sparkle:version>
-      <sparkle:shortVersionString>1.7.0</sparkle:shortVersionString>
-      <pubDate>Wed, 09 Sep 2026 00:49:40 +0000</pubDate>
+      <title>Version 1.8.0</title>
+      <sparkle:version>165</sparkle:version>
+      <sparkle:shortVersionString>1.8.0</sparkle:shortVersionString>
+      <pubDate>Wed, 09 Sep 2026 09:29:37 +0000</pubDate>
       <description><![CDATA[
 <h2>What’s new</h2>
 <h3>New and improved</h3>
 <ul>
-<li>refresh app icons and use real website screenshots (#126)</li>
+<li>pair Macs across iCloud accounts over tailnet (#127)</li>
 </ul>
 <h3>Under the hood</h3>
 <ul>
-<li>update appcast for v1.6.2 [skip ci]</li>
-<li>drag release notes sheet across the screen (#124)</li>
+<li>update appcast for v1.7.0 [skip ci]</li>
 </ul>
 <h3>Other changes</h3>
 <ul>
-<li>style(web): revamp Pasta website and add release highlights (#125)</li>
+<li>style(web): tighten marketing copy and add accessible motion (#128)</li>
 </ul>
-<p><strong>Full changelog:</strong> <a href="https://github.com/crmitchelmore/pasta/compare/v1.6.2...v1.7.0">https://github.com/crmitchelmore/pasta/compare/v1.6.2...v1.7.0</a></p>
+<p><strong>Full changelog:</strong> <a href="https://github.com/crmitchelmore/pasta/compare/v1.7.0...v1.8.0">https://github.com/crmitchelmore/pasta/compare/v1.7.0...v1.8.0</a></p>
       ]]></description>
       <enclosure
-        url="https://github.com/crmitchelmore/pasta/releases/download/v1.7.0/Pasta-1.7.0.dmg"
-        sparkle:edSignature="NTDIPv+3j5h8Yt9wW/7BaI+BwmdZHFZGG4FqSy1DvyS+kGxjgt1KLKEU6hPpCPPG6BqbxcBeAi+eBqEh+puRCQ=="
-        length="13589255"
+        url="https://github.com/crmitchelmore/pasta/releases/download/v1.8.0/Pasta-1.8.0.dmg"
+        sparkle:edSignature="qbph6UMcanjwvwHCq+O8jaYc10f0dAaxMwfr/nxFHg7ArJRkCv8RVZwiu9Q/WeRA4kdeWAUJ9657ssjp6z5OAQ=="
+        length="14022262"
         type="application/octet-stream"/>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
     </item>
