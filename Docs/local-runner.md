@@ -18,6 +18,9 @@ This runner deliberately has no generic default labels. For another personal
 repository, register a separate service with its own repository restriction and
 work directory; this registration cannot receive another repository's jobs.
 
+DMG creation uses the pinned packager's headless mode, avoiding Finder automation
+prompts; the installer uses Finder's default layout.
+
 Release jobs retain the original keychain search list, use temporary API keys,
 and restore any pre-existing provisioning profile. SwiftPM gets an internal
 job cache because the large personal cache directories live on removable storage.

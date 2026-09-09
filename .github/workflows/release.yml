@@ -378,13 +378,14 @@ jobs:
           chmod +x create-background.sh
           ./create-background.sh
       
-      - name: Create fancy DMG
+      - name: Create DMG
         id: dmg
         run: |
           DMG_FILE="${DMG_NAME}-${{ steps.version.outputs.version }}.dmg"
           
-          echo "==> Creating DMG with custom background and layout"
+          echo "==> Creating DMG without interactive Finder automation"
           create-dmg \
+            --skip-jenkins \
             --volname "${DMG_NAME}" \
             --volicon "Resources/DMG/AppIcon.icns" \
             --background "Resources/DMG/background@2x.png" \
