@@ -32,6 +32,8 @@ struct PastaApp: App {
 
     var body: some Scene {
         Settings {
+            // SettingsView owns the content size. A second, smaller frame here
+            // makes the native Settings host clip the page behind its toolbar.
             SettingsView(
                 syncManager: BackgroundService.shared.syncManager,
                 tailnetSync: BackgroundService.shared.tailnetSync,
@@ -58,7 +60,6 @@ struct PastaApp: App {
                     set: { UpdaterManager.shared.automaticallyChecksForUpdates = $0 }
                 )
             )
-            .frame(minWidth: 450, minHeight: 400)
         }
         .commands {
             CommandGroup(after: .appInfo) {
