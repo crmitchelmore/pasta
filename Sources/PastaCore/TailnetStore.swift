@@ -21,7 +21,7 @@ public struct TailnetPeer: Codable, Identifiable, Equatable, Sendable {
 }
 
 public enum TailnetTransferState: String, Codable, Sendable {
-    case pending, approval, declined, sent, failed
+    case pending, approval, declined, sent, alreadyPresent, failed
 }
 
 public struct TailnetTransfer: Identifiable, Sendable {
@@ -88,12 +88,18 @@ public final class TailnetStore: @unchecked Sendable {
         }
     }
 
+    // Legacy remote "seen" responses used sent with no detail; completed payload
+    // deliveries always stored a detail. Normalise before filtering and sorting.
     public func transfers(peerID: String? = nil, state: TailnetTransferState? = nil, limit: Int = 100, includeReceived: Bool = true) throws -> [TailnetTransfer] {
         try writer.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT q.*, e.content AS entryContent, e.contentType AS entryType FROM tailnet_queue q JOIN clipboard_entries e ON e.id = q.entryID
+                SELECT q.*, e.content AS entryContent, e.contentType AS entryType FROM (
+                    SELECT rowid, nodeID, entryID, backfill, detail, approvedDigest,
+                        CASE WHEN state = 'sent' AND detail IS NULL THEN 'alreadyPresent' ELSE state END AS state
+                    FROM tailnet_queue
+                ) q JOIN clipboard_entries e ON e.id = q.entryID
                 WHERE (? IS NULL OR nodeID = ?) AND (? IS NULL OR state = ?) AND (? OR e.receivedViaTailnet = 0)
-                ORDER BY CASE q.state WHEN 'approval' THEN 0 WHEN 'failed' THEN 1 WHEN 'pending' THEN 2 WHEN 'declined' THEN 3 ELSE 4 END, CASE WHEN q.state = 'sent' THEN -q.rowid ELSE q.rowid END LIMIT ?
+                ORDER BY CASE q.state WHEN 'approval' THEN 0 WHEN 'failed' THEN 1 WHEN 'pending' THEN 2 WHEN 'declined' THEN 3 ELSE 4 END, CASE WHEN q.state IN ('sent', 'alreadyPresent') THEN -q.rowid ELSE q.rowid END LIMIT ?
                 """, arguments: [peerID, peerID, state?.rawValue, state?.rawValue, includeReceived, limit])
             return rows.compactMap { row in
                 guard let id = UUID(uuidString: row["entryID"]), let state = TailnetTransferState(rawValue: row["state"]) else { return nil }

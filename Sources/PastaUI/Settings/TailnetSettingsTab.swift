@@ -26,7 +26,7 @@ struct TailnetSettingsTab: View {
             ForEach(sync.peers) { peer in
                 Section(peer.name) { TailnetPeerSettings(peer: peer, sync: sync) }
             }
-            let outstanding = sync.transfers.filter { $0.state != .sent }
+            let outstanding = sync.transfers.filter { $0.state != .sent && $0.state != .alreadyPresent }
             if !outstanding.isEmpty {
                 Section("Transfers") {
                     ForEach(outstanding, id: \.transferKey) { transfer in
@@ -52,7 +52,20 @@ struct TailnetSettingsTab: View {
                     ForEach(recent, id: \.transferKey) { transfer in
                         VStack(alignment: .leading) {
                             Text(transfer.title).lineLimit(1)
+                            Text("To \(sync.peers.first(where: { $0.id == transfer.peerID })?.name ?? "paired Mac")").font(.caption)
                             Text(transfer.detail ?? "Delivered").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            let alreadyPresent = Array(sync.transfers.filter { $0.state == .alreadyPresent }.prefix(10))
+            if !alreadyPresent.isEmpty {
+                Section("Already on paired Macs") {
+                    ForEach(alreadyPresent, id: \.transferKey) { transfer in
+                        VStack(alignment: .leading) {
+                            Text(transfer.title).lineLimit(1)
+                            Text("Already on \(sync.peers.first(where: { $0.id == transfer.peerID })?.name ?? "paired Mac") · no transfer needed")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
