@@ -226,7 +226,7 @@ jobs:
           
           # Set keychain search list
           python3 scripts/ci-keychain-search.py add "$RUNNER_TEMP/keychain-search.json" "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
           
           # Clean up certificate file
           rm certificate.p12
