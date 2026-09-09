@@ -145,6 +145,11 @@ if(command === 'allocate' || command === 'prepare') {
     upload(manifest.tag,`${surface}-receipt.json`,receipt,true);
 } else if(command === 'publish-alpha') {
     const manifest=manifestFor(required('tag')); if(manifest.train !== 'alpha') throw Error('Alpha only');
+    ci(manifest.source);
+    const receiptAsset=releases().find(r=>r.tag_name===manifest.tag)?.assets.find(a=>a.name==='mac-direct-receipt.json');
+    if(!receiptAsset) throw Error('No verified direct Alpha receipt');
+    const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${receiptAsset.id}`,'-H','Accept: application/octet-stream'));
+    if(receipt.status !== 'verified' || receipt.source !== manifest.source || receipt.build !== manifest.surfaces['mac-direct'].build || receipt.notesHash !== manifest.surfaces['mac-direct'].notesHash) throw Error('Direct Alpha is not verified');
     gh('release','edit',manifest.tag,'--repo',repo,'--draft=false','--prerelease','--latest=false');
     // Mutable pointer uses an explicit prerelease, never GitHub Latest.
     const all=releases(); const pointer=all.find(r=>r.tag_name==='alpha-latest');
