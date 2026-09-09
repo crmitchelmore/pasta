@@ -66,6 +66,10 @@ public protocol WorkspaceProviding {
 }
 
 #if canImport(AppKit)
+public extension NSPasteboard.PasteboardType {
+    static let pastaTailnetReceived = Self("com.pasta.tailnet-received")
+}
+
 public struct SystemPasteboard: PasteboardProviding {
     private let pasteboard: NSPasteboard
     
@@ -83,7 +87,7 @@ public struct SystemPasteboard: PasteboardProviding {
     public var changeCount: Int { pasteboard.changeCount }
 
     public func readContents() -> PasteboardContents? {
-        if pasteboard.types?.contains(NSPasteboard.PasteboardType("com.pasta.tailnet-received")) == true { return nil }
+        if pasteboard.types?.contains(.pastaTailnetReceived) == true { return nil }
         // Check for file paths first (copying files in Finder)
         if let objects = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !objects.isEmpty {
             return .filePaths(objects.map { $0.path })

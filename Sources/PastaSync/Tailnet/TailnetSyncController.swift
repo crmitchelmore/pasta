@@ -30,7 +30,7 @@ public final class TailnetSyncController: ObservableObject {
                     if PasteService().copy(entry) {
                         // Capture ignores this marker independently of the user's
                         // transient-content preference. Never simulate Command-V.
-                        NSPasteboard.general.setString("1", forType: NSPasteboard.PasteboardType("com.pasta.tailnet-received"))
+                        NSPasteboard.general.setString("1", forType: .pastaTailnetReceived)
                     }
                 }
                 NotificationCenter.default.post(name: Notification.Name("pasta.entriesDidChange"), object: nil)
@@ -106,7 +106,8 @@ public final class TailnetSyncController: ObservableObject {
             self?.decidePairing(request.id, allow: response == .alertFirstButtonReturn)
         }
         Task { [weak window, weak alert] in
-            try? await Task.sleep(nanoseconds: 120_000_000_000)
+            let remaining = max(0, request.expires.timeIntervalSinceNow)
+            try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
             if let window, let alert, window.attachedSheet === alert.window { window.endSheet(alert.window, returnCode: .alertSecondButtonReturn) }
         }
     }

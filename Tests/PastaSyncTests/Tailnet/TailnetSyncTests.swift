@@ -126,6 +126,79 @@ final class TailnetSyncTests: XCTestCase {
         XCTAssertTrue(try TailnetStore(database: b.db).peers().isEmpty)
     }
 
+    func testExpiredDeclineIsHarmlessAfterSnapshotPrunesRequest() async throws {
+        let clock = TailnetTestClock()
+        let network = TailnetTestNetwork()
+        let a = try await TailnetTestNode(1, network: network, parent: root, now: { clock.now() })
+        let b = try await TailnetTestNode(2, network: network, parent: root, now: { clock.now() })
+        await a.tick(); await b.tick()
+        try await a.engine.requestPairing(b.device.id)
+        let request = try await b.engine.snapshot().requests.first!
+        clock.advance(121)
+        let expired = try await b.engine.snapshot()
+        XCTAssertTrue(expired.requests.isEmpty)
+        // The sheet timeout and a late Decline both take this path.
+        try await b.engine.approve(request.id, allow: false)
+        await b.engine.setEnabled(false)
+        try await b.engine.approve(request.id, allow: false)
+        do { try await b.engine.approve(request.id, allow: true); XCTFail("Expired approval must still fail") } catch {}
+        XCTAssertTrue(try TailnetStore(database: b.db).peers().isEmpty)
+    }
+
+    func testQueuedForwardedItemsCannotStarveLocalItemsBeyondBatchOrOtherPeers() async throws {
+        let network = TailnetTestNetwork()
+        let a = try await TailnetTestNode(1, network: network, parent: root)
+        let b = try await TailnetTestNode(2, network: network, parent: root)
+        let c = try await TailnetTestNode(3, network: network, parent: root)
+        try await a.pair(b); try await a.pair(c)
+        let store = TailnetStore(database: a.db)
+        var policy = try a.peer(b); policy.forwardReceived = true
+        try await a.engine.update(policy)
+        for index in 0..<40 {
+            try store.receive(ClipboardEntry(content: "forwarded \(index)", contentType: .text), publishToCloud: false)
+        }
+        try store.enqueue(for: b.device.id)
+        policy.forwardReceived = false
+        try await a.engine.update(policy)
+        let local = ClipboardEntry(content: "local beyond skipped batch", contentType: .text)
+        try a.db.insert(local)
+        await a.tick()
+        XCTAssertEqual(try b.db.countEntries(), 1)
+        XCTAssertNotNil(try b.db.fetch(id: local.id))
+        XCTAssertEqual(try c.db.countEntries(), 1)
+        XCTAssertNotNil(try c.db.fetch(id: local.id))
+        XCTAssertEqual(try store.transfers(peerID: b.device.id, state: .pending).count, 40)
+        // A temporary policy pause does not lose already-queued history.
+        policy.forwardReceived = true
+        try await a.engine.update(policy)
+        await a.tick(); await a.tick()
+        XCTAssertEqual(try b.db.countEntries(), 41)
+        XCTAssertEqual(try c.db.countEntries(), 1)
+    }
+
+    func testDisablingForwardingDuringTransferDoesNotAbortOtherPendingItemsOrPeers() async throws {
+        let network = TailnetTestNetwork()
+        let a = try await TailnetTestNode(1, network: network, parent: root)
+        let b = try await TailnetTestNode(2, network: network, parent: root)
+        let c = try await TailnetTestNode(3, network: network, parent: root)
+        try await a.pair(b); try await a.pair(c)
+        var policy = try a.peer(b); policy.forwardReceived = true
+        try await a.engine.update(policy)
+        let forwarded = ClipboardEntry(content: "policy changes in flight", contentType: .text)
+        try TailnetStore(database: a.db).receive(forwarded, publishToCloud: false)
+        let local = ClipboardEntry(content: "still share local history", contentType: .text)
+        try a.db.insert(local)
+        await network.pauseOnResponse(.received)
+        let sending = Task { await a.tick() }
+        await network.waitForPause()
+        policy.forwardReceived = false
+        try await a.engine.update(policy)
+        await network.resume(); await sending.value
+        XCTAssertNil(try b.db.fetch(id: forwarded.id))
+        XCTAssertNotNil(try b.db.fetch(id: local.id))
+        XCTAssertNotNil(try c.db.fetch(id: local.id))
+    }
+
     func testDeletedLocalOriginCannotReturnThroughForwarding() throws {
         let db = try DatabaseManager.inMemory()
         let entry = ClipboardEntry(content: "local source", contentType: .text)

@@ -56,7 +56,7 @@ final class TailnetToPasteFlowTests: XCTestCase {
         XCTAssertTrue(paste.copy(result))
         XCTAssertEqual(pasteboard.string(forType: .string), rich.string)
         XCTAssertEqual(pasteboard.data(forType: .rtf), rtf)
-        pasteboard.setString("1", forType: NSPasteboard.PasteboardType("com.pasta.tailnet-received"))
+        pasteboard.setString("1", forType: .pastaTailnetReceived)
         XCTAssertNil(SystemPasteboard(pasteboard: pasteboard).readContents(), "Automatic received clipboard writes cannot be recaptured")
 
         let source = scratch.appendingPathComponent("sample\nfile.txt")

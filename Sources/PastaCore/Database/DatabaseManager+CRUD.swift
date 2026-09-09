@@ -175,8 +175,8 @@ extension DatabaseManager {
                                 entry.isPinned,
                                 entry.contentTypeMask,
                                 entry.isSynced,
-                        entry.cloudSyncAllowed,
-                        entry.receivedViaTailnet,
+                                entry.cloudSyncAllowed,
+                                entry.receivedViaTailnet,
                             ]
                         )
                         inserted += 1

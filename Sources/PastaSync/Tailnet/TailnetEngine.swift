@@ -142,10 +142,15 @@ actor TailnetEngine {
                 try store.save(peer)
                 guard peer.sendEnabled else { continue }
                 try store.enqueue(for: peer.id)
-                for transfer in try store.transfers(peerID: peer.id, state: .pending, limit: 32) {
+                for transfer in try store.transfers(peerID: peer.id, state: .pending, limit: 32, includeReceived: peer.forwardReceived) {
                     guard enabled, generation == run else { return }
                     do { try await transmit(transfer, to: peer) }
-                    catch is CancellationError { return }
+                    catch is CancellationError {
+                        guard enabled, generation == run, !Task.isCancelled else { return }
+                        // A changed pairing or forwarding policy cancels this
+                        // transfer, not unrelated entries or other peers.
+                        continue
+                    }
                     catch let error as TailnetError {
                         if case .timeout = error { status = error.localizedDescription; break }
                         try store.setState(transfer, .failed, detail: error.localizedDescription)
@@ -179,8 +184,10 @@ actor TailnetEngine {
         status = "Waiting for approval on \(device.name)"
     }
     func approve(_ id: UUID, allow: Bool) throws {
+        // Expiry, disabling, and a late click can all remove a request before
+        // its sheet closes. Declining must remain harmless and idempotent.
+        guard allow else { pending.removeValue(forKey: id); return }
         guard let value = pending.removeValue(forKey: id), value.request.expires > now(), let inventory, enabled else { throw TailnetError.denied }
-        guard allow else { return }
         var peer = TailnetPeer(id: value.request.device.id, name: value.request.device.name, address: value.request.device.address, pairingID: id)
         peer.localNodeID = inventory.local.id
         try credentials.save(value.token, id: id)
