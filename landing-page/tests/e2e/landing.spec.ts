@@ -197,11 +197,7 @@ test.describe('accessibility', () => {
   });
 
   test('axe-core: no WCAG 2.0/2.1 A or AA violations', async ({ page }) => {
-    // The scroll-reveal `.fade-in` elements start at opacity 0 and fade in over
-    // 0.45s, so axe's color-contrast check can sample them mid-transition on a
-    // slow runner. The page honours prefers-reduced-motion by rendering them
-    // fully opaque with no transition; emulate it so the audit measures the
-    // real final colours deterministically.
+    // Audit final colours without sampling the coordinated hero entrance mid-frame.
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/', { waitUntil: 'load' });
 
@@ -237,4 +233,26 @@ test('release highlights and roadmap remain distinct and keyboard accessible', a
   const shortcuts = page.locator('#shortcuts details');
   await shortcuts.locator('summary').click();
   await expect(shortcuts.getByText('Paste as plain text')).toBeVisible();
+});
+
+test('motion settles, responds to hover, and stops for reduced motion', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/');
+  const capture = page.locator('.hero__visual');
+  await expect(capture).toHaveCSS('animation-name', 'clipboard-arrives');
+  await expect(capture).toHaveCSS('opacity', '1');
+  const image = capture.locator('img');
+  await image.hover();
+  await expect(image).toHaveCSS('transform', 'matrix(1, 0, 0, 1, 0, -6)');
+
+  // A preference change must stop motion immediately, without hiding content.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(capture).toHaveCSS('animation-name', 'none');
+  await expect(capture).toHaveCSS('opacity', '1');
+  await expect(image).toHaveCSS('transform', 'none');
+  await expect(image).toHaveCSS('transition-duration', '0s');
+  await expect(page.locator('.hero__title')).toHaveCSS('animation-name', 'none');
+  await page.locator('#roadmap summary').first().click();
+  await expect(page.locator('#roadmap details').first()).toHaveAttribute('open', '');
+  await expect(page.locator('#roadmap details p').first()).toHaveCSS('animation-name', 'none');
 });
