@@ -206,8 +206,8 @@ jobs:
 
   test:
     name: Build & Test
-    # Fork PRs stay on hosted runners; trusted repository jobs use this Mac.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["pasta-local","macos-arm64"]' || '["macos-15"]') }}
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 131 && github.event.pull_request.head.repo.full_name == github.repository) && '["pasta-local","macos-arm64"]' || '["macos-15"]') }}
     
     steps:
       - name: Checkout code
@@ -408,8 +408,8 @@ jobs:
   # upload. Change the script, not the steps, so the two cannot drift.
   ios-e2e:
     name: iOS E2E (XCUITest)
-    # Fork PRs stay on hosted runners; trusted repository jobs use this Mac.
-    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["pasta-local","macos-arm64"]' || '["macos-15"]') }}
+    # Only the owner-approved Alpha rollout PR uses this Mac; other jobs stay hosted.
+    runs-on: ${{ fromJSON((github.event_name == 'pull_request' && github.event.number == 131 && github.event.pull_request.head.repo.full_name == github.repository) && '["pasta-local","macos-arm64"]' || '["macos-15"]') }}
     timeout-minutes: 45
     env:
       PROJECT: PastaIOS/PastaIOS.xcodeproj
