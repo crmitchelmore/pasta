@@ -29,8 +29,9 @@ the existing Sparkle feed and App Store remain Stable.
    rejected review or Alpha build. Paired reverts cancel and platform-specific
    changes stay on their surface. The tested source and dependency lock are frozen.
 3. Candidate workers rebuild that source using Stable identities and stage signed,
-   verified assets and TestFlight builds. Existing internal groups keep candidates;
-   Alpha uses its separate Public Alpha group.
+   verified assets and processed App Store candidates. Stable builds are never
+   assigned to TestFlight groups; Alpha alone uses its Public Alpha group.
+   Validate Stable archives and runtime separately before owner approval.
 4. Run **Publish Stable** with the candidate tag and the exact reviewed manifest
    SHA-256. Only the repository owner may approve. Changed notes/assets or a newer
    candidate for the same version invalidate publication.
