@@ -11,6 +11,10 @@ struct AboutSettingsTab: View {
     let checkForUpdates: (() -> Void)?
     let automaticallyChecksForUpdates: Binding<Bool>?
     
+    private var supportsSelfUpdate: Bool {
+        SelfUpdateConfiguration.isConfigured(info: Bundle.main.infoDictionary ?? [:])
+    }
+
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
     }
@@ -68,7 +72,11 @@ struct AboutSettingsTab: View {
             }
             
             Section {
-                if let checkForUpdates {
+                if !supportsSelfUpdate {
+                    Text(SelfUpdateConfiguration.unavailableMessage)
+                        .foregroundStyle(.secondary)
+                }
+                if supportsSelfUpdate, let checkForUpdates {
                     HStack {
                         Text("Check for Updates")
                         Spacer()
@@ -80,7 +88,7 @@ struct AboutSettingsTab: View {
                     }
                 }
                 
-                if let binding = automaticallyChecksForUpdates {
+                if supportsSelfUpdate, let binding = automaticallyChecksForUpdates {
                     Toggle("Check automatically", isOn: binding)
                 }
             } header: {
