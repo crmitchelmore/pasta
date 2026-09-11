@@ -18,6 +18,11 @@ struct GeneralSettingsTab: View {
 
     var body: some View {
         Form {
+            Section("Pasting into other apps") {
+                MacPermissionSetupRow(.accessibility)
+                Text("Without access, copy a clip and paste it yourself. Automatic snippet expansion has a separate setup in Snippets.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section {
                 HStack {
                     Text("Open \(ReleaseTrain.current.displayName)")
