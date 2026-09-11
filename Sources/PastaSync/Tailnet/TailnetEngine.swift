@@ -216,7 +216,7 @@ actor TailnetEngine {
     func handle(address: String, request: TailnetRequest) async -> TailnetResponse {
         do {
             pending = pending.filter { $0.value.request.expires > now() }
-            guard enabled, request.version == 1, let inventory,
+            guard enabled, request.version == 1, ReleaseTrain.current.acceptsPeer(request.releaseTrain), let inventory,
                   let device = inventory.peers.first(where: { $0.address == address && $0.online }) else { throw TailnetError.denied }
             if request.operation == .hello { return TailnetResponse(status: "hello", device: inventory.local) }
             if request.operation == .pair {

@@ -8,11 +8,12 @@ entitlements file or provisioning profile does not prove the shipped signature.
 
 from pathlib import Path
 import plistlib
+import os
 import sys
 from xml.parsers.expat import ExpatError
 
 
-CONTAINER = "iCloud.com.pasta.ios"
+CONTAINER = os.environ.get("ICLOUD_CONTAINER", "iCloud.com.pasta.ios")
 SERVICES_KEY = "com.apple.developer.icloud-services"
 CONTAINERS_KEY = "com.apple.developer.icloud-container-identifiers"
 ENVIRONMENT_KEY = "com.apple.developer.icloud-container-environment"
@@ -29,7 +30,7 @@ def verify(entitlements):
     if not isinstance(services, list) or "CloudKit" not in services:
         raise EntitlementError("signed app does not grant the CloudKit service")
     containers = entitlements.get(CONTAINERS_KEY)
-    if not isinstance(containers, list) or CONTAINER not in containers:
+    if not isinstance(containers, list) or containers != [CONTAINER]:
         raise EntitlementError(f"signed app does not grant the shared {CONTAINER} container")
     if entitlements.get(ENVIRONMENT_KEY) != "Production":
         raise EntitlementError("signed app must use the Production CloudKit environment")

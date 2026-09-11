@@ -16,8 +16,8 @@ test('all lanes and statuses are checked, and an advancing main fails closed', a
     return path.includes('/git/ref/') ? { object: { sha: 'a' } } : { workflow_runs: [] };
   } };
   await verifyMergeWindow(options);
-  assert.equal(seen.length, 22);
-  for (const workflow of ['ci.yml', 'release.yml', 'release-ios.yml', 'deploy-landing-page.yml']) {
+  assert.equal(seen.length, 37);
+  for (const workflow of ['ci.yml', 'release.yml', 'release-ios.yml', 'deploy-landing-page.yml', 'alpha-release.yml', 'prepare-stable.yml', 'publish-stable.yml']) {
     assert.ok(seen.some(path => path.includes(`${workflow}/runs?status=queued`)));
   }
   let refs = 0;

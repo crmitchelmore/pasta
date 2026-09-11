@@ -2,6 +2,7 @@
 import AppKit
 import Carbon
 import Foundation
+import PastaCore
 
 /// A hotkey binding: a key code plus modifier flags.
 /// Stored as JSON in UserDefaults.
@@ -71,8 +72,13 @@ public struct PastaHotKey: Codable, Hashable, Sendable {
 
     private static let storageKey = "pasta.hotKey"
 
+    public static var isConfigured: Bool {
+        ReleaseTrain.current.allowsGlobalShortcut(
+            explicitlyChosen: UserDefaults.standard.bool(forKey: "pasta.alpha.hotKeyExplicitlyChosen"))
+    }
+
     public static func load() -> PastaHotKey {
-        migrateFromKeyboardShortcutsIfNeeded()
+        if ReleaseTrain.current == .stable { migrateFromKeyboardShortcutsIfNeeded() }
 
         guard let data = UserDefaults.standard.data(forKey: storageKey),
               let hotKey = try? JSONDecoder().decode(PastaHotKey.self, from: data)
@@ -84,6 +90,7 @@ public struct PastaHotKey: Codable, Hashable, Sendable {
 
     public func save() {
         guard let data = try? JSONEncoder().encode(self) else { return }
+        UserDefaults.standard.set(true, forKey: "pasta.alpha.hotKeyExplicitlyChosen")
         UserDefaults.standard.set(data, forKey: PastaHotKey.storageKey)
     }
 

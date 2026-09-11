@@ -1,775 +1,319 @@
 name: Release
-
-on:
-  push:
-    tags:
-      - 'v*.*.*'  # Triggers on version tags like v1.0.0, v2.1.3, etc.
-
 permissions:
-  contents: write  # Required to create releases
-  actions: read  # Independently verify CI evidence for manually or automatically created tags
-
-# Hold the publisher lock through live verification as well as publication.
-# Otherwise a later release could replace the feed before this tag is checked.
+  contents: write
+  actions: read
 concurrency:
-  group: landing-page-deploy
+  group: pasta-mac-release-worker
+  queue: max
   cancel-in-progress: false
-
 env:
   APP_NAME: PastaApp
   BUNDLE_ID: com.pasta.clipboard
   DMG_NAME: Pasta
-
+  GH_TOKEN: ${{ github.token }}
 jobs:
   build-and-release:
     name: Build, Sign, Notarize & Release
     runs-on: pasta-local
-
     steps:
-      # ============================================================================
-      # CHECKOUT & SETUP
-      # ============================================================================
-      
-      - name: Checkout code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0  # Fetch all history for proper version detection
-      
-      - name: Extract version from tag
-        id: version
-        run: |
-          # Extract version from tag (e.g., v1.2.3 -> 1.2.3)
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION"
-          echo "RELEASE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
-      
-      # ============================================================================
-      # BUILD
-      # ============================================================================
-      
-      - name: Resolve Swift dependencies
-        run: |
-          python3 scripts/ci-verify-dependency-locks.py
-          swift package --cache-path "$RUNNER_TEMP/swiftpm-cache" resolve --force-resolved-versions
-      
-      - name: Build release binary (arm64)
-        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release --arch arm64
-      
-      - name: Build release binary (x86_64)
-        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release --arch x86_64
-      
-      - name: Create universal binary
-        run: |
-          mkdir -p .build/universal
-          lipo -create \
-            .build/arm64-apple-macosx/release/PastaApp \
-            .build/x86_64-apple-macosx/release/PastaApp \
-            -output .build/universal/PastaApp
-          
-          echo "==> Retaining symbols before stripping"
-          dsymutil .build/universal/PastaApp -o .build/universal/PastaApp.dSYM
-          python3 scripts/ci-verify-symbols.py .build/universal/PastaApp .build/universal/PastaApp.dSYM
-          ditto -c -k --keepParent .build/universal/PastaApp.dSYM .build/universal/PastaApp.dSYM.zip
+    - name: Checkout code
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        fetch-depth: 0
+        ref: ${{ inputs.manifest }}
+    - name: Load frozen release manifest
+      env:
+        MANIFEST: ${{ inputs.manifest }}
+      run: node scripts/release-train.mjs configure --tag "$MANIFEST" --surface mac-direct
+    - name: Stamp isolated release configuration
+      run: python3 scripts/configure-release-train.py
+    - name: Extract version from tag
+      id: version
+      run: echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+    - name: Resolve Swift dependencies
+      run: 'python3 scripts/ci-verify-dependency-locks.py
 
-          echo "==> Stripping debug symbols"
-          strip -x .build/universal/PastaApp
-          
-          echo "==> Created universal binary"
-          file .build/universal/PastaApp
-          ls -lh .build/universal/PastaApp
-      
-      - name: Create app bundle structure
-        run: |
-          BUILD_DIR=".build/universal"
-          # App bundle is named "Pasta.app" but executable inside is still "PastaApp"
-          APP_DIR="${BUILD_DIR}/${DMG_NAME}.app"
-          
-          echo "==> Creating app bundle at $APP_DIR"
-          rm -rf "$APP_DIR"
-          mkdir -p "$APP_DIR/Contents/MacOS"
-          mkdir -p "$APP_DIR/Contents/Resources"
-          mkdir -p "$APP_DIR/Contents/Frameworks"
-          
-          # Copy the universal binary (keep internal name as PastaApp)
-          cp ".build/universal/${APP_NAME}" "$APP_DIR/Contents/MacOS/${APP_NAME}"
-          
-          # Copy resources
-          if [ -d "Sources/PastaApp/Resources" ]; then
-            cp -R Sources/PastaApp/Resources/* "$APP_DIR/Contents/Resources/" || true
-          fi
-          
-          # Copy app icon to Resources
-          cp "Resources/DMG/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
-          
-          # Copy Sparkle framework
-          SPARKLE_PATH=$(find .build -name "Sparkle.framework" -type d | head -1)
-          if [ -n "$SPARKLE_PATH" ]; then
-            echo "==> Copying Sparkle framework from $SPARKLE_PATH"
-            cp -R "$SPARKLE_PATH" "$APP_DIR/Contents/Frameworks/"
-          else
-            echo "ERROR: Sparkle.framework not found!"
-            exit 1
-          fi
-          
-          # Fix rpath to find frameworks in Contents/Frameworks
-          echo "==> Fixing rpath for Sparkle framework"
-          install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/${APP_NAME}"
-          
-          # Verify rpath
-          echo "==> Verifying rpath:"
-          otool -l "$APP_DIR/Contents/MacOS/${APP_NAME}" | grep -A2 LC_RPATH
-          
-          # Make executable
-          chmod +x "$APP_DIR/Contents/MacOS/${APP_NAME}"
-          
-          echo "APP_DIR=$APP_DIR" >> $GITHUB_ENV
-      
-      - name: Generate Info.plist with version
-        env:
-          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
-          # Public (write-only) PostHog ingestion key. Safe to ship in a client.
-          # When the secret is unset this expands to an empty string and the app's
-          # analytics are a permanent, silent no-op.
-          POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
-        run: |
-          # Get the short commit SHA
-          COMMIT_SHA=$(git rev-parse --short HEAD)
-          
-          cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleName</key>
-              <string>Pasta</string>
-              <key>CFBundleDisplayName</key>
-              <string>Pasta</string>
-              <key>CFBundleIdentifier</key>
-              <string>${BUNDLE_ID}</string>
-              <key>CFBundleVersion</key>
-              <string>${GITHUB_RUN_NUMBER}</string>
-              <key>CFBundleShortVersionString</key>
-              <string>${GITHUB_REF_NAME#v}</string>
-              <key>CFBundleExecutable</key>
-              <string>${APP_NAME}</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleInfoDictionaryVersion</key>
-              <string>6.0</string>
-              <key>LSApplicationCategoryType</key>
-              <string>public.app-category.productivity</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>14.0</string>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-              <key>NSPrincipalClass</key>
-              <string>NSApplication</string>
-              <key>NSHumanReadableCopyright</key>
-              <string>© $(date +%Y) Pasta</string>
-              <key>CFBundleIconFile</key>
-              <string>AppIcon</string>
-              <key>CFBundleIconName</key>
-              <string>AppIcon</string>
-              <key>LSUIElement</key>
-              <true/>
-              <!-- Git Commit SHA for About screen -->
-              <key>GitCommitSHA</key>
-              <string>${COMMIT_SHA}</string>
-              <!-- Sparkle Auto-Update Configuration -->
-              <key>SUFeedURL</key>
-              <string>https://pasta-app.com/appcast.xml</string>
-              <key>SUPublicEDKey</key>
-              <string>${SPARKLE_PUBLIC_KEY}</string>
-              <key>SUEnableAutomaticChecks</key>
-              <true/>
-              <key>SUScheduledCheckInterval</key>
-              <integer>86400</integer>
-              <!-- Opt-in product analytics. Empty key = analytics disabled entirely. -->
-              <key>PostHogProjectKey</key>
-              <string>${POSTHOG_PROJECT_KEY}</string>
-              <key>PostHogHost</key>
-              <string>https://eu.i.posthog.com</string>
-          </dict>
-          </plist>
-          PLIST
-          
-          echo "==> Info.plist created"
-          cat "${APP_DIR}/Contents/Info.plist"
-      
-      # ============================================================================
-      # CODE SIGNING
-      # ============================================================================
-      
-      - name: Import Developer ID certificate
-        env:
-          CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
-          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_PASSWORD }}
-        run: |
-          # Create temporary keychain
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-          
-          echo "==> Creating temporary keychain"
-          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          
-          echo "==> Importing certificate"
-          echo "$CERTIFICATE_BASE64" | base64 --decode > certificate.p12
-          security import certificate.p12 \
-            -k "$KEYCHAIN_PATH" \
-            -P "$CERTIFICATE_PASSWORD" \
-            -T /usr/bin/codesign \
-            -T /usr/bin/productsign
-          
-          # Set keychain search list
-          python3 scripts/ci-keychain-search.py add "$RUNNER_TEMP/keychain-search.json" "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
-          
-          # Clean up certificate file
-          rm certificate.p12
-          
-          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
-          echo "KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD" >> $GITHUB_ENV
-          
-          echo "==> Certificate imported successfully"
-      
-      - name: Find signing identity
-        id: signing
-        run: |
-          # Find the Developer ID Application certificate
-          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep "Developer ID Application" | head -1 | grep -o '".*"' | tr -d '"')
-          
-          if [ -z "$IDENTITY" ]; then
-            echo "ERROR: No Developer ID Application certificate found!"
-            security find-identity -v -p codesigning "$KEYCHAIN_PATH"
-            exit 1
-          fi
-          
-          echo "identity=$IDENTITY" >> $GITHUB_OUTPUT
-          echo "==> Found signing identity: $IDENTITY"
-      
-      - name: Prepare entitlements file
-        run: |
-          cp Resources/release.entitlements entitlements.plist
-          echo "==> Entitlements file:"
-          cat entitlements.plist
-      
-      - name: Validate entitlements (no restricted keys without profile)
-        run: |
-          # These entitlements require specific provisioning profile capabilities.
-          # Adding one without updating the profile will cause SIGKILL on launch.
-          RESTRICTED_KEYS="aps-environment get-task-allow com.apple.developer.team-identifier"
-          
-          for key in $RESTRICTED_KEYS; do
-            if grep -q "$key" entitlements.plist; then
-              echo "ERROR: entitlements.plist contains restricted key '$key'."
-              echo "This requires a matching provisioning profile capability."
-              echo "Remove it or update the profile before releasing."
-              exit 1
-            fi
-          done
-          echo "==> Entitlements validation passed (no unexpected restricted keys)"
-      
-      - name: Embed provisioning profile
-        run: |
-          echo "${{ secrets.MACOS_PROVISIONING_PROFILE }}" | base64 -D -o "${APP_DIR}/Contents/embedded.provisionprofile"
-          echo "==> Provisioning profile embedded"
-          ls -la "${APP_DIR}/Contents/embedded.provisionprofile"
-      
-      - name: Code sign app bundle
-        run: |
-          echo "==> Signing app bundle with hardened runtime"
-          IDENTITY="${{ steps.signing.outputs.identity }}"
-          
-          # Sign framework internals first (WITHOUT app entitlements)
-          # Applying iCloud/CloudKit entitlements to framework binaries causes
-          # dyld signature rejection at launch.
-          echo "==> Signing framework binaries (no app entitlements)..."
-          find "${APP_DIR}/Contents/Frameworks" -type f -perm +111 | while read binary; do
-            if file "$binary" | grep -q "Mach-O"; then
-              echo "  Signing: $binary"
-              codesign --force --keychain "$KEYCHAIN_PATH" \
-                --sign "$IDENTITY" \
-                --options runtime \
-                --timestamp \
-                "$binary" || true
-            fi
-          done
-          
-          # Sign framework bundles (XPC services, apps inside frameworks)
-          find "${APP_DIR}/Contents/Frameworks" -name "*.xpc" -o -name "*.app" | while read bundle; do
-            if [ -d "$bundle" ]; then
-              echo "  Signing bundle: $bundle"
-              codesign --force --keychain "$KEYCHAIN_PATH" \
-                --sign "$IDENTITY" \
-                --options runtime \
-                --timestamp \
-                "$bundle" || true
-            fi
-          done
-          
-          # Sign the framework itself
-          find "${APP_DIR}/Contents/Frameworks" -name "*.framework" | while read fw; do
-            echo "  Signing framework: $fw"
-            codesign --force --keychain "$KEYCHAIN_PATH" \
-              --sign "$IDENTITY" \
-              --options runtime \
-              --timestamp \
-              "$fw" || true
-          done
-          
-          # Sign the main app binary WITH entitlements
-          echo "==> Signing main binary with entitlements..."
-          codesign --force --keychain "$KEYCHAIN_PATH" \
-            --sign "$IDENTITY" \
-            --options runtime \
-            --timestamp \
-            --entitlements entitlements.plist \
-            "${APP_DIR}/Contents/MacOS/PastaApp"
-          
-          # Sign the app bundle (top-level, with entitlements)
-          echo "==> Signing app bundle..."
-          codesign --force --keychain "$KEYCHAIN_PATH" \
-            --sign "$IDENTITY" \
-            --options runtime \
-            --timestamp \
-            --entitlements entitlements.plist \
-            "${APP_DIR}"
-          
-          echo "==> Verifying signature"
-          codesign --verify --verbose=4 "${APP_DIR}"
-          
-          # Verify entitlements are NOT on framework binaries
-          echo "==> Checking framework entitlements are clean..."
-          SPARKLE_ENTS=$(codesign -d --entitlements - "${APP_DIR}/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle" 2>&1 || true)
-          if echo "$SPARKLE_ENTS" | grep -q "icloud"; then
-            echo "ERROR: Sparkle binary has iCloud entitlements — this will crash at launch!"
-            exit 1
-          fi
-          echo "✓ Framework entitlements are clean"
-      
-      # ============================================================================
-      # CREATE DMG
-      # ============================================================================
-      
-      - name: Install create-dmg
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          repository: create-dmg/create-dmg
-          ref: a2b71d0fda6d0df2a86dc7f67082d4d73e84c59f # v1.3.0
-          path: .build/tools/create-dmg
-          persist-credentials: false
+        swift package --cache-path "$RUNNER_TEMP/swiftpm-cache" resolve --force-resolved-versions
 
-      - name: Add pinned create-dmg to PATH
-        run: echo "$GITHUB_WORKSPACE/.build/tools/create-dmg" >> "$GITHUB_PATH"
-      
-      - name: Generate DMG assets
-        run: |
-          cd Resources/DMG
-          
-          echo "==> Generating app icon (icns)"
-          chmod +x create-icns.sh
-          ./create-icns.sh
-          
-          echo "==> Generating background image"
-          chmod +x create-background.sh
-          ./create-background.sh
-      
-      - name: Create DMG
-        id: dmg
-        run: |
-          DMG_FILE="${DMG_NAME}-${{ steps.version.outputs.version }}.dmg"
-          
-          echo "==> Creating DMG without interactive Finder automation"
-          create-dmg \
-            --skip-jenkins \
-            --volname "${DMG_NAME}" \
-            --volicon "Resources/DMG/AppIcon.icns" \
-            --background "Resources/DMG/background@2x.png" \
-            --window-pos 200 120 \
-            --window-size 660 400 \
-            --icon-size 100 \
-            --icon "${DMG_NAME}.app" 180 200 \
-            --app-drop-link 480 200 \
-            --hide-extension "${DMG_NAME}.app" \
-            --no-internet-enable \
-            "${DMG_FILE}" \
-            "${APP_DIR}"
-          
-          echo "dmg_file=$DMG_FILE" >> $GITHUB_OUTPUT
-          echo "==> DMG created: $DMG_FILE"
-          ls -lh "$DMG_FILE"
-      
-      # ============================================================================
-      # NOTARIZATION
-      # ============================================================================
-      
-      - name: Notarize DMG
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
-          
-          echo "==> Submitting DMG for notarization"
-          xcrun notarytool submit "$DMG_FILE" \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_ID_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" \
-            --wait \
-            --timeout 60m
-          
-          echo "==> Notarization successful"
-      
-      - name: Staple notarization ticket
-        run: |
-          DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
-          
-          echo "==> Stapling notarization ticket to DMG"
-          xcrun stapler staple "$DMG_FILE"
-          
-          echo "==> Verifying stapled ticket"
-          xcrun stapler validate "$DMG_FILE"
-      
-      # ============================================================================
-      # VERIFICATION
-      # ============================================================================
-      
-      - name: Verify signed and notarized DMG
-        run: |
-          DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
-          
-          echo "==> Verifying DMG"
-          
-          # Mount DMG
-          hdiutil attach "$DMG_FILE" -mountpoint /tmp/pasta-verify
-          
-          # Verify signature
-          echo "==> Checking code signature"
-          codesign --verify --deep --strict --verbose=2 "/tmp/pasta-verify/${DMG_NAME}.app"
-          
-          # Check notarization ticket (stapler validate on the DMG already verified this)
-          echo "==> Checking notarization"
-          xcrun stapler validate "$DMG_FILE"
-          
-          # Unmount
-          hdiutil detach /tmp/pasta-verify
-          
-          echo "==> ✅ All verifications passed!"
-      
-      # RELEASE GATE: the app inside the signed, notarized, stapled DMG — the
-      # exact bytes users download — must initialise (PASTA_CI_READY marker
-      # from BackgroundService, see Sources/PastaApp/CIReadiness.swift) and quit
-      # cleanly on SIGTERM. Same script as ci.yml's PR smoke test, so a PR-green
-      # build cannot ship a launch regression that only the notarized bundle
-      # exhibits (AMFI, dyld library validation, entitlement/profile mismatch).
-      # Runs BEFORE "Create GitHub Release": a failure here publishes nothing.
-      - name: Launch readiness smoke test (notarized DMG contents)
-        run: |
-          set -euo pipefail
-          DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
-          MOUNTPOINT="$RUNNER_TEMP/pasta-smoke-mnt"
-          INSTALL_DIR="$RUNNER_TEMP/pasta-smoke-Applications"
-          mkdir -p "$MOUNTPOINT" "$INSTALL_DIR"
-          hdiutil attach "$DMG_FILE" -mountpoint "$MOUNTPOINT" -nobrowse -readonly -noautoopen
-          # Copy out exactly as a user dragging to /Applications would (ditto keeps
-          # the signature and resource forks intact), then release the DMG.
-          ditto "$MOUNTPOINT/${DMG_NAME}.app" "$INSTALL_DIR/${DMG_NAME}.app"
-          hdiutil detach "$MOUNTPOINT"
-          scripts/ci-launch-smoke.sh "$INSTALL_DIR/${DMG_NAME}.app"
-      
-      # ============================================================================
-      # RELEASE
-      # ============================================================================
-      
-      - name: Generate detailed release notes
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          RELEASE_NOTES_MODEL: gpt-5.6-luna
-          RELEASE_NOTES_REASONING_EFFORT: medium
-        run: |
-          node scripts/generate-release-notes.mjs \
-            --tag "${GITHUB_REF_NAME}" \
-            --output "$RUNNER_TEMP/generated-release-notes.md" \
-            --html-output "$RUNNER_TEMP/release-notes.html"
+        '
+    - name: Build release binary (arm64)
+      run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release --arch arm64
+    - name: Build release binary (x86_64)
+      run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release --arch x86_64
+    - name: Create universal binary
+      run: "mkdir -p .build/universal\nlipo -create \\\n  .build/arm64-apple-macosx/release/PastaApp \\\n  .build/x86_64-apple-macosx/release/PastaApp\
+        \ \\\n  -output .build/universal/PastaApp\n\necho \"==> Retaining symbols before stripping\"\ndsymutil .build/universal/PastaApp\
+        \ -o .build/universal/PastaApp.dSYM\npython3 scripts/ci-verify-symbols.py .build/universal/PastaApp .build/universal/PastaApp.dSYM\n\
+        ditto -c -k --keepParent .build/universal/PastaApp.dSYM .build/universal/PastaApp.dSYM.zip\n\necho \"==> Stripping\
+        \ debug symbols\"\nstrip -x .build/universal/PastaApp\n\necho \"==> Created universal binary\"\nfile .build/universal/PastaApp\n\
+        ls -lh .build/universal/PastaApp\n"
+    - name: Create app bundle structure
+      run: "BUILD_DIR=\".build/universal\"\n# App bundle is named \"Pasta.app\" but executable inside is still \"PastaApp\"\
+        \nAPP_DIR=\"${BUILD_DIR}/${DMG_NAME}.app\"\n\necho \"==> Creating app bundle at $APP_DIR\"\nrm -rf \"$APP_DIR\"\n\
+        mkdir -p \"$APP_DIR/Contents/MacOS\"\nmkdir -p \"$APP_DIR/Contents/Resources\"\nmkdir -p \"$APP_DIR/Contents/Frameworks\"\
+        \n\n# Copy the universal binary (keep internal name as PastaApp)\ncp \".build/universal/${APP_NAME}\" \"$APP_DIR/Contents/MacOS/${APP_NAME}\"\
+        \n\n# Copy resources\nif [ -d \"Sources/PastaApp/Resources\" ]; then\n  cp -R Sources/PastaApp/Resources/* \"$APP_DIR/Contents/Resources/\"\
+        \ || true\nfi\n\n# Copy app icon to Resources\ncp \"$ICON_PATH\" \"$APP_DIR/Contents/Resources/AppIcon.icns\"\n\n\
+        # Copy Sparkle framework\nSPARKLE_PATH=$(find .build -name \"Sparkle.framework\" -type d | head -1)\nif [ -n \"$SPARKLE_PATH\"\
+        \ ]; then\n  echo \"==> Copying Sparkle framework from $SPARKLE_PATH\"\n  cp -R \"$SPARKLE_PATH\" \"$APP_DIR/Contents/Frameworks/\"\
+        \nelse\n  echo \"ERROR: Sparkle.framework not found!\"\n  exit 1\nfi\n\n# Fix rpath to find frameworks in Contents/Frameworks\n\
+        echo \"==> Fixing rpath for Sparkle framework\"\ninstall_name_tool -add_rpath \"@executable_path/../Frameworks\" \"\
+        $APP_DIR/Contents/MacOS/${APP_NAME}\"\n\n# Verify rpath\necho \"==> Verifying rpath:\"\notool -l \"$APP_DIR/Contents/MacOS/${APP_NAME}\"\
+        \ | grep -A2 LC_RPATH\n\n# Make executable\nchmod +x \"$APP_DIR/Contents/MacOS/${APP_NAME}\"\n\necho \"APP_DIR=$APP_DIR\"\
+        \ >> \"$GITHUB_ENV\"\n\nfind .build/arm64-apple-macosx/release -maxdepth 1 -name \"*.bundle\" -exec cp -R {} \"$APP_DIR/Contents/Resources/\"\
+        \ \\;\n"
+    - name: Generate Info.plist with version
+      env:
+        SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+        POSTHOG_PROJECT_KEY: ${{ secrets.POSTHOG_PROJECT_KEY }}
+      run: "# Get the short commit SHA\nCOMMIT_SHA=$(git rev-parse --short HEAD)\n\ncat > \"${APP_DIR}/Contents/Info.plist\"\
+        \ <<PLIST\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\"\
+        >\n<plist version=\"1.0\">\n<dict>\n    <key>CFBundleName</key>\n    <string>${TRAIN_DISPLAY_NAME}</string>\n    <key>CFBundleDisplayName</key>\n\
+        \    <string>${TRAIN_DISPLAY_NAME}</string>\n    <key>CFBundleIdentifier</key>\n    <string>${BUNDLE_ID}</string>\n\
+        \    <key>CFBundleVersion</key>\n    <string>${BUILD_NUMBER}</string>\n    <key>CFBundleShortVersionString</key>\n\
+        \    <string>${RELEASE_VERSION}</string>\n    <key>CFBundleExecutable</key>\n    <string>${APP_NAME}</string>\n  \
+        \  <key>CFBundlePackageType</key>\n    <string>APPL</string>\n    <key>CFBundleInfoDictionaryVersion</key>\n    <string>6.0</string>\n\
+        \    <key>LSApplicationCategoryType</key>\n    <string>public.app-category.productivity</string>\n    <key>LSMinimumSystemVersion</key>\n\
+        \    <string>14.0</string>\n    <key>NSHighResolutionCapable</key>\n    <true/>\n    <key>NSPrincipalClass</key>\n\
+        \    <string>NSApplication</string>\n    <key>NSHumanReadableCopyright</key>\n    <string>\xA9 $(date +%Y) Pasta</string>\n\
+        \    <key>CFBundleIconFile</key>\n    <string>AppIcon</string>\n    <key>CFBundleIconName</key>\n    <string>AppIcon</string>\n\
+        \    <key>LSUIElement</key>\n    <true/>\n    <!-- Git Commit SHA for About screen -->\n    <key>GitCommitSHA</key>\n\
+        \    <string>${COMMIT_SHA}</string>\n    <!-- Sparkle Auto-Update Configuration -->\n    <key>SUFeedURL</key>\n  \
+        \  <string>${FEED_URL}</string>\n    <key>SUPublicEDKey</key>\n    <string>${SPARKLE_PUBLIC_KEY}</string>\n    <key>SUEnableAutomaticChecks</key>\n\
+        \    <true/>\n    <key>SUScheduledCheckInterval</key>\n    <integer>86400</integer>\n    <!-- Opt-in product analytics.\
+        \ Empty key = analytics disabled entirely. -->\n    <key>PostHogProjectKey</key>\n    <string>${POSTHOG_PROJECT_KEY}</string>\n\
+        \    <key>PostHogHost</key>\n    <string>https://eu.i.posthog.com</string>\n<key>PastaReleaseTrain</key><string>${RELEASE_TRAIN}</string>\n\
+        <key>GitCommitSHA</key><string>${RELEASE_SOURCE}</string>\n</dict>\n</plist>\nPLIST\n\necho \"==> Info.plist created\"\
+        \ncat \"${APP_DIR}/Contents/Info.plist\"\n"
+    - name: Import Developer ID certificate
+      env:
+        CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+        CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_PASSWORD }}
+      run: "# Create temporary keychain\nKEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db\nKEYCHAIN_PASSWORD=$(openssl rand\
+        \ -base64 32)\n\necho \"==> Creating temporary keychain\"\necho \"KEYCHAIN_PATH=$KEYCHAIN_PATH\" >> \"$GITHUB_ENV\"\
+        \nsecurity create-keychain -p \"$KEYCHAIN_PASSWORD\" \"$KEYCHAIN_PATH\"\nsecurity set-keychain-settings -lut 21600\
+        \ \"$KEYCHAIN_PATH\"\nsecurity unlock-keychain -p \"$KEYCHAIN_PASSWORD\" \"$KEYCHAIN_PATH\"\n\necho \"==> Importing\
+        \ certificate\"\necho \"$CERTIFICATE_BASE64\" | base64 --decode > certificate.p12\nsecurity import certificate.p12\
+        \ \\\n  -k \"$KEYCHAIN_PATH\" \\\n  -P \"$CERTIFICATE_PASSWORD\" \\\n  -T /usr/bin/codesign \\\n  -T /usr/bin/productsign\n\
+        \n# Set keychain search list\npython3 scripts/ci-keychain-search.py add \"$RUNNER_TEMP/keychain-search.json\" \"$KEYCHAIN_PATH\"\
+        \nsecurity set-key-partition-list -S apple-tool:,apple:,codesign: -s -k \"$KEYCHAIN_PASSWORD\" \"$KEYCHAIN_PATH\"\
+        \ >/dev/null\n\n# Clean up certificate file\nrm certificate.p12\n\necho \"KEYCHAIN_PATH=$KEYCHAIN_PATH\" >> \"$GITHUB_ENV\"\
+        \necho \"KEYCHAIN_PASSWORD=$KEYCHAIN_PASSWORD\" >> \"$GITHUB_ENV\"\n\necho \"==> Certificate imported successfully\"\
+        \n"
+    - name: Find signing identity
+      id: signing
+      run: "# Find the Developer ID Application certificate\nIDENTITY=$(security find-identity -v -p codesigning \"$KEYCHAIN_PATH\"\
+        \ | grep \"Developer ID Application\" | head -1 | grep -o '\".*\"' | tr -d '\"')\n\nif [ -z \"$IDENTITY\" ]; then\n\
+        \  echo \"ERROR: No Developer ID Application certificate found!\"\n  security find-identity -v -p codesigning \"$KEYCHAIN_PATH\"\
+        \n  exit 1\nfi\n\necho \"identity=$IDENTITY\" >> \"$GITHUB_OUTPUT\"\necho \"==> Found signing identity: $IDENTITY\"\
+        \n"
+    - name: Prepare entitlements file
+      run: 'cp Resources/release.entitlements entitlements.plist
 
-      - name: Assemble GitHub release notes
-        run: |
-          set -euo pipefail
-          VERSION="${{ steps.version.outputs.version }}"
-          cat > release_notes.md <<EOF
-          # Pasta ${VERSION}
-          
-          ## 🍝 Your clipboard, al dente.
-          
-          A blazing-fast, local-first clipboard history manager for macOS with intelligent content detection.
-          
-          ### Installation
-          
-          1. Download \`${{ steps.dmg.outputs.dmg_file }}\`
-          2. Open the DMG and drag **Pasta** to your Applications folder
-          3. Launch Pasta from Applications
-          4. Grant Accessibility permissions when prompted (recommended for full functionality)
-          
-          ### Requirements
-          
-          - macOS 14.0 (Sonoma) or later
-          - Apple Silicon (M1/M2/M3) or Intel Mac
-          
-          ### Features
-          
-          - ✨ **Unlimited clipboard history** — Never lose a copied item
-          - 🧠 **Smart content detection** — Auto-categorizes emails, JWTs, code, URLs, and more
-          - ⚡ **Ultra-fast search** — Full-text search with fuzzy matching
-          - ⌨️  **Keyboard-first** — Global hotkey (\`⌃⌘V\`) and full navigation
-          - 👁️  **Rich previews** — Images, decoded base64, syntax-highlighted code
-          - 🔒 **Privacy-first** — Local storage with optional private iCloud sync
-          
-          ### Usage
-          
-          1. Copy anything (text, URLs, images, etc.)
-          2. Press **\`⌃⌘V\`** to show Pasta
-          3. Search, navigate with **↑/↓**, press **Enter** to paste
-          
-          ### Verification
-          
-          This release is code-signed and notarized by Apple for secure distribution outside the Mac App Store.
-          
-          \`\`\`bash
-          # Verify code signature
-          codesign --verify --deep --strict /Applications/Pasta.app
-          
-          # Check notarization
-          spctl --assess --type execute --verbose /Applications/Pasta.app
-          \`\`\`
-          
-          EOF
-          
-          cat "$RUNNER_TEMP/generated-release-notes.md" >> release_notes.md
-          cat >> release_notes.md <<EOF
-          ---
-          
-          **SHA-256 Checksum:**
-          \`\`\`
-          $(shasum -a 256 "${{ steps.dmg.outputs.dmg_file }}" | awk '{print $1}')
-          \`\`\`
-          EOF
-          
-          echo "Release notes generated"
-          cat release_notes.md
-      
-      - name: Generate Appcast for Sparkle Updates
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
-          DMG_PATH="${{ steps.dmg.outputs.dmg_file }}"
-          
-          chmod +x scripts/generate-appcast.sh
-          ./scripts/generate-appcast.sh \
-            "$VERSION" \
-            "$BUILD_NUMBER" \
-            "$DMG_PATH" \
-            "$SPARKLE_PRIVATE_KEY" \
-            "$RUNNER_TEMP/release-notes.html" > "$RUNNER_TEMP/appcast.xml"
-          
-          echo "APPCAST_PATH=$RUNNER_TEMP/appcast.xml" >> "$GITHUB_ENV"
-          echo "Generated appcast.xml:"
-          cat "$RUNNER_TEMP/appcast.xml"
-      
-      # Manual tags must satisfy the same surface gates as auto-release.
-      # CI may still be running its tag-push job; the shared gate requires
-      # completed successful surface jobs without waiting on that parent run.
-      - name: Require every surface gate before publishing the release
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          script: |
-            const { verifyReleasePublication } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
-            await verifyReleasePublication({ github, ...context.repo, sha: process.env.RELEASE_SHA });
+        echo "==> Entitlements file:"
 
-      - name: Mark publication attempt
-        id: publication_attempt
-        run: echo 'started=true' >> "$GITHUB_OUTPUT"
+        cat entitlements.plist
 
-      - name: Create GitHub Release
-        id: publish
-        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
-        with:
-          name: Pasta ${{ steps.version.outputs.version }}
-          body_path: release_notes.md
-          files: |
-            ${{ steps.dmg.outputs.dmg_file }}
-            ${{ env.APPCAST_PATH }}
-            .build/universal/PastaApp.dSYM.zip
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Update landing page appcast.xml
-        run: |
-          # Copy the generated appcast to the landing-page directory for deployment
-          cp "$APPCAST_PATH" landing-page/appcast.xml
-          echo "Appcast copied to landing-page/appcast.xml"
-      
-      - name: Refuse superseded release landing source
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          script: |
-            const { verifyCurrentLandingSource } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
-            await verifyCurrentLandingSource({ github, ...context.repo, sha: process.env.RELEASE_SHA });
+        '
+    - name: Validate entitlements (no restricted keys without profile)
+      run: "# These entitlements require specific provisioning profile capabilities.\n# Adding one without updating the profile\
+        \ will cause SIGKILL on launch.\nRESTRICTED_KEYS=\"aps-environment get-task-allow com.apple.developer.team-identifier\"\
+        \n\nfor key in $RESTRICTED_KEYS; do\n  if grep -q \"$key\" entitlements.plist; then\n    echo \"ERROR: entitlements.plist\
+        \ contains restricted key '$key'.\"\n    echo \"This requires a matching provisioning profile capability.\"\n    echo\
+        \ \"Remove it or update the profile before releasing.\"\n    exit 1\n  fi\ndone\necho \"==> Entitlements validation\
+        \ passed (no unexpected restricted keys)\"\n"
+    - name: Embed provisioning profile
+      run: 'echo "$TRAIN_PROFILE" | base64 -D -o "${APP_DIR}/Contents/embedded.provisionprofile"
 
-      - name: Deploy landing page with updated appcast
-        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
-        with:
-          wranglerVersion: '4.129.1'
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy landing-page --project-name=pasta-app --branch=main
+        echo "==> Provisioning profile embedded"
 
-      # Keep landing-page/appcast.xml in git equal to the feed just deployed, so
-      # deploy-landing-page.yml never re-publishes a stale copy and the
-      # appcast-contract test can require the newest tag. Non-fatal by design:
-      # the release is already live and verify-release must still run. The
-      # script falls back to a release/appcast-v* branch + PR if main is
-      # protected against direct pushes (see scripts/ci-commit-appcast.sh).
-      - name: Commit regenerated appcast back to main
-        env:
-          GH_TOKEN: ${{ secrets.AUTO_RELEASE_TOKEN }}
-        run: scripts/ci-commit-appcast.sh "$APPCAST_PATH" "${{ steps.version.outputs.version }}"
+        ls -la "${APP_DIR}/Contents/embedded.provisionprofile"
 
-      # ============================================================================
-      # UPDATE HOMEBREW TAP
-      # ============================================================================
-      
-      - name: Update Homebrew tap
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
-          SHA256=$(shasum -a 256 "$DMG_FILE" | awk '{print $1}')
-          
-          echo "==> Updating Homebrew tap for version $VERSION"
-          echo "    SHA256: $SHA256"
-          
-          # Clone the tap repo
-          git clone https://x-access-token:${GH_TOKEN}@github.com/crmitchelmore/homebrew-pasta.git /tmp/homebrew-tap
-          cd /tmp/homebrew-tap
-          
-          # Update the cask file
-          cat > Casks/pasta.rb << EOF
-          cask "pasta" do
-            version "$VERSION"
-            sha256 "$SHA256"
+        '
+      env:
+        TRAIN_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_MACOS_PROVISIONING_PROFILE || secrets.MACOS_PROVISIONING_PROFILE
+          }}
+    - name: Code sign app bundle
+      run: "echo \"==> Signing app bundle with hardened runtime\"\nIDENTITY=\"${{ steps.signing.outputs.identity }}\"\n\n\
+        # Sign framework internals first (WITHOUT app entitlements)\n# Applying iCloud/CloudKit entitlements to framework\
+        \ binaries causes\n# dyld signature rejection at launch.\necho \"==> Signing framework binaries (no app entitlements)...\"\
+        \nfind \"${APP_DIR}/Contents/Frameworks\" -type f -perm +111 | while read -r binary; do\n  if file \"$binary\" | grep\
+        \ -q \"Mach-O\"; then\n    echo \"  Signing: $binary\"\n    codesign --force --keychain \"$KEYCHAIN_PATH\" \\\n  \
+        \    --sign \"$IDENTITY\" \\\n      --options runtime \\\n      --timestamp \\\n      \"$binary\" || true\n  fi\n\
+        done\n\n# Sign framework bundles (XPC services, apps inside frameworks)\nfind \"${APP_DIR}/Contents/Frameworks\" -name\
+        \ \"*.xpc\" -o -name \"*.app\" | while read -r bundle; do\n  if [ -d \"$bundle\" ]; then\n    echo \"  Signing bundle:\
+        \ $bundle\"\n    codesign --force --keychain \"$KEYCHAIN_PATH\" \\\n      --sign \"$IDENTITY\" \\\n      --options\
+        \ runtime \\\n      --timestamp \\\n      \"$bundle\" || true\n  fi\ndone\n\n# Sign the framework itself\nfind \"\
+        ${APP_DIR}/Contents/Frameworks\" -name \"*.framework\" | while read -r fw; do\n  echo \"  Signing framework: $fw\"\
+        \n  codesign --force --keychain \"$KEYCHAIN_PATH\" \\\n    --sign \"$IDENTITY\" \\\n    --options runtime \\\n   \
+        \ --timestamp \\\n    \"$fw\" || true\ndone\n\n# Sign the main app binary WITH entitlements\necho \"==> Signing main\
+        \ binary with entitlements...\"\ncodesign --force --keychain \"$KEYCHAIN_PATH\" \\\n  --sign \"$IDENTITY\" \\\n  --options\
+        \ runtime \\\n  --timestamp \\\n  --entitlements entitlements.plist \\\n  \"${APP_DIR}/Contents/MacOS/PastaApp\"\n\
+        \n# Sign the app bundle (top-level, with entitlements)\necho \"==> Signing app bundle...\"\ncodesign --force --keychain\
+        \ \"$KEYCHAIN_PATH\" \\\n  --sign \"$IDENTITY\" \\\n  --options runtime \\\n  --timestamp \\\n  --entitlements entitlements.plist\
+        \ \\\n  \"${APP_DIR}\"\n\necho \"==> Verifying signature\"\ncodesign --verify --verbose=4 \"${APP_DIR}\"\n\n# Verify\
+        \ entitlements are NOT on framework binaries\necho \"==> Checking framework entitlements are clean...\"\nSPARKLE_ENTS=$(codesign\
+        \ -d --entitlements - \"${APP_DIR}/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle\" 2>&1 || true)\nif echo\
+        \ \"$SPARKLE_ENTS\" | grep -q \"icloud\"; then\n  echo \"ERROR: Sparkle binary has iCloud entitlements \u2014 this\
+        \ will crash at launch!\"\n  exit 1\nfi\necho \"\u2713 Framework entitlements are clean\"\n"
+    - name: Install create-dmg
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        repository: create-dmg/create-dmg
+        ref: a2b71d0fda6d0df2a86dc7f67082d4d73e84c59f
+        path: .build/tools/create-dmg
+        persist-credentials: false
+    - name: Add pinned create-dmg to PATH
+      run: echo "$GITHUB_WORKSPACE/.build/tools/create-dmg" >> "$GITHUB_PATH"
+    - name: Generate DMG assets
+      run: 'cd Resources/DMG
 
-            url "https://github.com/crmitchelmore/pasta/releases/download/v#{version}/Pasta-#{version}.dmg"
-            name "Pasta"
-            desc "Blazing-fast, local-first clipboard history manager for macOS"
-            homepage "https://pasta-app.com"
 
-            livecheck do
-              url :url
-              strategy :github_latest
-            end
+        echo "==> Generating app icon (icns)"
 
-            depends_on macos: ">= :sonoma"
+        chmod +x create-icns.sh
 
-            app "Pasta.app"
+        ./create-icns.sh
 
-            zap trash: [
-              "~/Library/Application Support/Pasta",
-              "~/Library/Caches/com.pasta.clipboard",
-              "~/Library/Preferences/com.pasta.clipboard.plist",
-            ]
-          end
-          EOF
-          
-          # Commit and push
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          bash "$GITHUB_WORKSPACE/scripts/ci-commit-homebrew.sh" "$VERSION"
-          
-          echo "==> Homebrew tap updated successfully"
-      
-      # ============================================================================
-      # CLEANUP
-      # ============================================================================
-      
-      - name: Cleanup keychain
-        if: always()
-        run: |
-          python3 scripts/ci-keychain-search.py restore "$RUNNER_TEMP/keychain-search.json"
-          rm -f certificate.p12
-          if [ -n "${KEYCHAIN_PATH:-}" ] && [ -f "$KEYCHAIN_PATH" ]; then
-            echo "==> Cleaning up keychain"
-            security delete-keychain "$KEYCHAIN_PATH" || true
-          fi
-      
-      - name: Upload build artifacts (for debugging)
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: failed-build-artifacts
-          path: |
-            .build/
-            entitlements.plist
-            release_notes.md
-          retention-days: 7
 
-      # A later deploy/source-check/tap failure skips verify-release entirely.
-      # An asset upload may fail after creating a public release. Query after
-      # every publication attempt, including failed/cancelled action outcomes.
-      - name: Draft release after publication failure
-        if: ${{ always() && (failure() || cancelled()) && steps.publication_attempt.outputs.started == 'true' }}
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          script: |
-            const { draftAttemptedRelease } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-draft-release.mjs`);
-            const result = await draftAttemptedRelease({ github, ...context.repo, tag: process.env.GITHUB_REF_NAME });
-            core.error(`Release publication failed or was cancelled; cleanup: ${result}. Inspect the live appcast and Homebrew cask before retrying; drafting does not roll those back.`);
+        echo "==> Generating background image"
 
-  # ============================================================================
-  # POST-PUBLISH VERIFICATION — the "certainty" gate for auto-update users.
-  # ============================================================================
-  # Treats the live world as the source of truth: fetches the appcast Sparkle
-  # clients poll, follows its enclosure to the GitHub release asset, downloads
-  # the DMG, and puts the shipped app through Gatekeeper, codesign and the same
-  # launch-readiness smoke test. If anything fails the GitHub release is flipped
-  # back to DRAFT (asset URLs stop resolving, so Sparkle cannot fetch it) and the
-  # job fails loudly. See scripts/ci-verify-release.sh for the exact checks.
-  verify-release:
-    name: Verify published release (live appcast + DMG)
-    needs: build-and-release
-    runs-on: pasta-local
-    timeout-minutes: 20
-    permissions:
-      contents: write  # gh release edit --draft on failure
+        chmod +x create-background.sh
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        ./create-background.sh
 
-      - name: Verify live appcast, DMG, Gatekeeper, signature and launch
-        id: verify
-        run: scripts/ci-verify-release.sh "${GITHUB_REF_NAME#v}"
+        '
+    - name: Create fancy DMG
+      id: dmg
+      run: "DMG_FILE=\"${DMG_NAME}-${{ steps.version.outputs.version }}.dmg\"\n\necho \"==> Creating DMG with custom background\
+        \ and layout\"\ncreate-dmg \\\n  --volname \"${DMG_NAME}\" \\\n  --volicon \"$ICON_PATH\" \\\n  --background \"Resources/DMG/background@2x.png\"\
+        \ \\\n  --window-pos 200 120 \\\n  --window-size 660 400 \\\n  --icon-size 100 \\\n  --icon \"${DMG_NAME}.app\" 180\
+        \ 200 \\\n  --app-drop-link 480 200 \\\n  --hide-extension \"${DMG_NAME}.app\" \\\n  --no-internet-enable \\\n  \"\
+        ${DMG_FILE}\" \\\n  \"${APP_DIR}\"\n\necho \"dmg_file=$DMG_FILE\" >> \"$GITHUB_OUTPUT\"\necho \"==> DMG created: $DMG_FILE\"\
+        \nls -lh \"$DMG_FILE\"\n"
+    - name: Notarize DMG
+      env:
+        APPLE_ID: ${{ secrets.APPLE_ID }}
+        APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+        APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      run: "DMG_FILE=\"${{ steps.dmg.outputs.dmg_file }}\"\n\necho \"==> Submitting DMG for notarization\"\nxcrun notarytool\
+        \ submit \"$DMG_FILE\" \\\n  --apple-id \"$APPLE_ID\" \\\n  --password \"$APPLE_ID_PASSWORD\" \\\n  --team-id \"$APPLE_TEAM_ID\"\
+        \ \\\n  --wait \\\n  --timeout 60m\n\necho \"==> Notarization successful\"\n"
+    - name: Staple notarization ticket
+      run: 'DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
 
-      - name: Pull the release back to draft
-        if: ${{ always() && (failure() || cancelled()) }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -uo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          echo "==> Post-publish verification failed or was interrupted for $TAG; converting the GitHub release to a draft so Sparkle clients cannot download it."
-          if gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft; then
-            echo "::error title=Release $TAG pulled::verify-release failed. The GitHub release $TAG has been converted to a DRAFT (its DMG is no longer downloadable, so auto-update cannot pick it up). Inspect the currently advertised appcast version and Homebrew cask before any rollback. Restore their previous verified versions only if they still advertise this failed $TAG; do not overwrite a newer healthy release. Drafting cannot revoke existing downloads. See the 'Verify live appcast, DMG, Gatekeeper, signature and launch' step for what failed."
-          else
-            echo "::error title=Release $TAG NOT pulled::verify-release failed AND 'gh release edit --draft' also failed. Manually draft or delete the GitHub release $TAG NOW: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"
-          fi
-          exit 1
+
+        echo "==> Stapling notarization ticket to DMG"
+
+        xcrun stapler staple "$DMG_FILE"
+
+
+        echo "==> Verifying stapled ticket"
+
+        xcrun stapler validate "$DMG_FILE"
+
+        '
+    - name: Verify signed and notarized DMG
+      run: "DMG_FILE=\"${{ steps.dmg.outputs.dmg_file }}\"\n\necho \"==> Verifying DMG\"\n\n# Mount DMG\nhdiutil attach \"\
+        $DMG_FILE\" -mountpoint /tmp/pasta-verify\n\n# Verify signature\necho \"==> Checking code signature\"\ncodesign --verify\
+        \ --deep --strict --verbose=2 \"/tmp/pasta-verify/${DMG_NAME}.app\"\n\n# Check notarization ticket (stapler validate\
+        \ on the DMG already verified this)\necho \"==> Checking notarization\"\nxcrun stapler validate \"$DMG_FILE\"\n\n\
+        # Unmount\nhdiutil detach /tmp/pasta-verify\n\necho \"==> \u2705 All verifications passed!\"\n"
+    - name: Launch readiness smoke test (notarized DMG contents)
+      run: 'set -euo pipefail
+
+        DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
+
+        MOUNTPOINT="$RUNNER_TEMP/pasta-smoke-mnt"
+
+        INSTALL_DIR="$RUNNER_TEMP/pasta-smoke-Applications"
+
+        mkdir -p "$MOUNTPOINT" "$INSTALL_DIR"
+
+        hdiutil attach "$DMG_FILE" -mountpoint "$MOUNTPOINT" -nobrowse -readonly -noautoopen
+
+        # Copy out exactly as a user dragging to /Applications would (ditto keeps
+
+        # the signature and resource forks intact), then release the DMG.
+
+        ditto "$MOUNTPOINT/${DMG_NAME}.app" "$INSTALL_DIR/${DMG_NAME}.app"
+
+        hdiutil detach "$MOUNTPOINT"
+
+        scripts/ci-launch-smoke.sh "$INSTALL_DIR/${DMG_NAME}.app"
+
+        '
+    - name: Generate Appcast for Sparkle Updates
+      env:
+        SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+      run: "VERSION=\"${RELEASE_VERSION}\"\nDMG_PATH=\"${{ steps.dmg.outputs.dmg_file }}\"\n\nchmod +x scripts/generate-appcast.sh\n\
+        ./scripts/generate-appcast.sh \\\n  \"$VERSION\" \\\n  \"$BUILD_NUMBER\" \\\n  \"$DMG_PATH\" \\\n  \"$SPARKLE_PRIVATE_KEY\"\
+        \ \\\n  \"$RUNNER_TEMP/release-notes.html\" > \"$RUNNER_TEMP/appcast.xml\"\n\necho \"APPCAST_PATH=$RUNNER_TEMP/appcast.xml\"\
+        \ >> \"$GITHUB_ENV\"\necho \"Generated appcast.xml:\"\ncat \"$RUNNER_TEMP/appcast.xml\"\n"
+    - name: Require every surface gate before publishing the release
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+      with:
+        script: 'const { verifyManifestPublication } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
+
+          await verifyManifestPublication({ github, ...context.repo, sha: process.env.RELEASE_SHA });
+
+          '
+    - name: Verify signed train identity and frozen notes
+      run: python3 scripts/verify-release-train-archive.py "$APP_DIR" "$RUNNER_TEMP/release-manifest.json" mac-direct
+    - name: Stage immutable candidate assets
+      env:
+        DMG_FILE: ${{ steps.dmg.outputs.dmg_file }}
+      run: gh release upload "$RELEASE_TAG" "$DMG_FILE" "$APPCAST_PATH" .build/universal/PastaApp.dSYM.zip --clobber
+    - name: Expose Alpha assets for external verification
+      if: env.RELEASE_TRAIN == 'alpha'
+      run: gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
+    - name: Verify Alpha download, signature and launch from outside
+      if: env.RELEASE_TRAIN == 'alpha'
+      env:
+        DMG_FILE: ${{ steps.dmg.outputs.dmg_file }}
+      run: 'export APPCAST_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/appcast.xml"
+
+        export EXPECTED_FEED_URL="$FEED_URL"
+
+        ENCODED_DMG=$(python3 -c ''import os,urllib.parse;print(urllib.parse.quote(os.environ["DMG_FILE"]))'')
+
+        export EXPECTED_DMG_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$ENCODED_DMG"
+
+        scripts/ci-verify-release.sh "$RELEASE_VERSION"'
+    - name: Record verified candidate assets
+      env:
+        DMG_FILE: ${{ steps.dmg.outputs.dmg_file }}
+      run: node scripts/release-train.mjs receipt --tag "$RELEASE_TAG" --surface mac-direct --status verified --asset "$DMG_FILE"
+        --asset "$APPCAST_PATH" --asset .build/universal/PastaApp.dSYM.zip
+    - name: Publish Alpha prerelease only
+      if: env.RELEASE_TRAIN == 'alpha'
+      run: node scripts/release-train.mjs publish-alpha --tag "$RELEASE_TAG"
+    - name: Cleanup keychain
+      if: always()
+      run: "python3 scripts/ci-keychain-search.py restore \"$RUNNER_TEMP/keychain-search.json\"\nrm -f certificate.p12\nif\
+        \ [ -n \"${KEYCHAIN_PATH:-}\" ] && [ -f \"$KEYCHAIN_PATH\" ]; then\n  echo \"==> Cleaning up keychain\"\n  security\
+        \ delete-keychain \"$KEYCHAIN_PATH\" || true\nfi\n"
+    - name: Upload build artifacts (for debugging)
+      if: failure()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      with:
+        name: failed-build-artifacts
+        path: '.build/
+
+          entitlements.plist
+
+          release_notes.md
+
+          '
+        retention-days: 7
+    - name: Withdraw failed Alpha build
+      if: always() && (failure() || cancelled()) && env.RELEASE_TRAIN == 'alpha'
+      run: 'node scripts/release-train.mjs receipt --tag "$RELEASE_TAG" --surface mac-direct --status failed
+
+        gh release edit "$RELEASE_TAG" --draft=true'
+'on':
+  workflow_call:
+    inputs:
+      manifest:
+        required: true
+        type: string

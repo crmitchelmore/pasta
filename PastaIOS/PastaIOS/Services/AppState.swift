@@ -327,7 +327,7 @@ final class AppState: ObservableObject {
     static func databaseURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return appSupport
-            .appendingPathComponent("Pasta", isDirectory: true)
+            .appendingPathComponent(PastaStorageLocation.directoryName, isDirectory: true)
             .appendingPathComponent("pasta.sqlite")
     }
 

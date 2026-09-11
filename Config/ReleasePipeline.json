@@ -1,0 +1,18 @@
+{
+  "enabled": false,
+  "versions": {
+    "mac": "1.9.0",
+    "ios": "1.9.0"
+  },
+  "publishedBaselines": {
+    "ios": null
+  },
+  "apple": {
+    "stable": {
+      "ios": "6759037470"
+    },
+    "alpha": {
+      "ios": "6810331953"
+    }
+  }
+}

@@ -42,12 +42,12 @@ enum SentryManager {
             options.enableCaptureFailedRequests = false
             
             // Set environment
-            options.environment = "production"
+            options.environment = ReleaseTrain.current == .alpha ? "alpha" : "production"
             
             // Set app version from bundle
             if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
                let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
-                options.releaseName = "com.pasta.clipboard@\(version)+\(build)"
+                options.releaseName = "\(ReleaseTrain.current.macBundleIdentifier)@\(version)+\(build)"
             }
             
             // Don't send PII by default

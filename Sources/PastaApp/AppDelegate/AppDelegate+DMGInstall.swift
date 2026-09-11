@@ -19,7 +19,11 @@ extension AppDelegate {
 
         // Check if running from a DMG (mounted volume)
         let volumesPrefix = "/Volumes/"
-        guard bundlePath.hasPrefix(volumesPrefix) else { return }
+        guard bundlePath.hasPrefix(volumesPrefix),
+              let volume = extractVolumePath(from: bundlePath as String),
+              bundlePath.deletingLastPathComponent == volume,
+              (try? URL(fileURLWithPath: volume).resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly == true
+        else { return }
 
         // Check if we've already asked the user (persists across launches via UserDefaults)
         let hasAskedKey = "pasta.hasAskedToMoveToApplications"
@@ -47,10 +51,11 @@ extension AppDelegate {
 
             for volume in volumes {
                 let volumePath = "/Volumes/\(volume)"
-                let appPath = "\(volumePath)/Pasta.app"
+                let appPath = "\(volumePath)/\(ReleaseTrain.current.displayName).app"
 
                 // Check if this looks like our Pasta DMG
-                if volume.lowercased().contains("pasta") || fileManager.fileExists(atPath: appPath) {
+                if Bundle(path: appPath)?.bundleIdentifier == Bundle.main.bundleIdentifier,
+                   (try? URL(fileURLWithPath: volumePath).resourceValues(forKeys: [.volumeIsReadOnlyKey]))?.volumeIsReadOnly == true {
                     // Skip if we've already asked about this volume
                     if askedVolumes.contains(volume) {
                         PastaLogger.app.debug("Already asked about volume: \(volume), skipping")
@@ -73,7 +78,7 @@ extension AppDelegate {
     func showEjectDMGAlert(volumeName: String) {
         let alert = NSAlert()
         alert.messageText = "Eject Installer?"
-        alert.informativeText = "Pasta has been installed. Would you like to eject the installer disk image and move it to Trash?"
+        alert.informativeText = "\(ReleaseTrain.current.displayName) has been installed. Would you like to eject the installer disk image and move it to Trash?"
         alert.addButton(withTitle: "Eject & Trash")
         alert.addButton(withTitle: "Just Eject")
         alert.addButton(withTitle: "Keep Mounted")
@@ -92,8 +97,8 @@ extension AppDelegate {
 
     func showMoveToApplicationsAlert(bundlePath: String) {
         let alert = NSAlert()
-        alert.messageText = "Move Pasta to Applications?"
-        alert.informativeText = "Pasta is running from a disk image. Would you like to move it to your Applications folder for permanent installation?"
+        alert.messageText = "Move \(ReleaseTrain.current.displayName) to Applications?"
+        alert.informativeText = "\(ReleaseTrain.current.displayName) is running from a disk image. Would you like to move it to your Applications folder for permanent installation?"
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Move to Applications")
         alert.addButton(withTitle: "Not Now")
@@ -117,7 +122,7 @@ extension AppDelegate {
 
     func moveToApplications(from sourcePath: String, deleteDMG: Bool) {
         let fileManager = FileManager.default
-        let appName = (sourcePath as NSString).lastPathComponent
+        let appName = "\(ReleaseTrain.current.displayName).app"
         let destinationPath = "/Applications/\(appName)"
 
         // Extract volume path for DMG deletion
