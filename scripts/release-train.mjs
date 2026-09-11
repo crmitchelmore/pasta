@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
+import { runReleaseCommand } from './release-command.mjs';
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,7 +8,7 @@ import { parseCommits } from './release-notes-lib.mjs';
 import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/pasta';
-const run = (command, args) => execFileSync(command, args, {encoding:'utf8', stdio:['pipe','pipe','inherit']}).trim();
+const run = runReleaseCommand;
 const gh = (...args) => run('gh', args);
 const git = (...args) => run('git', args);
 const temp = mkdtempSync(join(tmpdir(), 'release-train-'));
