@@ -32,12 +32,12 @@ jobs:
       with:
         fetch-depth: 0
         ref: ${{ inputs.manifest }}
-    - name: Load frozen release manifest
-      env:
-        MANIFEST: ${{ inputs.manifest }}
-      run: node scripts/release-train.mjs configure --tag "$MANIFEST" --surface ios
-    - name: Stamp isolated release configuration
-      run: python3 scripts/configure-release-train.py
+    # Preflight runs the XCUITest suite on the pristine tagged source, exactly
+    # as ci.yml's ios-e2e did for this commit. The frozen manifest is loaded and
+    # stamped only in the testflight job below: `configure` replaces the bundled
+    # IOSReleaseNotes.json with the train's own history, which removed the Stable
+    # fixture entry the What's New UI test reads and failed every Alpha
+    # preflight (alpha-build-1, run 34682319511).
     - name: Select Xcode
       if: runner.name != 'bravo-mini-pasta'
       uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90
