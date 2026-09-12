@@ -9,9 +9,13 @@ iOS TestFlight/App Store app. This does not add a macOS App Store target.
 
 Every successful main CI push is eligible for Alpha. `alpha-release.yml` queues
 immutable `alpha-build-N` manifests; an hourly reconciliation catches interrupted
-runs. `Config/ReleasePipeline.json` keeps automatic commissioning disabled until
-signed archives, device coexistence and update delivery have been verified. The
-owner can commission a specific successful main source manually during setup.
+runs. Automatic allocation was enabled in `Config/ReleasePipeline.json` on
+12 September 2026 so that Alpha builds reach the Sparkle feed
+(`https://pasta-app.com/alpha/appcast.xml` answers 503 "Alpha is not available
+yet" until the first `alpha-latest` pointer exists). Enabling is not delivery
+evidence: signed archives, device coexistence and an installed N to N+1 Sparkle
+update must still be recorded from real runs. The owner can also commission a
+specific successful main source manually.
 A failed upload keeps its receipt and build number; retries reuse an existing
 Apple build, while an invalid binary requires a new allocation.
 
