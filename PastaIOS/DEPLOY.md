@@ -38,80 +38,21 @@ Nothing else is needed. The workflow never reads Apple ID passwords.
 
 ## How a release happens
 
-1. Merge to `main`. `ci.yml`'s `auto-release` job derives the next semantic
-   version from the conventional-commit messages and pushes a `vX.Y.Z` tag —
-   but only if every CI suite on that push was green (macOS tests + launch
-   smoke, iOS XCUITests, appcast contract, landing e2e when it ran). A red
-   suite means no tag and therefore no release of either app.
-2. That tag triggers both `release.yml` (macOS DMG, Sparkle, Homebrew) and
-   `release-ios.yml` (TestFlight). The two are independent; an iOS failure does
-   not block the macOS release and vice versa.
-3. `release-ios.yml` first runs the **`preflight`** job: the full XCUITest e2e
-   suite on an iPhone simulator, via `scripts/ci-ios-e2e.sh` — the very same
-   script and steps as `ci.yml`'s `ios-e2e` job, so the two cannot drift. The
-   `testflight` job `needs: preflight`; nothing is archived, let alone
-   uploaded, if the suite fails. Its result bundle and crash logs are attached
-   as the `release-ios-preflight-diagnostics` artifact on failure.
-4. `testflight` then sets `MARKETING_VERSION` to the tag (`v1.5.0` → `1.5.0`)
-   and `CURRENT_PROJECT_VERSION` to the build number described below, archives,
-   verifies the archive's bundle id / version / build / iCloud container, then
-   independently requires successful main CI for that exact commit across every
-   surface, then exports and uploads. Main must still match the commit or be an
-   appcast-only descendant. This applies to automatic and manual tags/uploads.
-5. After the upload, `scripts/ci-asc-wait-for-build.sh` polls the App Store
-   Connect API (a JWT minted from the same `APP_STORE_CONNECT_*` secrets) every
-   60 s for up to 20 minutes until the build's `processingState` is `VALID`.
-   `INVALID`/`FAILED` fails the job and prints the build's attributes; a
-   timeout also fails because acceptance remains unverified. The upload may
-   still complete: inspect the existing build or rerun only the polling script,
-   rather than re-uploading the same build number.
-   Once `VALID`, the build is under the app's TestFlight tab; internal testers
-   get it automatically, external groups need the usual review.
+See [Alpha and Stable release trains](../Docs/release-trains.md) for the current
+workflow. Every successful main merge is eligible for a separate Alpha app;
+Stable requires an explicitly approved candidate with cumulative release notes.
+The reusable iOS worker retains native XCUITest preflight, archive identity and
+Production CloudKit verification, exact-source CI and App Store processing checks.
+Existing Apple builds are reused on retries. Upload is not public availability.
 
-Runs are serialised (`concurrency: release-ios`) so two tags pushed close
-together cannot race App Store Connect.
-
-### Manual runs and dry runs
-
-**Actions → Release iOS (TestFlight) → Run workflow** lets you:
-
-- `version`: override the marketing version. Defaults to the latest `v*` tag
-  reachable from the selected ref.
-- `build_number`: override `CFBundleVersion` (for example to recover after an
-  out-of-band upload used a higher number).
-- `upload`: untick for a **dry run**. The workflow still runs `preflight`,
-  signs and exports the IPA, verifies its signature and embedded profile, and
-  attaches the IPA plus dSYMs as a workflow artifact, but does not talk to App
-  Store Connect (no upload, no processing poll), so no build number is
-  consumed. **Do this first** after adding the secrets.
-
-Manual uploads need successful main CI on the selected source commit; a feature
-branch or superseded commit cannot be published by passing a version override.
-Run CI on current main first (manual CI includes Playwright). Dry-run export
-remains available after native preflight without the shared upload gate.
 
 ## Build numbers
 
-TestFlight requires `CFBundleVersion` to be unique and increasing within a
-marketing version. The workflow computes
-
-```
-CFBundleVersion = BUILD_NUMBER_BASE (100) + github.run_number
-```
-
-`github.run_number` is the monotonically increasing counter of this workflow
-(it never resets, including for dry runs and failed runs). The offset keeps CI
-builds above the builds previously uploaded by hand (the project file is at
-`CURRENT_PROJECT_VERSION = 7`). If a higher number is ever uploaded outside
-CI, raise `BUILD_NUMBER_BASE` in the workflow; never lower it. The
-`build_number` dispatch input overrides the computation for one run.
-
-`manageAppVersionAndBuildNumber` is `false` in `ExportOptions.plist` so Xcode
-cannot silently rewrite the value. The literal `CFBundleShortVersionString` /
-`CFBundleVersion` values in `PastaIOS/PastaIOS/Info.plist` are overridden by
-the `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` build settings (the target
-uses `GENERATE_INFOPLIST_FILE = YES`); this was verified by inspecting the
-archived `Info.plist`.
+The immutable train manifest owns version/build values. Each train allocates an
+increasing ordinal; iOS uses `1000 + ordinal` and direct Mac preserves its existing
+timestamp ordering. Never upload outside this allocator without first reserving a
+higher build. Failed/invalid uploads require a new attempt, not a reused number.
+`manageAppVersionAndBuildNumber` remains false so Xcode cannot rewrite the manifest.
 
 ## Entitlements and capabilities
 
@@ -180,32 +121,8 @@ xcodebuild -exportArchive -archivePath /tmp/PastaIOS.xcarchive \
 
 ### Bundled iOS release notes
 
-The TestFlight workflow runs `scripts/prepare-ios-release-notes.mjs` before
-archiving, stamps the selected marketing version, build number and source SHA,
-and verifies the actual archived resource before any upload. Dry-run exported
-IPAs are checked as well. The SwiftPM resource
-`Sources/PastaCore/Resources/IOSReleaseNotes.json` is available offline; the app
-selects an exact build entry before a version-level entry and never labels a
-newer or unrelated release as the installed version.
-
-For detailed, reviewed user-facing changes, add a uniquely named JSON file to
-`release-notes/ios/`, containing `summary` (a sentence) and `changes` (an array of
-sentences). No next-version number is needed. The generator consumes fragments
-added since the preceding release tag, so their highlights do not repeat in
-later releases. Keep Mac-only work out of iOS fragments unless its effect on
-shared history is explained explicitly.
-
-Without fragments, the generator asks the existing release-note model to
-summarise only iPhone/shared-library source changes. If the model is unavailable,
-it reports only source-verified change areas, with the full changelog link;
-it does not repeat stale highlights or invent fixes. Published GitHub releases
-are backfilled as history (drafts, prereleases and failed/unpublished tags are
-excluded), preserving reviewed historical prose. A missing preceding tag or an
-invalid/empty catalogue fails preparation. Archive verification rejects wrong
-version/build/source metadata and stale resource bytes from build caches.
-
-An existing install sees the new sheet until it dismisses it with Done or a
-swipe. First-run onboarding acknowledges the starting build. Completing the
-walkthrough later must not consume pending update notes. Settings always offers
-replay. The old version-only seen marker is not trusted because older builds
-wrote it before their hardcoded notes were actually displayed.
+The manifest freezes deterministic notes and their hash before packaging. Alpha
+notes describe that source change; Stable notes accumulate since the last observed
+published iOS release. The worker embeds the exact version/build/source catalogue,
+and archive verification rejects stale or mismatched resources. History is capped
+at 40 entries in the same train. See [release trains](../Docs/release-trains.md).

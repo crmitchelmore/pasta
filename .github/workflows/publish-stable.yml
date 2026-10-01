@@ -1,0 +1,150 @@
+name: Publish Stable
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: landing-page-deploy
+  queue: max
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.actor == github.repository_owner && github.ref == 'refs/heads/main'
+    runs-on: macos-15
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+    - name: Require current website CI before changing its Stable feed
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+      with:
+        script: |-
+          const { verifyManifestPublication } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
+          await verifyManifestPublication({ github, ...context.repo, sha: context.sha });
+    - name: Approve frozen candidate and publish verified direct Mac artefacts
+      env:
+        GH_TOKEN: ${{ github.token }}
+        HOMEBREW_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        CANDIDATE: ${{ inputs.candidate }}
+        APPROVED_HASH: ${{ inputs.approved_manifest_sha256 }}
+      run: node scripts/release-train.mjs publish --tag "$CANDIDATE" --approved-hash "$APPROVED_HASH"
+    - name: Load approved Stable feed
+      env:
+        GH_TOKEN: ${{ github.token }}
+        CANDIDATE: ${{ inputs.candidate }}
+      run: |-
+        gh release download "$CANDIDATE" --pattern "appcast.xml" --dir "$RUNNER_TEMP/stable-feed"
+        cp "$RUNNER_TEMP/stable-feed/appcast.xml" landing-page/appcast.xml
+        VERSION=$(node -p 'require(process.env.RUNNER_TEMP + "/release-manifest.json").surfaces["mac-direct"].version')
+        echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+    - name: Reject superseded website source
+      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+      with:
+        script: |-
+          const { verifyCurrentLandingSource } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
+          await verifyCurrentLandingSource({ github, ...context.repo, sha: context.sha });
+    - name: Deploy landing page with updated appcast
+      uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd
+      with:
+        wranglerVersion: 4.129.1
+        apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        command: pages deploy landing-page --project-name=pasta-app --branch=main
+    - name: Commit regenerated appcast back to main
+      env:
+        GH_TOKEN: ${{ secrets.AUTO_RELEASE_TOKEN }}
+      run: scripts/ci-commit-appcast.sh "$RUNNER_TEMP/stable-feed/appcast.xml" "$RELEASE_VERSION"
+    - name: Update Homebrew tap
+      env:
+        GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      run: |
+        gh release download "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --pattern "Pasta-$RELEASE_VERSION.dmg" --dir "$RUNNER_TEMP"
+        VERSION="$RELEASE_VERSION"
+        DMG_FILE="$RUNNER_TEMP/Pasta-$RELEASE_VERSION.dmg"
+        SHA256=$(shasum -a 256 "$DMG_FILE" | awk '{print $1}')
+
+        echo "==> Updating Homebrew tap for version $VERSION"
+        echo "    SHA256: $SHA256"
+
+        # Clone the tap repo
+        git clone "https://x-access-token:${GH_TOKEN}@github.com/crmitchelmore/homebrew-pasta.git" /tmp/homebrew-tap
+        cd /tmp/homebrew-tap
+
+        # Update the cask file
+        cat > Casks/pasta.rb << EOF
+        cask "pasta" do
+          version "$VERSION"
+          sha256 "$SHA256"
+
+          url "https://github.com/crmitchelmore/pasta/releases/download/v#{version}/Pasta-#{version}.dmg"
+          name "Pasta"
+          desc "Blazing-fast, local-first clipboard history manager for macOS"
+          homepage "https://pasta-app.com"
+
+          livecheck do
+            url :url
+            strategy :github_latest
+          end
+
+          depends_on macos: ">= :sonoma"
+
+          app "Pasta.app"
+
+          zap trash: [
+            "~/Library/Application Support/Pasta",
+            "~/Library/Caches/com.pasta.clipboard",
+            "~/Library/Preferences/com.pasta.clipboard.plist",
+          ]
+        end
+        EOF
+
+        # Commit and push
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        bash "$GITHUB_WORKSPACE/scripts/ci-commit-homebrew.sh" "$VERSION"
+
+        echo "==> Homebrew tap updated successfully"
+    - name: Verify published Stable from outside
+      run: scripts/ci-verify-release.sh "$RELEASE_VERSION"
+    - name: Withdraw failed Stable publication
+      if: always() && (failure() || cancelled())
+      env:
+        GH_TOKEN: ${{ github.token }}
+        CANDIDATE: ${{ inputs.candidate }}
+      run: node scripts/release-train.mjs withdraw --tag "$CANDIDATE"
+  submit-apple:
+    needs: publish
+    runs-on: macos-15
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+    - name: Download approved manifest
+      env:
+        GH_TOKEN: ${{ github.token }}
+        CANDIDATE: ${{ inputs.candidate }}
+      run: gh release download "$CANDIDATE" --pattern release-manifest.json --dir "$RUNNER_TEMP"
+    - name: Install existing Apple API key
+      env:
+        KEY_DATA: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+      run: |
+        umask 077
+        mkdir -p "$HOME/.appstoreconnect/private_keys"
+        printf '%s' "$KEY_DATA" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_B3BM4F88FJ.p8"
+    - name: Submit approved Stable Apple builds
+      env:
+        GH_TOKEN: ${{ github.token }}
+        APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      run: |
+        ruby scripts/release-apple.rb submit "$RUNNER_TEMP/release-manifest.json" "ios"
+'on':
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: Validated stable-candidate-N
+        required: true
+        type: string
+      approved_manifest_sha256:
+        description: SHA-256 from the reviewed candidate packet; binds versions, source and exact notes
+        required: true
+        type: string
