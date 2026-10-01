@@ -6,8 +6,9 @@ import UniformTypeIdentifiers
 
 // Deterministic platform exports from the unmasked, opaque master artwork.
 // Run from the repository root: swift scripts/generate-brand-assets.swift
+let isAlpha = CommandLine.arguments.contains("--alpha")
 let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-let masterURL = root.appendingPathComponent("Resources/Branding/AppIcon-master.png")
+let masterURL = root.appendingPathComponent(isAlpha ? "Resources/Branding/AppIconAlpha-master.png" : "Resources/Branding/AppIcon-master.png")
 guard let master = NSImage(contentsOf: masterURL) else { fatalError("Missing icon master") }
 
 func export(_ path: String, size: Int, macOS: Bool = false) throws {
@@ -37,11 +38,14 @@ func export(_ path: String, size: Int, macOS: Bool = false) throws {
     print("\(path): \(size)px, \(macOS ? "macOS mask" : "opaque")")
 }
 
-for (folder, macOS) in [
+for (originalFolder, macOS) in [
     ("Sources/PastaApp/Resources/Assets.xcassets/AppIcon.appiconset", true),
     ("PastaIOS/PastaIOS/Assets.xcassets/AppIcon.appiconset", false)
 ] {
-    let contents = try Data(contentsOf: root.appendingPathComponent(folder + "/Contents.json"))
+    let folder = isAlpha ? originalFolder.replacingOccurrences(of: "AppIcon.appiconset", with: "AppIconAlpha.appiconset") : originalFolder
+    try FileManager.default.createDirectory(at: root.appendingPathComponent(folder), withIntermediateDirectories: true)
+    let contents = try Data(contentsOf: root.appendingPathComponent(originalFolder + "/Contents.json"))
+    if isAlpha { try contents.write(to: root.appendingPathComponent(folder + "/Contents.json")) }
     let json = try JSONSerialization.jsonObject(with: contents) as! [String: Any]
     let images = json["images"] as! [[String: Any]]
     var written = Set<String>()
@@ -56,6 +60,23 @@ for (folder, macOS) in [
         where url.pathExtension == "png" && !written.contains(url.lastPathComponent) {
         try FileManager.default.removeItem(at: url)
     }
+}
+if isAlpha {
+    try export("Sources/PastaApp/Resources/AppIconAlpha.png", size: 1024, macOS: true)
+    let iconset = root.appendingPathComponent(".build/PastaAlpha.iconset")
+    try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
+    let folder = root.appendingPathComponent("Sources/PastaApp/Resources/Assets.xcassets/AppIconAlpha.appiconset")
+    for file in try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) where file.pathExtension == "png" {
+        let target = iconset.appendingPathComponent(file.lastPathComponent)
+        if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
+        try FileManager.default.copyItem(at: file, to: target)
+    }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
+    process.arguments = ["-c", "icns", iconset.path, "-o", "Resources/DMG/AppIconAlpha.icns"]
+    try process.run(); process.waitUntilExit()
+    guard process.terminationStatus == 0 else { fatalError("Alpha ICNS generation failed") }
+    exit(0)
 }
 try export("Sources/PastaApp/Resources/AppIcon.png", size: 1024, macOS: true)
 for (name, size) in [("app-icon-v2.png", 512), ("apple-touch-icon-v2.png", 180), ("favicon-32x32-v2.png", 32), ("favicon-16x16-v2.png", 16)] {

@@ -1,10 +1,12 @@
 #if os(macOS)
 import Foundation
 import Network
+import PastaCore
 
 struct TailnetRequest: Codable, Sendable {
     enum Operation: String, Codable { case hello, pair, pairingStatus, received, begin, chunk, commit, revoke }
     var version = 1
+    var releaseTrain: String? = ReleaseTrain.current.rawValue
     var operation: Operation
     var pairingID: UUID?
     var token: String?
@@ -16,6 +18,7 @@ struct TailnetRequest: Codable, Sendable {
 }
 struct TailnetResponse: Codable, Sendable {
     var version = 1
+    var releaseTrain: String? = ReleaseTrain.current.rawValue
     var status: String
     var device: TailnetDevice?
     var token: String?
@@ -26,7 +29,7 @@ struct TailnetResponse: Codable, Sendable {
 /// One bounded request per connection. Tailnet encryption is provided by
 /// Tailscale; application tokens bind the request to an explicitly approved node.
 final class TailnetTransport: @unchecked Sendable {
-    static let port: UInt16 = 45873
+    static var port: UInt16 { ReleaseTrain.current.tailnetPort }
     static let maximumFrame = 3_000_000
     private let queue = DispatchQueue(label: "com.pasta.tailnet.network", qos: .utility)
     private var listener: NWListener?
@@ -101,7 +104,7 @@ final class TailnetTransport: @unchecked Sendable {
         return try await withTaskCancellationHandler {
             try await writeFrame(JSONEncoder().encode(request), to: connection)
             let result = try JSONDecoder().decode(TailnetResponse.self, from: await readFrame(connection))
-            guard result.version == 1 else { throw TailnetError.invalid("Update Pasta on both Macs to compatible versions.") }
+            guard result.version == 1, ReleaseTrain.current.acceptsPeer(result.releaseTrain) else { throw TailnetError.invalid("Update Pasta on both Macs to compatible versions.") }
             return result
         } onCancel: { connection.cancel() }
     }

@@ -19,7 +19,7 @@ struct ShortcutRecorderView: View {
             if isRecording {
                 recordingLabel
             } else {
-                Text(currentHotKey.displayString)
+                Text(PastaHotKey.isConfigured ? currentHotKey.displayString : "Not assigned")
                     .font(.system(.body, design: .rounded))
                     .frame(minWidth: 120)
             }

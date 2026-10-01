@@ -11,7 +11,7 @@ struct PastaIOSApp: App {
 
     private static func makeSyncManager() -> SyncManager {
         let manager = SyncManager(
-            containerIdentifier: "iCloud.com.pasta.ios",
+            containerIdentifier: ReleaseTrain.current.cloudContainer,
             syncEnabled: false,
             cloudKitProvisioned: Self.cloudKitProvisioned
         )

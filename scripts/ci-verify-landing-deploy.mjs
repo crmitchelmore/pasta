@@ -72,3 +72,9 @@ export async function verifyCurrentLandingSource({ github, owner, repo, sha }) {
     throw new Error(`Deployment SHA ${sha} was superseded by unverified changes on main (${current.object.sha})`);
   }
 }
+
+// Immutable train manifests intentionally retain a tested historical source.
+// All native/browser surface requirements remain authoritative.
+export async function verifyManifestPublication(options) {
+  await verifySurfaceCI({ ...options, allowRunningCI: false, allowIrrelevantSkip: true });
+}
