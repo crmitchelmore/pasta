@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { digest } from '../../scripts/release-train-lib.mjs';
 import { buildPrompt } from '../../scripts/release-notes-lib.mjs';
 import { collectIOSContext, contentForContext, stampCatalogue, validateCatalogue, verifyInstalledCatalogue } from '../../scripts/ios-release-notes-lib.mjs';
 
@@ -68,9 +69,45 @@ test('generator uses iOS source paths and supports untagged future releases with
     } finally { rmSync(cwd, { recursive: true, force: true }); }
 });
 
-test('release archives prepare and verify the actual resource before upload', () => {
+test('release archives stamp frozen manifest notes and verify the actual resource before upload', () => {
     const workflow = readFileSync(new URL('../../.github/workflows/release-ios.yml', import.meta.url), 'utf8');
-    assert.ok(workflow.indexOf('prepare-ios-release-notes.mjs') < workflow.indexOf('- name: Archive PastaIOS'));
-    assert.ok(workflow.indexOf('verify-ios-release-notes.mjs') < workflow.indexOf('- name: Export IPA and upload'));
-    assert.match(workflow, /--published-history/);
+    const archiveJob = workflow.slice(workflow.indexOf('  testflight:'));
+    const prepare = archiveJob.indexOf('release-train.mjs configure --tag "$MANIFEST" --surface ios');
+    const archive = archiveJob.indexOf('- name: Archive PastaIOS');
+    const verify = archiveJob.indexOf('verify-ios-release-notes.mjs');
+    const upload = archiveJob.indexOf('- name: Export IPA and upload');
+    assert.ok(prepare >= 0 && archive > prepare, 'Stamp the frozen catalogue before archiving');
+    assert.ok(verify > archive && upload > verify, 'Verify the archived catalogue before uploading');
+    assert.doesNotMatch(archiveJob, /prepare-ios-release-notes\.mjs/, 'Do not regenerate approved notes');
+});
+
+test('release configure stamps the frozen iOS notes, source and Alpha history into the resource', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'pasta-frozen-ios-notes-'));
+    const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+    try {
+        git('init', '-q'); git('config', 'user.name', 'Notes Test'); git('config', 'user.email', 'notes@example.invalid');
+        const resources = join(cwd, 'Sources/PastaCore/Resources');
+        mkdirSync(resources, { recursive: true });
+        writeFileSync(join(resources, 'IOSReleaseNotes.json'), JSON.stringify(catalogue));
+        writeFileSync(join(resources, 'ReleaseTrains.json'), readFileSync(new URL('../../Sources/PastaCore/Resources/ReleaseTrains.json', import.meta.url)));
+        writeFileSync(join(cwd, 'Package.resolved'), '{}\n');
+        git('add', '.'); git('commit', '-qm', 'Fixture');
+        const sha = git('rev-parse', 'HEAD');
+        const notes = '- Approved iPhone history improvement.';
+        const entry = { version: '1.9.0', build: '1001', baseline: sha, notes, notesHash: digest(notes), storeNotes: notes, storeNotesHash: digest(notes) };
+        const manifest = { schema: 1, train: 'alpha', tag: 'alpha-build-1', source: sha,
+            ordinal: 1, build: '202609110700', createdAt: '2026-09-11T07:00:00Z', dependenciesHash: digest('{}'),
+            surfaces: { 'mac-direct': { ...entry, build: '202609110700' }, ios: { ...entry } } };
+        git('tag', '-a', manifest.tag, '-m', JSON.stringify(manifest));
+        execFileSync(process.execPath, [resolve('scripts/release-train.mjs'), 'configure', '--tag', manifest.tag, '--surface', 'ios'], {
+            cwd, env: { ...process.env, GITHUB_ENV: join(cwd, 'env'), RUNNER_TEMP: cwd },
+        });
+        const prepared = JSON.parse(readFileSync(join(resources, 'IOSReleaseNotes.json')));
+        verifyInstalledCatalogue({ catalogue: prepared, version: entry.version, build: entry.build, sha });
+        assert.equal(prepared.entries[0].markdown, notes);
+        assert.equal(prepared.entries[0].summary, notes);
+        assert.equal(prepared.entries[0].train, 'alpha');
+        assert.equal(prepared.entries.length, 1, 'Stable history must not appear in Alpha');
+        assert.equal(readFileSync(join(cwd, 'release-notes.md'), 'utf8'), notes);
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
 });

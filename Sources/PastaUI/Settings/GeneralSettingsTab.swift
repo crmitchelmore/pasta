@@ -20,11 +20,16 @@ struct GeneralSettingsTab: View {
         Form {
             Section {
                 HStack {
-                    Text("Open Pasta")
+                    Text("Open \(ReleaseTrain.current.displayName)")
                     Spacer()
                     ShortcutRecorderView(
                         hotKey: PastaHotKey.load()
                     )
+                }
+                if ReleaseTrain.current == .alpha {
+                    Text("Choose a separate shortcut for Alpha. No global shortcut is registered until you choose one.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             } header: {
                 Label("Keyboard Shortcut", systemImage: "keyboard")

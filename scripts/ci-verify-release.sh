@@ -162,7 +162,7 @@ APP_BUILD=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO")
 APP_FEED=$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$INFO" 2>/dev/null || echo missing)
 [ "$APP_SHORT" = "$VERSION" ] || fail "shipped app is CFBundleShortVersionString $APP_SHORT, expected $VERSION"
 [ "$APP_BUILD" = "$TOP_BUILD" ] || fail "shipped app is CFBundleVersion $APP_BUILD but appcast sparkle:version is $TOP_BUILD; Sparkle would offer the update forever"
-[ "$APP_FEED" = "$APPCAST_URL" ] || fail "shipped app's SUFeedURL is '$APP_FEED', expected '$APPCAST_URL'"
+[ "$APP_FEED" = "${EXPECTED_FEED_URL:-$APPCAST_URL}" ] || fail "shipped app's SUFeedURL is '$APP_FEED', expected '$APPCAST_URL'"
 echo "✓ notarized, Gatekeeper-accepted, signature intact, version $APP_SHORT ($APP_BUILD), SUFeedURL $APP_FEED"
 
 # ---------------------------------------------------------------------------

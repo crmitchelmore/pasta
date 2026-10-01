@@ -9,10 +9,12 @@ export function assertReleaseLanesIdle(runs) {
   if (active.length) throw new Error(`Merge blocked by unfinished publication: ${active.map(run => `${run.name ?? run.workflowName} (${run.html_url ?? run.url})`).join(', ')}`);
 }
 
-export async function verifyMergeWindow({ api, repo, expectedMain }) {
+export const publicationWorkflows = ['ci.yml', 'release.yml', 'release-ios.yml', 'deploy-landing-page.yml', 'alpha-release.yml', 'prepare-stable.yml', 'publish-stable.yml'];
+
+export async function verifyMergeWindow({ api, repo, expectedMain, workflows = publicationWorkflows }) {
   const current = await api(`repos/${repo}/git/ref/heads/main`);
   if (current.object.sha !== expectedMain) throw new Error('main advanced; refresh the PR and recheck publication');
-  for (const workflow of ['ci.yml', 'release.yml', 'release-ios.yml', 'deploy-landing-page.yml']) {
+  for (const workflow of workflows) {
     // Query statuses independently, so a busy repository cannot hide an old
     // queued release behind the most recent 100 completed runs.
     for (const status of ['queued', 'in_progress', 'waiting', 'pending', 'requested']) {
@@ -43,7 +45,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // GitHub remains authoritative about each required check. Never use --admin.
   gh(['pr', 'checks', pr, '--repo', repo, '--required']);
   const main = await api(`repos/${repo}/git/ref/heads/main`);
-  await verifyMergeWindow({ api, repo, expectedMain: main.object.sha });
+  const files = await api(`repos/${repo}/contents/.github/workflows?ref=main`);
+  const workflows = publicationWorkflows.filter(name => files.some(file => file.name === name));
+  await verifyMergeWindow({ api, repo, expectedMain: main.object.sha, workflows });
   if (flags.includes('--check')) console.log(`Publication lanes idle; PR #${pr} required checks passed.`);
   else {
     gh(['pr', 'merge', pr, '--repo', repo, '--squash', '--match-head-commit', pull.headRefOid]);

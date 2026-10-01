@@ -122,7 +122,7 @@ final class BackgroundService: ObservableObject {
             // CI harness why instead of letting it time out.
             CIReadiness.reportDegraded(reason: dbError != nil ? "in-memory-database" : "temporary-image-storage")
         }
-        self.syncManager = SyncManager(containerIdentifier: "iCloud.com.pasta.ios")
+        self.syncManager = SyncManager(containerIdentifier: ReleaseTrain.current.cloudContainer)
         if !CIReadiness.isEnabled && dbError == nil && storageError == nil {
             do { self.tailnetSync = try TailnetSyncController(database: db) }
             catch { PastaLogger.app.error("Tailnet storage unavailable; peer sync disabled") }

@@ -6,6 +6,8 @@ import PastaUI
 
 extension AppDelegate {
     func registerHotKey() {
+        hotKeyManager.unregister()
+        guard PastaHotKey.isConfigured else { return }
         let hotKey = PastaHotKey.load()
         hotKeyManager.onHotKey = { [weak self] in
             PastaLogger.app.debug("Hotkey triggered, toggling quick search")

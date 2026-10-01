@@ -11,7 +11,9 @@ final class BrandAssetTests: XCTestCase {
     func testEveryAppIconSlotHasTheExactPixelsAndPlatformAlpha() throws {
         for (folder, expectsAlpha) in [
             ("Sources/PastaApp/Resources/Assets.xcassets/AppIcon.appiconset", true),
-            ("PastaIOS/PastaIOS/Assets.xcassets/AppIcon.appiconset", false)
+            ("PastaIOS/PastaIOS/Assets.xcassets/AppIcon.appiconset", false),
+            ("Sources/PastaApp/Resources/Assets.xcassets/AppIconAlpha.appiconset", true),
+            ("PastaIOS/PastaIOS/Assets.xcassets/AppIconAlpha.appiconset", false)
         ] {
             let directory = root.appendingPathComponent(folder)
             let json = try JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("Contents.json"))) as! [String: Any]
@@ -30,6 +32,14 @@ final class BrandAssetTests: XCTestCase {
                 }
             }
         }
+    }
+
+    func testAlphaArtworkIsDistinctAndIncludesEveryMacSize() throws {
+        let alpha = try Data(contentsOf: root.appendingPathComponent("Resources/DMG/AppIconAlpha.icns"))
+        let stable = try Data(contentsOf: root.appendingPathComponent("Resources/DMG/AppIcon.icns"))
+        XCTAssertNotEqual(alpha, stable)
+        let icon = try XCTUnwrap(NSImage(data: alpha))
+        XCTAssertTrue(Set([16, 32, 64, 128, 256, 512, 1024]).isSubset(of: Set(icon.representations.map(\.pixelsWide))))
     }
 
     func testBundleAndInAppBrandingUseTheSameArtwork() throws {
