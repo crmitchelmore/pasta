@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import PastaCore
 import Sparkle
 import SwiftUI
 
@@ -8,12 +10,15 @@ final class UpdaterManager: ObservableObject {
     /// Shared instance for app-wide access
     static let shared = UpdaterManager()
 
+    let supportsSelfUpdate = SelfUpdateConfiguration.isConfigured(info: Bundle.main.infoDictionary ?? [:])
+
     /// The Sparkle updater controller
     private let updaterController: SPUStandardUpdaterController
 
     /// Whether automatic update checks are enabled
     @Published var automaticallyChecksForUpdates: Bool {
         didSet {
+            guard supportsSelfUpdate else { return }
             updaterController.updater.automaticallyChecksForUpdates = automaticallyChecksForUpdates
         }
     }
@@ -22,15 +27,15 @@ final class UpdaterManager: ObservableObject {
     @Published private(set) var canCheckForUpdates = false
 
     private init() {
-        // Initialize Sparkle updater
-        // startingUpdater: true means it will automatically check on launch per settings
+        // Leave Sparkle stopped in local bundles that cannot receive updates.
         updaterController = SPUStandardUpdaterController(
-            startingUpdater: true,
+            startingUpdater: supportsSelfUpdate,
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
 
-        automaticallyChecksForUpdates = updaterController.updater.automaticallyChecksForUpdates
+        automaticallyChecksForUpdates = supportsSelfUpdate && updaterController.updater.automaticallyChecksForUpdates
+        guard supportsSelfUpdate else { return }
 
         // Observe canCheckForUpdates changes
         updaterController.updater.publisher(for: \.canCheckForUpdates)
@@ -39,6 +44,14 @@ final class UpdaterManager: ObservableObject {
 
     /// Manually trigger an update check
     func checkForUpdates() {
+        guard supportsSelfUpdate else {
+            let alert = NSAlert()
+            alert.messageText = "Updates unavailable"
+            alert.informativeText = SelfUpdateConfiguration.unavailableMessage
+            alert.runModal()
+            return
+        }
+        guard canCheckForUpdates else { return }
         updaterController.checkForUpdates(nil)
     }
 
