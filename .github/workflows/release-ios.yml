@@ -72,7 +72,7 @@ jobs:
       run: scripts/ci-ios-e2e.sh diagnostics
     - name: Upload result bundle and diagnostics
       if: failure()
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: release-ios-preflight-diagnostics
         path: '.build/ios-e2e/PastaIOSUITests.xcresult
@@ -359,7 +359,7 @@ jobs:
         \ | \\`${GITHUB_SHA::7}\\` |\"\n} >> \"$GITHUB_STEP_SUMMARY\"\n"
     - name: Upload IPA and dSYMs (dry run)
       if: steps.upload.outputs.enabled != 'true' && success()
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: PastaIOS-${{ steps.version.outputs.version }}-${{ steps.build_number.outputs.build }}
         path: 'build/export/*.ipa
@@ -371,7 +371,7 @@ jobs:
         if-no-files-found: error
     - name: Upload logs (on failure)
       if: failure()
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: release-ios-logs
         path: 'build/*.log
