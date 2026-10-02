@@ -199,6 +199,24 @@ final class TailnetSyncTests: XCTestCase {
         XCTAssertNotNil(try c.db.fetch(id: local.id))
     }
 
+    func testLegacySkippedDeliveryIsNotShownAsSent() throws {
+        let db = try DatabaseManager.inMemory()
+        let store = TailnetStore(database: db)
+        let peer = TailnetPeer(id: "peer", name: "Other Mac", address: "100.64.0.2")
+        try store.save(peer, newPair: true)
+        let entry = ClipboardEntry(content: "existing item", contentType: .text)
+        try db.insert(entry)
+        try store.enqueue(for: peer.id)
+        let transfer = try XCTUnwrap(store.transfers().first)
+        // Version 1.8.2 recorded remote deduplication as sent without detail.
+        try store.setState(transfer, .sent)
+        XCTAssertEqual(try store.transfers().first?.state, .alreadyPresent)
+        XCTAssertTrue(try store.transfers(state: .sent).isEmpty)
+        XCTAssertEqual(try store.transfers(state: .alreadyPresent).count, 1)
+        try store.setState(transfer, .sent, detail: "Delivered")
+        XCTAssertEqual(try store.transfers().first?.state, .sent)
+    }
+
     func testDeletedLocalOriginCannotReturnThroughForwarding() throws {
         let db = try DatabaseManager.inMemory()
         let entry = ClipboardEntry(content: "local source", contentType: .text)
@@ -277,6 +295,12 @@ final class TailnetSyncTests: XCTestCase {
         XCTAssertNotNil(try c.db.fetch(id: entry.id))
         var back = try c.peer(a); back.forwardReceived = true; try await c.engine.update(back)
         try await c.engine.backfill(a.device.id); await c.tick()
+        let delivered = try XCTUnwrap(TailnetStore(database: b.db).transfers(peerID: c.device.id).first { $0.id == entry.id })
+        XCTAssertEqual(delivered.state, .sent)
+        let skipped = try XCTUnwrap(TailnetStore(database: c.db).transfers(peerID: a.device.id).first { $0.id == entry.id })
+        XCTAssertEqual(skipped.state, .alreadyPresent)
+        await c.tick()
+        XCTAssertEqual(try TailnetStore(database: c.db).transfers(peerID: a.device.id).first { $0.id == entry.id }?.state, .alreadyPresent)
         XCTAssertEqual(try a.db.countEntries(), 1)
         XCTAssertEqual(try a.db.fetch(id: entry.id)?.copyCount, 1)
         try b.db.delete(id: entry.id)

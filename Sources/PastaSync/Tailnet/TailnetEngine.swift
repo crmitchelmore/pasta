@@ -291,7 +291,7 @@ actor TailnetEngine {
     private func transmit(_ transfer: TailnetTransfer, to initialPeer: TailnetPeer) async throws {
         guard let entry = try store.database.fetch(id: transfer.id) else { return }
         var query = TailnetRequest(operation: .received); query.entryID = entry.id
-        if try await call(query, peer: initialPeer).status == "seen" { try store.setState(transfer, .sent); return }
+        if try await call(query, peer: initialPeer).status == "seen" { try store.setState(transfer, .alreadyPresent, detail: "Already on this Mac · no transfer needed"); return }
         let files = files
         let task = Task.detached(priority: .utility) { try files.prepare(entry, backfill: transfer.backfill) }
         preparation = (initialPeer.id, task)
@@ -306,7 +306,7 @@ actor TailnetEngine {
         }
         query.operation = .begin; query.manifest = prepared.manifest
         let begin = try await call(query, peer: initialPeer)
-        if begin.status == "seen" { try store.setState(transfer, .sent); return }
+        if begin.status == "seen" { try store.setState(transfer, .alreadyPresent, detail: "Already on this Mac · no transfer needed"); return }
         guard begin.status == "ready", let offsets = begin.offsets, offsets.count == prepared.sources.count else { throw TailnetError.invalid("Receiver rejected the transfer manifest.") }
         for (index, source) in prepared.sources.enumerated() {
             let handle = try FileHandle(forReadingFrom: source); defer { try? handle.close() }
