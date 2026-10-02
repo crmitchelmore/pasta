@@ -20,7 +20,7 @@ let package = Package(
         // Auto-updates
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.6.0"),
         // Crash reporting
-        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "8.40.0")
+        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.29.2")
     ],
     targets: [
         // Main application
