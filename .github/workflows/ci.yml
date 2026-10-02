@@ -10,6 +10,9 @@ on:
   # the macOS "Build & Test" job.
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   # ============================================================================
   # LANDING PAGE / UPDATE SURFACE (cheap ubuntu jobs; see landing-page/README.md)
