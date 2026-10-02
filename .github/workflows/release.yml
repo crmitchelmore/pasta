@@ -17,7 +17,7 @@ jobs:
     runs-on: pasta-local
     steps:
     - name: Checkout code
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         fetch-depth: 0
         ref: ${{ inputs.manifest }}
@@ -157,7 +157,7 @@ jobs:
         \ \"$SPARKLE_ENTS\" | grep -q \"icloud\"; then\n  echo \"ERROR: Sparkle binary has iCloud entitlements \u2014 this\
         \ will crash at launch!\"\n  exit 1\nfi\necho \"\u2713 Framework entitlements are clean\"\n"
     - name: Install create-dmg
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         repository: create-dmg/create-dmg
         ref: a2b71d0fda6d0df2a86dc7f67082d4d73e84c59f
