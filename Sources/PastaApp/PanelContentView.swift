@@ -36,7 +36,8 @@ struct PanelContentView: View {
     @State var lastSelectedEntryID: UUID? = nil
     @State var showExtractedValuesOnly: Bool = false
 
-    @State var isAccessibilityTrusted: Bool = AccessibilityPermission.isTrusted()
+    @ObservedObject var permissions = MacPermissionStore.shared
+    var isAccessibilityTrusted: Bool { permissions.snapshot.accessibility }
     @State var isShowingErrorAlert: Bool = false
     @State var isShowingContentTypePicker: Bool = false
     @State var copyFeedbackMessage: String? = nil
@@ -132,8 +133,7 @@ struct PanelContentView: View {
             // one-line banner, not a reason to replay the whole walkthrough.
             if didCompleteOnboarding && !isAccessibilityTrusted {
                 AccessibilityPermissionBanner {
-                    AccessibilityPermission.requestPrompt()
-                    AccessibilityPermission.openAccessibilitySettings()
+                    MacPermissionGuidance.shared.show(.accessibility)
                 }
                 .transition(.opacity)
             }
@@ -400,7 +400,7 @@ struct PanelContentView: View {
         DispatchQueue.main.async {
             searchFocused = true
         }
-        isAccessibilityTrusted = AccessibilityPermission.isTrusted()
+        permissions.refresh()
         if !didCompleteOnboarding {
             PastaLogger.ui.debug("Showing onboarding (completed=\(didCompleteOnboarding), accessibilityTrusted=\(isAccessibilityTrusted))")
             presentOnboarding()
@@ -581,7 +581,7 @@ private struct AccessibilityPermissionBanner: View {
         HStack(spacing: PastaTheme.Spacing.md) {
             Image(systemName: "hand.raised.fill")
                 .foregroundStyle(.secondary)
-            Text("Grant Accessibility access so Pasta can paste into other apps.")
+            Text("Grant Accessibility access so \(PermissionAppIdentity.current.name) can paste into other apps.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

@@ -34,7 +34,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
                 backing: .buffered,
                 defer: false
             )
-            window.title = "Welcome to Pasta"
+            window.title = "Welcome to \(PermissionAppIdentity.current.name)"
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.isMovableByWindowBackground = true
