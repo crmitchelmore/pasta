@@ -142,8 +142,7 @@ public struct JevClassifier: Sendable {
         request.httpMethod = "POST"
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")\n        request.httpBody = try JSONSerialization.data(withJSONObject: [
             "model": configuration.model,
             "input": content,
             "categories": ContentType.allCases.map(\.rawValue)
