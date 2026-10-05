@@ -27,6 +27,10 @@ struct DetectionRulesSettingsTab: View {
     @State private var reparseTotal: Int = 0
     @State private var showReparseConfirmation: Bool = false
     @State private var reparseSummary: String? = nil
+    @State private var jevConfiguration: JevConfiguration = .load()
+    @State private var jevAPIKey: String = ""
+    @State private var jevKeyStatus: String?
+    @State private var showJevKeyError = false
 
     @State private var advancedDetector: BuiltInDetectorKind? = nil
     @State private var advancedEnabledDraft: Bool = false
@@ -151,6 +155,61 @@ struct DetectionRulesSettingsTab: View {
                 Label("Maintenance", systemImage: "wrench.and.screwdriver")
             }
 
+            Section {
+                Toggle("Enable Jev comparison", isOn: Binding(
+                    get: { jevConfiguration.isEnabled },
+                    set: {
+                        jevConfiguration.isEnabled = $0
+                        jevConfiguration.save()
+                    }
+                ))
+
+                SecureField("Jev API key", text: $jevAPIKey)
+                    .textFieldStyle(.roundedBorder)
+
+                HStack {
+                    Button("Save API Key") {
+                        do {
+                            try JevKeychain.save(jevAPIKey.trimmingCharacters(in: .whitespacesAndNewlines))
+                            jevAPIKey = ""
+                            jevKeyStatus = "API key saved in the macOS Keychain."
+                        } catch {
+                            errorMessage = error.localizedDescription
+                            showJevKeyError = true
+                        }
+                    }
+                    .disabled(jevAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Remove Key", role: .destructive) {
+                        try? JevKeychain.remove()
+                        jevKeyStatus = "API key removed."
+                    }
+                }
+
+                TextField("Jev endpoint", text: Binding(
+                    get: { jevConfiguration.endpoint },
+                    set: {
+                        jevConfiguration.endpoint = $0
+                        jevConfiguration.save()
+                    }
+                ))
+                TextField("Model", text: Binding(
+                    get: { jevConfiguration.model },
+                    set: {
+                        jevConfiguration.model = $0
+                        jevConfiguration.save()
+                    }
+                ))
+
+                Text("Experimental comparisons send supported text clipboard entries to Jev. Existing Pasta classifications remain unchanged. The API key is stored only in Keychain.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let jevKeyStatus {
+                    Text(jevKeyStatus).font(.caption).foregroundStyle(.secondary)
+                }
+            } header: {
+                Label("Experimental Jev Classification", systemImage: "sparkles")
+            }
+
             if let saveMessage {
                 Section {
                     Text(saveMessage)
@@ -161,6 +220,11 @@ struct DetectionRulesSettingsTab: View {
         }
         .formStyle(.grouped)
         .alert("Detection Rules Error", isPresented: $showError) {
+            Button("OK") { }
+        } message: {
+            Text(errorMessage)
+        }
+        .alert("Jev Configuration Error", isPresented: $showJevKeyError) {
             Button("OK") { }
         } message: {
             Text(errorMessage)
@@ -185,6 +249,7 @@ struct DetectionRulesSettingsTab: View {
         }
         .onAppear {
             configuration = DetectorConfigurationStore.load()
+            jevConfiguration = .load()
         }
         .onChange(of: newCustomPattern) { _, _ in
             scheduleNewPatternEvaluation()

@@ -62,6 +62,11 @@ struct PastaApp: App {
             )
         }
         .commands {
+            CommandMenu("Tools") {
+                Button("Compare Classification with Jev…") {
+                    appDelegate.compareClassificationWithJev()
+                }
+            }
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") {
                     UpdaterManager.shared.checkForUpdates()

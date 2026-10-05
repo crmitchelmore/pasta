@@ -58,6 +58,16 @@ final class BackgroundService: ObservableObject {
         static let minHeadFetchLimit = 100
         static let insertedCountMultiplier = 4
     }
+
+    private nonisolated static func jevLiveConfiguration() -> (configuration: JevConfiguration, apiKey: String)? {
+        let configuration = JevConfiguration.load()
+        guard configuration.isEnabled,
+              let apiKey = try? JevKeychain.read(),
+              !apiKey.isEmpty else {
+            return nil
+        }
+        return (configuration, apiKey)
+    }
     
     private enum Defaults {
         static let maxEntries = "pasta.maxEntries"
@@ -480,6 +490,23 @@ final class BackgroundService: ObservableObject {
                     } catch {
                         PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Failed to enrich entry")
                         result = EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: [])
+                    }
+
+                    if let jev = Self.jevLiveConfiguration() {
+                        let localCategory = result.primaryEntry.contentType
+                        let content = result.primaryEntry.content
+                        Task.detached(priority: .utility) {
+                            do {
+                                let classification = try await JevClassifier().classify(
+                                    content: content,
+                                    configuration: jev.configuration,
+                                    apiKey: jev.apiKey
+                                )
+                                PastaLogger.clipboard.info("Jev comparison completed: local=\(localCategory.rawValue), jev=\(classification.category.rawValue)")
+                            } catch {
+                                PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Jev comparison failed")
+                            }
+                        }
                     }
 
                     // Insert all entries

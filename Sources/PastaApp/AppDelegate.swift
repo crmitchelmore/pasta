@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var hotKeyChangeObserver: NSObjectProtocol?
     var settingsWindow: NSWindow?
     var snippetExpansion: SnippetExpansionController?
+    var jevComparisonWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         PastaLogger.app.info("Pasta app initializing...")
