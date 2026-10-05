@@ -59,7 +59,7 @@ final class BackgroundService: ObservableObject {
         static let insertedCountMultiplier = 4
     }
 
-    private static func jevLiveConfiguration() -> (configuration: JevConfiguration, apiKey: String)? {
+    private nonisolated static func jevLiveConfiguration() -> (configuration: JevConfiguration, apiKey: String)? {
         let configuration = JevConfiguration.load()
         guard configuration.isEnabled,
               let apiKey = try? JevKeychain.read(),
