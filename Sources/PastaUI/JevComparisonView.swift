@@ -38,7 +38,7 @@ public struct JevComparisonView: View {
                 }
                 TableColumn("Jev") { row in
                     Text(row.jevCategory?.displayTitle ?? row.error ?? "Unknown")
-                        .foregroundStyle(row.error == nil ? .primary : .red)
+                        .foregroundStyle(row.error == nil ? Color.primary : Color.red)
                 }
                 TableColumn("Confidence") { row in
                     Text(row.confidence.map { "\(Int($0 * 100))%" } ?? "—")
