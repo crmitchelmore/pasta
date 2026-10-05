@@ -502,7 +502,7 @@ final class BackgroundService: ObservableObject {
                                     configuration: jev.configuration,
                                     apiKey: jev.apiKey
                                 )
-                                PastaLogger.clipboard.info("Jev comparison completed: local=\(localCategory.rawValue, privacy: .public), jev=\(classification.category.rawValue, privacy: .public)")
+                                PastaLogger.clipboard.info("Jev comparison completed: local=\(localCategory.rawValue), jev=\(classification.category.rawValue)")
                             } catch {
                                 PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Jev comparison failed")
                             }
