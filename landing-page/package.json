@@ -18,8 +18,8 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",
-    "@playwright/test": "1.62.1",
-    "@types/node": "26.4.1",
-    "fast-xml-parser": "5.11.1"
+    "@playwright/test": "1.63.0",
+    "@types/node": "26.6.3",
+    "fast-xml-parser": "5.11.2"
   }
 }

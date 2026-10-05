@@ -28,7 +28,7 @@ jobs:
       SIM_NAME: PastaCI iPhone
     steps:
     - name: Checkout code
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         fetch-depth: 0
         ref: ${{ inputs.manifest }}
@@ -44,7 +44,7 @@ jobs:
       with:
         xcode-version: '26.3'
     - name: Cache SwiftPM checkouts and build intermediates
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
       with:
         path: '.build/ios-derived/SourcePackages
 
@@ -72,7 +72,7 @@ jobs:
       run: scripts/ci-ios-e2e.sh diagnostics
     - name: Upload result bundle and diagnostics
       if: failure()
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: release-ios-preflight-diagnostics
         path: '.build/ios-e2e/PastaIOSUITests.xcresult
@@ -92,7 +92,7 @@ jobs:
     timeout-minutes: 90
     steps:
     - name: Checkout code
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         fetch-depth: 0
         ref: ${{ inputs.manifest }}
@@ -359,7 +359,7 @@ jobs:
         \ | \\`${GITHUB_SHA::7}\\` |\"\n} >> \"$GITHUB_STEP_SUMMARY\"\n"
     - name: Upload IPA and dSYMs (dry run)
       if: steps.upload.outputs.enabled != 'true' && success()
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: PastaIOS-${{ steps.version.outputs.version }}-${{ steps.build_number.outputs.build }}
         path: 'build/export/*.ipa
@@ -371,7 +371,7 @@ jobs:
         if-no-files-found: error
     - name: Upload logs (on failure)
       if: failure()
-      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: release-ios-logs
         path: 'build/*.log
