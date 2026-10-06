@@ -57,6 +57,7 @@ module AppleRelease
       @train = manifest.fetch('train')
       @pipeline = JSON.parse(File.read('Config/ReleasePipeline.json'))
       @app = @pipeline.fetch('apple').fetch(@train).fetch(surface)
+      @stable_app = @pipeline.fetch('apple').fetch('stable').fetch(surface)
       raise "Alpha App Store Connect record not configured for #{surface}" unless @app
       config = JSON.parse(File.read('Sources/PastaCore/Resources/ReleaseTrains.json')).fetch(@train)
       @bundle = config.fetch(surface == 'ios' ? 'iosBundleIdentifier' : 'storeMacBundleIdentifier')
@@ -114,6 +115,7 @@ module AppleRelease
       raise 'Only Alpha may be distributed through TestFlight' unless @train == 'alpha'
       id = found.fetch('id')
       ensure_beta_app_description
+      ensure_beta_review_detail
       locales = @client.list("/v1/builds/#{id}/betaBuildLocalizations")
       locale = locales.find { |l| l.dig('attributes', 'locale') == BETA_BUILD_LOCALE }
       attrs = {whatsNew: @item.fetch('storeNotes')}
@@ -183,6 +185,18 @@ module AppleRelease
           data: {type: 'betaAppLocalizations', attributes: attributes.merge(locale: 'en-US'),
             relationships: {app: AppleRelease.relationship('apps', @app)}})
       end
+    end
+
+    def ensure_beta_review_detail
+      source = @client.get("/v1/apps/#{@stable_app}/betaAppReviewDetail").fetch('data')
+      target = @client.get("/v1/apps/#{@app}/betaAppReviewDetail").fetch('data')
+      allowed = %w[contactFirstName contactLastName contactPhone contactEmail demoAccountName demoAccountPassword demoAccountRequired notes]
+      attributes = source.fetch('attributes').select { |key, value| allowed.include?(key) && !value.nil? }
+      required = %w[contactFirstName contactLastName contactPhone contactEmail]
+      missing = required.reject { |key| attributes[key].is_a?(String) && !attributes[key].empty? }
+      raise "Stable Beta App Review Information is incomplete: #{missing.join(', ')}" unless missing.empty?
+      @client.patch("/v1/betaAppReviewDetails/#{target.fetch('id')}",
+        data: {type: 'betaAppReviewDetails', id: target.fetch('id'), attributes: attributes})
     end
 
     def observe_publication
