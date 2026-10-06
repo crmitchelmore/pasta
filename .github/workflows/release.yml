@@ -41,27 +41,28 @@ jobs:
     - name: Build release binary (x86_64)
       run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release --arch x86_64
     - name: Create universal binary
-      run: "mkdir -p .build/universal\nlipo -create \\\n  .build/arm64-apple-macosx/release/PastaApp \\\n  .build/x86_64-apple-macosx/release/PastaApp\
-        \ \\\n  -output .build/universal/PastaApp\n\necho \"==> Retaining symbols before stripping\"\ndsymutil .build/universal/PastaApp\
-        \ -o .build/universal/PastaApp.dSYM\npython3 scripts/ci-verify-symbols.py .build/universal/PastaApp .build/universal/PastaApp.dSYM\n\
-        ditto -c -k --keepParent .build/universal/PastaApp.dSYM .build/universal/PastaApp.dSYM.zip\n\necho \"==> Stripping\
-        \ debug symbols\"\nstrip -x .build/universal/PastaApp\n\necho \"==> Created universal binary\"\nfile .build/universal/PastaApp\n\
-        ls -lh .build/universal/PastaApp\n"
+      run: |
+        set -euo pipefail
+        mkdir -p .build/universal
+        lipo -create \
+          .build/arm64-apple-macosx/release/PastaApp \
+          .build/x86_64-apple-macosx/release/PastaApp \
+          -output .build/universal/PastaApp
+        bash scripts/ci-prepare-macos-executable.sh .build/universal/PastaApp
+        file .build/universal/PastaApp
     - name: Create app bundle structure
       run: "BUILD_DIR=\".build/universal\"\n# App bundle is named \"Pasta.app\" but executable inside is still \"PastaApp\"\
         \nAPP_DIR=\"${BUILD_DIR}/${DMG_NAME}.app\"\n\necho \"==> Creating app bundle at $APP_DIR\"\nrm -rf \"$APP_DIR\"\n\
         mkdir -p \"$APP_DIR/Contents/MacOS\"\nmkdir -p \"$APP_DIR/Contents/Resources\"\nmkdir -p \"$APP_DIR/Contents/Frameworks\"\
         \n\n# Copy the universal binary (keep internal name as PastaApp)\ncp \".build/universal/${APP_NAME}\" \"$APP_DIR/Contents/MacOS/${APP_NAME}\"\
-        \n\n# Copy resources\nif [ -d \"Sources/PastaApp/Resources\" ]; then\n  cp -R Sources/PastaApp/Resources/* \"$APP_DIR/Contents/Resources/\"\
-        \ || true\nfi\n\n# Copy app icon to Resources\ncp \"$ICON_PATH\" \"$APP_DIR/Contents/Resources/AppIcon.icns\"\n\n\
+        \n\n# Stage runtime resources once, with matching train artwork\npython3 scripts/ci-stage-macos-resources.py .build/arm64-apple-macosx/release \"$APP_DIR\" \"$ICON_PATH\"\n\n\
         # Copy Sparkle framework\nSPARKLE_PATH=$(find .build -name \"Sparkle.framework\" -type d | head -1)\nif [ -n \"$SPARKLE_PATH\"\
         \ ]; then\n  echo \"==> Copying Sparkle framework from $SPARKLE_PATH\"\n  cp -R \"$SPARKLE_PATH\" \"$APP_DIR/Contents/Frameworks/\"\
         \nelse\n  echo \"ERROR: Sparkle.framework not found!\"\n  exit 1\nfi\n\n# Fix rpath to find frameworks in Contents/Frameworks\n\
         echo \"==> Fixing rpath for Sparkle framework\"\ninstall_name_tool -add_rpath \"@executable_path/../Frameworks\" \"\
         $APP_DIR/Contents/MacOS/${APP_NAME}\"\n\n# Verify rpath\necho \"==> Verifying rpath:\"\notool -l \"$APP_DIR/Contents/MacOS/${APP_NAME}\"\
         \ | grep -A2 LC_RPATH\n\n# Make executable\nchmod +x \"$APP_DIR/Contents/MacOS/${APP_NAME}\"\n\necho \"APP_DIR=$APP_DIR\"\
-        \ >> \"$GITHUB_ENV\"\n\nfind .build/arm64-apple-macosx/release -maxdepth 1 -name \"*.bundle\" -exec cp -R {} \"$APP_DIR/Contents/Resources/\"\
-        \ \\;\n"
+        \ >> \"$GITHUB_ENV\"\n"
     - name: Generate Info.plist with version
       env:
         SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
@@ -186,7 +187,7 @@ jobs:
     - name: Create fancy DMG
       id: dmg
       run: "DMG_FILE=\"${DMG_NAME// /-}-${{ steps.version.outputs.version }}.dmg\"\n\necho \"==> Creating DMG with custom background\
-        \ and layout\"\ncreate-dmg \\\n  --volname \"${DMG_NAME}\" \\\n  --volicon \"$ICON_PATH\" \\\n  --background \"Resources/DMG/background@2x.png\"\
+        \ and layout\"\nbash scripts/ci-create-macos-dmg.sh \\\n  --volname \"${DMG_NAME}\" \\\n  --volicon \"$ICON_PATH\" \\\n  --background \"Resources/DMG/background@2x.png\"\
         \ \\\n  --window-pos 200 120 \\\n  --window-size 660 400 \\\n  --icon-size 100 \\\n  --icon \"${DMG_NAME}.app\" 180\
         \ 200 \\\n  --app-drop-link 480 200 \\\n  --hide-extension \"${DMG_NAME}.app\" \\\n  --no-internet-enable \\\n  \"\
         ${DMG_FILE}\" \\\n  \"${APP_DIR}\"\n\necho \"dmg_file=$DMG_FILE\" >> \"$GITHUB_OUTPUT\"\necho \"==> DMG created: $DMG_FILE\"\

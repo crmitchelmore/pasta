@@ -34,6 +34,7 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "Sentry", package: "sentry-cocoa")
             ],
+            exclude: ["Resources/Assets.xcassets"],
             resources: [
                 .process("Resources")
             ]
