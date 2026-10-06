@@ -85,6 +85,9 @@ class ReleaseAppleTest < Minitest::Test
     refute_nil review_index
     assert_operator index, :<, review_index
     assert_equal AppleRelease::BETA_APP_DESCRIPTION, client.post_bodies[index].dig(:data, :attributes, :description)
+    build_locale_index = client.post_bodies.index { |body| body.dig(:data, :type) == 'betaBuildLocalizations' }
+    assert_equal 'Frozen notes', client.post_bodies[build_locale_index].dig(:data, :attributes, :description)
+    assert_equal 'Frozen notes', client.post_bodies[build_locale_index].dig(:data, :attributes, :whatsNew)
   end
   def test_alpha_updates_existing_beta_app_description
     client=FakeClient.new
