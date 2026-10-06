@@ -3,11 +3,11 @@ require_relative '../release-apple'
 
 class ReleaseAppleTest < Minitest::Test
   class FakeClient
-    attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id
+    attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id, :app_localization
     attr_reader :posts, :patches, :post_bodies, :patch_bodies
     def initialize
       @bundle_id='com.pasta.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false
-      @posts=[]; @patches=[]; @post_bodies=[]; @patch_bodies=[]
+      @app_localization=nil; @posts=[]; @patches=[]; @post_bodies=[]; @patch_bodies=[]
     end
     def build
       {'id'=>'apple-build','attributes'=>{'processingState'=>processing,'expired'=>false,'expirationDate'=>'2026-12-01T00:00:00Z'}}
@@ -21,7 +21,7 @@ class ReleaseAppleTest < Minitest::Test
         return review_busy ? [build] : [] if path.include?('betaAppReviewSubmission')
         return [build]
       end
-      return [] if path.include?('/betaAppLocalizations')
+      return app_localization ? [app_localization] : [] if path.include?('/betaAppLocalizations')
       return [] if path.end_with?('/betaBuildLocalizations')
       return [{'id'=>'public-alpha','attributes'=>{'name'=>'Public Alpha','isInternalGroup'=>false,'publicLink'=>'https://testflight.apple.com/join/example'}}] if path.include?('/apps/')
       assigned ? [build] : []
@@ -85,6 +85,15 @@ class ReleaseAppleTest < Minitest::Test
     refute_nil review_index
     assert_operator index, :<, review_index
     assert_equal AppleRelease::BETA_APP_DESCRIPTION, client.post_bodies[index].dig(:data, :attributes, :description)
+  end
+  def test_alpha_updates_existing_beta_app_description
+    client=FakeClient.new
+    client.app_localization={'id'=>'existing-localization','attributes'=>{'locale'=>'en-GB','description'=>'Old description'}}
+    delivery(client).distribute(wait_seconds:0)
+    assert_includes client.patches, '/v1/betaAppLocalizations/existing-localization'
+    index=client.patches.index('/v1/betaAppLocalizations/existing-localization')
+    assert_equal AppleRelease::BETA_APP_DESCRIPTION, client.patch_bodies[index].dig(:data, :attributes, :description)
+    refute_includes client.posts, '/v1/betaAppLocalizations'
   end
   def test_rejected_beta_is_actionable_not_indefinitely_pending
     client=FakeClient.new;client.beta_state='BETA_REJECTED';d=delivery(client)
