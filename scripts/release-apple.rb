@@ -112,10 +112,7 @@ module AppleRelease
       ensure_beta_app_description
       locales = @client.list("/v1/builds/#{id}/betaBuildLocalizations")
       locale = locales.find { |l| l.dig('attributes', 'locale') == 'en-GB' }
-      attrs = {
-        description: @item.fetch('storeNotes'),
-        whatsNew: @item.fetch('storeNotes')
-      }
+      attrs = {whatsNew: @item.fetch('storeNotes')}
       if locale
         @client.patch("/v1/betaBuildLocalizations/#{locale['id']}", data: {type: 'betaBuildLocalizations', id: locale['id'], attributes: attrs})
       else
