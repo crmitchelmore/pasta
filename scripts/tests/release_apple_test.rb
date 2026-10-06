@@ -88,6 +88,10 @@ class ReleaseAppleTest < Minitest::Test
     assert_equal AppleRelease::BETA_FEEDBACK_EMAIL, client.post_bodies[index].dig(:data, :attributes, :feedbackEmail)
     assert_equal AppleRelease::BETA_MARKETING_URL, client.post_bodies[index].dig(:data, :attributes, :marketingUrl)
     assert_equal AppleRelease::BETA_PRIVACY_POLICY_URL, client.post_bodies[index].dig(:data, :attributes, :privacyPolicyUrl)
+    build_localization = client.post_bodies.find.with_index do |body, body_index|
+      client.posts[body_index] == '/v1/betaBuildLocalizations'
+    end
+    assert_equal AppleRelease::BETA_BUILD_LOCALE, build_localization.dig(:data, :attributes, :locale)
   end
   def test_alpha_updates_existing_beta_app_description
     client=FakeClient.new

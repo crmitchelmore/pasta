@@ -9,6 +9,7 @@ require 'digest'
 
 module AppleRelease
   BETA_APP_DESCRIPTION = 'Pasta is a privacy-first clipboard history manager. Test clipboard history, search, sync, and experimental features in this public Alpha.'
+  BETA_BUILD_LOCALE = 'en-US'
   BETA_FEEDBACK_EMAIL = 'support@pasta-app.com'
   BETA_MARKETING_URL = 'https://pasta-app.com'
   BETA_PRIVACY_POLICY_URL = 'https://github.com/crmitchelmore/pasta/blob/main/SECURITY.md'
@@ -114,12 +115,12 @@ module AppleRelease
       id = found.fetch('id')
       ensure_beta_app_description
       locales = @client.list("/v1/builds/#{id}/betaBuildLocalizations")
-      locale = locales.find { |l| l.dig('attributes', 'locale') == 'en-GB' }
+      locale = locales.find { |l| l.dig('attributes', 'locale') == BETA_BUILD_LOCALE }
       attrs = {whatsNew: @item.fetch('storeNotes')}
       if locale
         @client.patch("/v1/betaBuildLocalizations/#{locale['id']}", data: {type: 'betaBuildLocalizations', id: locale['id'], attributes: attrs})
       else
-        @client.post('/v1/betaBuildLocalizations', data: {type: 'betaBuildLocalizations', attributes: attrs.merge(locale: 'en-GB'), relationships: {build: AppleRelease.relationship('builds', id)}})
+        @client.post('/v1/betaBuildLocalizations', data: {type: 'betaBuildLocalizations', attributes: attrs.merge(locale: BETA_BUILD_LOCALE), relationships: {build: AppleRelease.relationship('builds', id)}})
       end
       groups = @client.list("/v1/apps/#{@app}/betaGroups?limit=200")
       targets = groups.select { |g| g.dig('attributes', 'name') == 'Public Alpha' && !g.dig('attributes', 'isInternalGroup') }
