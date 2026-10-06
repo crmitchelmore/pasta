@@ -85,6 +85,9 @@ class ReleaseAppleTest < Minitest::Test
     refute_nil review_index
     assert_operator index, :<, review_index
     assert_equal AppleRelease::BETA_APP_DESCRIPTION, client.post_bodies[index].dig(:data, :attributes, :description)
+    assert_equal AppleRelease::BETA_FEEDBACK_EMAIL, client.post_bodies[index].dig(:data, :attributes, :feedbackEmail)
+    assert_equal AppleRelease::BETA_MARKETING_URL, client.post_bodies[index].dig(:data, :attributes, :marketingUrl)
+    assert_equal AppleRelease::BETA_PRIVACY_POLICY_URL, client.post_bodies[index].dig(:data, :attributes, :privacyPolicyUrl)
   end
   def test_alpha_updates_existing_beta_app_description
     client=FakeClient.new
@@ -93,6 +96,9 @@ class ReleaseAppleTest < Minitest::Test
     assert_includes client.patches, '/v1/betaAppLocalizations/existing-localization'
     index=client.patches.index('/v1/betaAppLocalizations/existing-localization')
     assert_equal AppleRelease::BETA_APP_DESCRIPTION, client.patch_bodies[index].dig(:data, :attributes, :description)
+    assert_equal AppleRelease::BETA_FEEDBACK_EMAIL, client.patch_bodies[index].dig(:data, :attributes, :feedbackEmail)
+    assert_equal AppleRelease::BETA_MARKETING_URL, client.patch_bodies[index].dig(:data, :attributes, :marketingUrl)
+    assert_equal AppleRelease::BETA_PRIVACY_POLICY_URL, client.patch_bodies[index].dig(:data, :attributes, :privacyPolicyUrl)
     refute_includes client.posts, '/v1/betaAppLocalizations'
   end
   def test_alpha_creates_default_english_beta_app_localization
