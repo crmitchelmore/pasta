@@ -9,6 +9,9 @@ require 'digest'
 
 module AppleRelease
   BETA_APP_DESCRIPTION = 'Pasta is a privacy-first clipboard history manager. Test clipboard history, search, sync, and experimental features in this public Alpha.'
+  BETA_FEEDBACK_EMAIL = 'support@pasta-app.com'
+  BETA_MARKETING_URL = 'https://pasta-app.com'
+  BETA_PRIVACY_POLICY_URL = 'https://github.com/crmitchelmore/pasta/blob/main/SECURITY.md'
 
   class Client < AppleAPI::Client
     def initialize
@@ -165,7 +168,12 @@ module AppleRelease
     def ensure_beta_app_description
       localizations = @client.list("/v1/apps/#{@app}/betaAppLocalizations?limit=200")
       localization = localizations.find { |entry| entry.dig('attributes', 'locale') == 'en-US' }
-      attributes = {description: BETA_APP_DESCRIPTION}
+      attributes = {
+        description: BETA_APP_DESCRIPTION,
+        feedbackEmail: BETA_FEEDBACK_EMAIL,
+        marketingUrl: BETA_MARKETING_URL,
+        privacyPolicyUrl: BETA_PRIVACY_POLICY_URL
+      }
       if localization
         @client.patch("/v1/betaAppLocalizations/#{localization.fetch('id')}",
           data: {type: 'betaAppLocalizations', id: localization.fetch('id'), attributes: attributes})
