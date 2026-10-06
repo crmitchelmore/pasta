@@ -54,6 +54,28 @@ and `ALPHA_MACOS_PROVISIONING_PROFILE` with existing distribution certificates.
 Archive validation requires the exact train bundle, source, version/build, notes
 hash, Sparkle feed and isolated Production CloudKit container.
 
+### Direct macOS package size
+
+Alpha and Stable retain universal ARM/Intel executables and identical features.
+`ci-prepare-macos-executable.sh` captures and verifies matching dSYMs before
+stripping the main executable's nonessential symbol table, retaining imports
+and dynamically referenced exports. Matching UUIDs are checked again afterward;
+the separate dSYM archive remains available for crash symbolication.
+
+`ci-stage-macos-resources.py` stages SwiftPM resource bundles once, including
+release notes, train configuration and dependency privacy manifests. Source icon
+catalogs are excluded from the executable target; they remain in the repository
+for full-resolution ICNS generation. Installed packages keep the selected train's
+full-resolution ICNS and matching PNG fallback, not both trains' source artwork
+and duplicate loose resource copies. CI launch-tests the same resource staging
+and stripping path as releases.
+
+`ci-create-macos-dmg.sh` uses lossless LZMA (`ULMO`) compression, supported since
+macOS 10.15, below Pasta's macOS 14 minimum. Installer artwork, signing,
+notarisation, Sparkle signatures and pre-/post-publication verification remain
+unchanged. Optimisations happen before signing; never modify a signed bundle or
+recompress an already Sparkle-signed update.
+
 Pasta Alpha iOS: `com.pasta.ios.alpha`; direct Mac: `com.pasta.clipboard.alpha`.
 Both use `iCloud.com.pasta.ios.alpha`. On 9 September 2026 its Production schema
 was deployed and matched the Stable Production schema byte-for-byte (SHA-256

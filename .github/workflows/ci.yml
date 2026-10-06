@@ -213,6 +213,9 @@ jobs:
 
       - name: Test release verification scripts (Sparkle EdDSA)
         run: scripts/tests/ci-verify-eddsa.test.sh
+
+      - name: Test macOS packaging and symbol preservation
+        run: python3 -m unittest discover -s scripts/tests -p 'test_macos_packaging.py'
       
       - name: Build release
         run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release
@@ -229,7 +232,9 @@ jobs:
           mkdir -p "$APP_DIR/Contents/Resources"
           
           # Copy binary
+          bash scripts/ci-prepare-macos-executable.sh .build/release/PastaApp
           cp .build/release/PastaApp "$APP_DIR/Contents/MacOS/PastaApp"
+          python3 scripts/ci-stage-macos-resources.py .build/release "$APP_DIR" Resources/DMG/AppIcon.icns
           echo "==> Copied binary"
           
           # Copy Sparkle framework (same as release.yml)
