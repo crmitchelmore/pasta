@@ -3,16 +3,22 @@ require_relative '../release-apple'
 
 class ReleaseAppleTest < Minitest::Test
   class FakeClient
-    attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id, :app_localization
-    attr_reader :posts, :patches, :post_bodies, :patch_bodies
+    attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id, :app_localization, :review_source
+    attr_reader :posts, :patches, :post_bodies, :patch_bodies, :events
     def initialize
       @bundle_id='com.pasta.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false
-      @app_localization=nil; @posts=[]; @patches=[]; @post_bodies=[]; @patch_bodies=[]
+      @app_localization=nil
+      @review_source={'id'=>'stable-review','attributes'=>{'contactFirstName'=>'Test','contactLastName'=>'Reviewer','contactPhone'=>'+441234567890','contactEmail'=>'review@example.com','demoAccountRequired'=>false,'notes'=>'No sign-in required.'}}
+      @posts=[]; @patches=[]; @post_bodies=[]; @patch_bodies=[]; @events=[]
     end
     def build
       {'id'=>'apple-build','attributes'=>{'processingState'=>processing,'expired'=>false,'expirationDate'=>'2026-12-01T00:00:00Z'}}
     end
     def get(path)
+      if path.end_with?('/betaAppReviewDetail')
+        return {'data'=>review_source} if path.include?('/6759037470/')
+        return {'data'=>{'id'=>'alpha-review','attributes'=>{}}}
+      end
       return {'data'=>{'attributes'=>{'bundleId'=>bundle_id}}} if path.start_with?('/v1/apps/')
       {'data'=>{'attributes'=>{'externalBuildState'=>assigned ? 'IN_BETA_TESTING' : beta_state}}}
     end
@@ -27,11 +33,11 @@ class ReleaseAppleTest < Minitest::Test
       assigned ? [build] : []
     end
     def post(path, body)
-      @posts << path; @post_bodies << body
+      @posts << path; @post_bodies << body; @events << [:post, path]
       @assigned=true if path.end_with?('/relationships/builds')
       {'data'=>{}}
     end
-    def patch(path, body); @patches << path; @patch_bodies << body; {'data'=>{}}; end
+    def patch(path, body); @patches << path; @patch_bodies << body; @events << [:patch, path]; {'data'=>{}}; end
   end
   class Delivery < AppleRelease::Delivery
     attr_reader :receipts
@@ -92,6 +98,32 @@ class ReleaseAppleTest < Minitest::Test
       client.posts[body_index] == '/v1/betaBuildLocalizations'
     end
     assert_equal AppleRelease::BETA_BUILD_LOCALE, build_localization.dig(:data, :attributes, :locale)
+  end
+  def test_alpha_copies_stable_beta_review_information_before_submission
+    client=FakeClient.new;delivery(client).distribute(wait_seconds:0)
+    patch_index=client.events.index([:patch, '/v1/betaAppReviewDetails/alpha-review'])
+    review_index=client.events.index([:post, '/v1/betaAppReviewSubmissions'])
+    refute_nil patch_index
+    refute_nil review_index
+    assert_operator patch_index, :<, review_index
+    body_index=client.patches.index('/v1/betaAppReviewDetails/alpha-review')
+    assert_equal client.review_source['attributes'], client.patch_bodies[body_index].dig(:data, :attributes)
+  end
+  def test_alpha_refuses_review_metadata_that_requires_demo_credentials
+    client=FakeClient.new
+    client.review_source['attributes']['demoAccountRequired']=true
+    client.review_source['attributes']['demoAccountName']='masked-user'
+    client.review_source['attributes']['demoAccountPassword']='********'
+    error=assert_raises(RuntimeError){delivery(client).distribute(wait_seconds:0)}
+    assert_match 'unexpectedly requires demo credentials', error.message
+    refute_includes client.posts, '/v1/betaAppReviewSubmissions'
+  end
+  def test_alpha_refuses_incomplete_stable_beta_review_information
+    client=FakeClient.new
+    client.review_source={'id'=>'stable-review','attributes'=>{'contactEmail'=>'review@example.com','demoAccountRequired'=>false}}
+    error=assert_raises(RuntimeError){delivery(client).distribute(wait_seconds:0)}
+    assert_match 'contactFirstName, contactLastName, contactPhone', error.message
+    refute_includes client.posts, '/v1/betaAppReviewSubmissions'
   end
   def test_alpha_updates_existing_beta_app_description
     client=FakeClient.new
