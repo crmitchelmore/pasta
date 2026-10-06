@@ -109,9 +109,18 @@ class ReleaseAppleTest < Minitest::Test
     body_index=client.patches.index('/v1/betaAppReviewDetails/alpha-review')
     assert_equal client.review_source['attributes'], client.patch_bodies[body_index].dig(:data, :attributes)
   end
+  def test_alpha_refuses_review_metadata_that_requires_demo_credentials
+    client=FakeClient.new
+    client.review_source['attributes']['demoAccountRequired']=true
+    client.review_source['attributes']['demoAccountName']='masked-user'
+    client.review_source['attributes']['demoAccountPassword']='********'
+    error=assert_raises(RuntimeError){delivery(client).distribute(wait_seconds:0)}
+    assert_match 'unexpectedly requires demo credentials', error.message
+    refute_includes client.posts, '/v1/betaAppReviewSubmissions'
+  end
   def test_alpha_refuses_incomplete_stable_beta_review_information
     client=FakeClient.new
-    client.review_source={'id'=>'stable-review','attributes'=>{'contactEmail'=>'review@example.com'}}
+    client.review_source={'id'=>'stable-review','attributes'=>{'contactEmail'=>'review@example.com','demoAccountRequired'=>false}}
     error=assert_raises(RuntimeError){delivery(client).distribute(wait_seconds:0)}
     assert_match 'contactFirstName, contactLastName, contactPhone', error.message
     refute_includes client.posts, '/v1/betaAppReviewSubmissions'

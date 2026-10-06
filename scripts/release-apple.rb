@@ -190,8 +190,11 @@ module AppleRelease
     def ensure_beta_review_detail
       source = @client.get("/v1/apps/#{@stable_app}/betaAppReviewDetail").fetch('data')
       target = @client.get("/v1/apps/#{@app}/betaAppReviewDetail").fetch('data')
-      allowed = %w[contactFirstName contactLastName contactPhone contactEmail demoAccountName demoAccountPassword demoAccountRequired notes]
-      attributes = source.fetch('attributes').select { |key, value| allowed.include?(key) && !value.nil? }
+      source_attributes = source.fetch('attributes')
+      raise 'Stable Beta App Review Information unexpectedly requires demo credentials' unless source_attributes['demoAccountRequired'] == false
+      allowed = %w[contactFirstName contactLastName contactPhone contactEmail notes]
+      attributes = source_attributes.select { |key, value| allowed.include?(key) && !value.nil? }
+      attributes['demoAccountRequired'] = false
       required = %w[contactFirstName contactLastName contactPhone contactEmail]
       missing = required.reject { |key| attributes[key].is_a?(String) && !attributes[key].empty? }
       raise "Stable Beta App Review Information is incomplete: #{missing.join(', ')}" unless missing.empty?
