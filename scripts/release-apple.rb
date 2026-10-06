@@ -8,6 +8,8 @@ require 'tmpdir'
 require 'digest'
 
 module AppleRelease
+  BETA_APP_DESCRIPTION = 'Pasta is a privacy-first clipboard history manager. Test clipboard history, search, sync, and experimental features in this public Alpha.'
+
   class Client < AppleAPI::Client
     def initialize
       @key_id = ENV.fetch('APP_STORE_CONNECT_KEY_ID', 'B3BM4F88FJ')
@@ -107,6 +109,7 @@ module AppleRelease
     def assign(found)
       raise 'Only Alpha may be distributed through TestFlight' unless @train == 'alpha'
       id = found.fetch('id')
+      ensure_beta_app_description
       locales = @client.list("/v1/builds/#{id}/betaBuildLocalizations")
       locale = locales.find { |l| l.dig('attributes', 'locale') == 'en-GB' }
       attrs = {whatsNew: @item.fetch('storeNotes')}
@@ -157,6 +160,20 @@ module AppleRelease
       ready = %w[IN_BETA_TESTING READY_FOR_BETA_TESTING].include?(state)
       receipt(ready ? 'verified' : 'beta_processing', found, betaState: state,
         groups: targets.map { |g| g['id'] }, publicLinks: targets.map { |g| g.dig('attributes', 'publicLink') }.compact, expirationDate: found.dig('attributes', 'expirationDate'))
+    end
+
+    def ensure_beta_app_description
+      localizations = @client.list("/v1/apps/#{@app}/betaAppLocalizations?limit=200")
+      localization = localizations.find { |entry| entry.dig('attributes', 'locale') == 'en-GB' }
+      attributes = {description: BETA_APP_DESCRIPTION}
+      if localization
+        @client.patch("/v1/betaAppLocalizations/#{localization.fetch('id')}",
+          data: {type: 'betaAppLocalizations', id: localization.fetch('id'), attributes: attributes})
+      else
+        @client.post('/v1/betaAppLocalizations',
+          data: {type: 'betaAppLocalizations', attributes: attributes.merge(locale: 'en-GB'),
+            relationships: {app: AppleRelease.relationship('apps', @app)}})
+      end
     end
 
     def observe_publication

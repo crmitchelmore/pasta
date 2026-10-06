@@ -192,6 +192,7 @@ test('workers stage only after native checks and immutable archive verification'
     assert.doesNotMatch(worker,/continue-on-error/);
   }
   assert.ok(mac.indexOf('Launch readiness smoke test') < mac.indexOf('Stage immutable candidate assets'));
+  assert.match(mac, /DMG_FILE=\\"\\\$\{DMG_NAME\/\/ \/-\}-/);
   assert.ok(mac.indexOf('Verify Alpha download') < mac.indexOf('Publish Alpha prerelease only'));
   assert.match(ios,/needs: preflight/);
   assert.ok(ios.indexOf('Require every surface gate before TestFlight upload') < ios.indexOf('Export IPA and upload'));

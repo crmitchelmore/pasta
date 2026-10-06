@@ -185,7 +185,7 @@ jobs:
         '
     - name: Create fancy DMG
       id: dmg
-      run: "DMG_FILE=\"${DMG_NAME}-${{ steps.version.outputs.version }}.dmg\"\n\necho \"==> Creating DMG with custom background\
+      run: "DMG_FILE=\"${DMG_NAME// /-}-${{ steps.version.outputs.version }}.dmg\"\n\necho \"==> Creating DMG with custom background\
         \ and layout\"\ncreate-dmg \\\n  --volname \"${DMG_NAME}\" \\\n  --volicon \"$ICON_PATH\" \\\n  --background \"Resources/DMG/background@2x.png\"\
         \ \\\n  --window-pos 200 120 \\\n  --window-size 660 400 \\\n  --icon-size 100 \\\n  --icon \"${DMG_NAME}.app\" 180\
         \ 200 \\\n  --app-drop-link 480 200 \\\n  --hide-extension \"${DMG_NAME}.app\" \\\n  --no-internet-enable \\\n  \"\
