@@ -164,14 +164,14 @@ module AppleRelease
 
     def ensure_beta_app_description
       localizations = @client.list("/v1/apps/#{@app}/betaAppLocalizations?limit=200")
-      localization = localizations.find { |entry| entry.dig('attributes', 'locale') == 'en-GB' }
+      localization = localizations.find { |entry| entry.dig('attributes', 'locale') == 'en-US' }
       attributes = {description: BETA_APP_DESCRIPTION}
       if localization
         @client.patch("/v1/betaAppLocalizations/#{localization.fetch('id')}",
           data: {type: 'betaAppLocalizations', id: localization.fetch('id'), attributes: attributes})
       else
         @client.post('/v1/betaAppLocalizations',
-          data: {type: 'betaAppLocalizations', attributes: attributes.merge(locale: 'en-GB'),
+          data: {type: 'betaAppLocalizations', attributes: attributes.merge(locale: 'en-US'),
             relationships: {app: AppleRelease.relationship('apps', @app)}})
       end
     end
