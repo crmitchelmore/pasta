@@ -88,12 +88,18 @@ class ReleaseAppleTest < Minitest::Test
   end
   def test_alpha_updates_existing_beta_app_description
     client=FakeClient.new
-    client.app_localization={'id'=>'existing-localization','attributes'=>{'locale'=>'en-GB','description'=>'Old description'}}
+    client.app_localization={'id'=>'existing-localization','attributes'=>{'locale'=>'en-US','description'=>'Old description'}}
     delivery(client).distribute(wait_seconds:0)
     assert_includes client.patches, '/v1/betaAppLocalizations/existing-localization'
     index=client.patches.index('/v1/betaAppLocalizations/existing-localization')
     assert_equal AppleRelease::BETA_APP_DESCRIPTION, client.patch_bodies[index].dig(:data, :attributes, :description)
     refute_includes client.posts, '/v1/betaAppLocalizations'
+  end
+  def test_alpha_creates_default_english_beta_app_localization
+    client=FakeClient.new
+    delivery(client).distribute(wait_seconds:0)
+    index=client.posts.index('/v1/betaAppLocalizations')
+    assert_equal 'en-US', client.post_bodies[index].dig(:data, :attributes, :locale)
   end
   def test_rejected_beta_is_actionable_not_indefinitely_pending
     client=FakeClient.new;client.beta_state='BETA_REJECTED';d=delivery(client)
