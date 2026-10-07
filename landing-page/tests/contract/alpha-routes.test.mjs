@@ -11,7 +11,7 @@ test('Alpha routing never intercepts Stable downloads or home page', async()=>{
 test('Alpha pointer selects immutable prerelease assets and rejects malformed pointers',async(t)=>{
  t.mock.method(globalThis,'fetch',async()=>Response.json({tag:'alpha-build-42',version:'1.9.0'}));
  const result=await worker.fetch(new Request('https://pasta-app.com/alpha/download'),{});
- assert.equal(result.status,302);assert.equal(result.headers.get('Location'),'https://github.com/crmitchelmore/pasta/releases/download/alpha-build-42/Pasta%20Alpha-1.9.0.dmg');
+ assert.equal(result.status,302);assert.equal(result.headers.get('Location'),'https://github.com/crmitchelmore/pasta/releases/download/alpha-build-42/Pasta-Alpha-1.9.0.dmg');
  globalThis.fetch=async()=>Response.json({tag:'v1.9.0',version:'1.9.0'});
  assert.equal((await worker.fetch(new Request('https://pasta-app.com/alpha/appcast.xml'),{})).status,503);
 });
