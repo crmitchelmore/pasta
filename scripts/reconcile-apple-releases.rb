@@ -6,10 +6,16 @@ client = AppleRelease::Client.new
 output, status = Open3.capture2('git','for-each-ref','--format=%(refname:short)','refs/tags/alpha-build-*','refs/tags/stable-candidate-*')
 abort 'Cannot read release ledger' unless status.success?
 failures=[]
-output.lines.map(&:strip).each do |tag|
+manifests=output.lines.map(&:strip).filter_map do |tag|
   data, result = Open3.capture2('git','for-each-ref','--format=%(contents)',"refs/tags/#{tag}")
-  next unless result.success?
-  manifest=JSON.parse(data)
+  JSON.parse(data) if result.success?
+end
+# Only the newest Alpha can become the tester build. Submitting superseded
+# Alphas would spend Apple's limited beta review slots on stale binaries.
+newest_alpha=manifests.select { |m| m['train'] == 'alpha' }.max_by { |m| m['ordinal'].to_i }
+manifests.each do |manifest|
+  tag=manifest['tag']
+  next if manifest['train'] == 'alpha' && !manifest.equal?(newest_alpha)
   # Expired Alpha builds remain in the ledger but cannot be made installable.
   # Rebuild explicitly if the most recent Alpha approaches TestFlight's 90 days.
   if manifest['train'] == 'alpha' && Time.parse(manifest['createdAt']) < Time.now - 90*86_400

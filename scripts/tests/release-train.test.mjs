@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {digest, validateManifest, nextAllocation, effectiveCommits, notesFor, canAdvance} from '../release-train-lib.mjs';
+import {digest, validateManifest, nextAllocation, effectiveCommits, notesFor, canAdvance, newestReconcileSource} from '../release-train-lib.mjs';
 const source='a'.repeat(40), prior='b'.repeat(40);
 test('manifest rejects changed frozen notes and moving source refs',()=>{
  const entry={version:'3.2.0',build:'1001',baseline:prior,notes:'Frozen',notesHash:digest('Frozen'),storeNotes:'Short',storeNotesHash:digest('Short')};
@@ -36,4 +36,12 @@ test('cumulative platform notes respect legacy bracket tags',()=>{
  const notes=notesFor([{sha:source,subject:'fix: [ios] keyboard handoff',body:''},
   {sha:prior,subject:'fix: [mac] desktop capture',body:''}],'mac');
  assert.doesNotMatch(notes,/keyboard handoff/);assert.match(notes,/desktop capture/);
+});
+
+test('reconciliation retries only the newest eligible main source',()=>{
+ const runs=[{head_sha:'old',run_number:3},{head_sha:'newest',run_number:9},{head_sha:'pre-adoption',run_number:1},{head_sha:'mid',run_number:5}];
+ assert.equal(newestReconcileSource(runs),'newest');
+ assert.equal(newestReconcileSource(runs,sha=>sha!=='newest'),'mid');
+ assert.equal(newestReconcileSource(runs,()=>false),null);
+ assert.equal(newestReconcileSource([]),null);
 });

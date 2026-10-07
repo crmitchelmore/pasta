@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseCommits } from './release-notes-lib.mjs';
-import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, assertStableVersionAdvance } from './release-train-lib.mjs';
+import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, newestReconcileSource, assertStableVersionAdvance } from './release-train-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/pasta';
 const run = runReleaseCommand;
@@ -229,25 +229,21 @@ if(command === 'allocate' || command === 'prepare') {
     const pointer=pointerAsset ? JSON.parse(gh('api',`repos/${repo}/releases/assets/${pointerAsset.id}`,'-H','Accept: application/octet-stream')) : null;
     const allocated=new Map(existing.filter(r=>r.tag_name.startsWith('alpha-build-')).sort((a,b)=>Number(a.tag_name.split('-').at(-1))-Number(b.tag_name.split('-').at(-1))).map(r=>[git('rev-parse',`${r.tag_name}^{commit}`),r]));
     const active=api(`repos/${repo}/actions/workflows/alpha-release.yml/runs?per_page=100`).workflow_runs.filter(r=>r.status !== 'completed');
-    const seen=new Set();
-    for(const r of runs.reverse()) {
-        try {git('merge-base','--is-ancestor',adoption,r.head_sha);} catch {continue;}
-        if(seen.has(r.head_sha)) continue;
-        seen.add(r.head_sha);
-        if(active.some(a=>a.display_title === `Alpha ${r.head_sha}`)) continue;
-        const allocatedRelease=allocated.get(r.head_sha);
-        if(allocatedRelease) {
-            const allocatedManifest=manifestFor(allocatedRelease.tag_name);
-            let complete=true;
-            for(const surface of surfaces) {
-                const asset=allocatedRelease.assets.find(a=>a.name===`${surface}-receipt.json`);
-                if(!asset) {complete=false;break;}
-                const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${asset.id}`,'-H','Accept: application/octet-stream'));
-                const item=allocatedManifest.surfaces[surface];
-                if(receipt.status !== 'verified' || receipt.source !== allocatedManifest.source || receipt.build !== item.build || receipt.notesHash !== item.notesHash) {complete=false;break;}
-            }
-            if(complete && !allocatedRelease.draft && pointer && !canAdvance(pointer,allocatedManifest)) continue;
+    const source=newestReconcileSource(runs,sha=>{try {git('merge-base','--is-ancestor',adoption,sha); return true;} catch {return false;}});
+    if(!source) { console.log('No successful main CI after Alpha adoption'); process.exit(0); }
+    if(active.some(a=>a.display_title === `Alpha ${source}`)) { console.log(`Alpha ${source} already running`); process.exit(0); }
+    const allocatedRelease=allocated.get(source);
+    if(allocatedRelease) {
+        const allocatedManifest=manifestFor(allocatedRelease.tag_name);
+        let complete=true;
+        for(const surface of surfaces) {
+            const asset=allocatedRelease.assets.find(a=>a.name===`${surface}-receipt.json`);
+            if(!asset) {complete=false;break;}
+            const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${asset.id}`,'-H','Accept: application/octet-stream'));
+            const item=allocatedManifest.surfaces[surface];
+            if(receipt.status !== 'verified' || receipt.source !== allocatedManifest.source || receipt.build !== item.build || receipt.notesHash !== item.notesHash) {complete=false;break;}
         }
-        gh('workflow','run','alpha-release.yml','--repo',repo,'--ref','main','-f',`source=${r.head_sha}`);
+        if(complete && !allocatedRelease.draft && pointer && !canAdvance(pointer,allocatedManifest)) { console.log(`Alpha ${source} is complete`); process.exit(0); }
     }
+    gh('workflow','run','alpha-release.yml','--repo',repo,'--ref','main','-f',`source=${source}`);
 } else { throw Error(`Unknown command ${command}`); }

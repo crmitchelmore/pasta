@@ -18,6 +18,11 @@ update must still be recorded from real runs. The owner can also commission a
 specific successful main source manually.
 A failed upload keeps its receipt and build number; retries reuse an existing
 Apple build, while an invalid binary requires a new allocation.
+Reconciliation only retries the newest successful main source and only submits
+the newest Alpha for TestFlight beta review; superseded sources are never
+rebuilt with current workflows. Before submission the Alpha app's Beta App
+Review contact is filled from App Store Connect (Alpha's own Test Information,
+else Stable's beta or App Store review contact); no contact data is committed.
 
 Alpha is a GitHub prerelease, never GitHub Latest. Only the README advertises
 `/alpha/download` and the Public Alpha TestFlight group. The Alpha Sparkle feed

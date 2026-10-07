@@ -48,6 +48,14 @@ export function notesFor(commits, platform, compareURL) {
 }
 export function notesHTML(manifest, surface) { return markdownToHTML(manifest.surfaces[surface].notes); }
 export function canAdvance(current, incoming) { return !current || BigInt(incoming.build) > BigInt(current.build); }
+// Alpha only ever advances to the newest successful main source. Rebuilding a
+// superseded source runs today's workflows against an old checkout (missing
+// scripts) and can never move the pointer, so reconciliation retries only the
+// newest eligible run. `runs` is any order; `eligible` filters pre-adoption SHAs.
+export function newestReconcileSource(runs, eligible = () => true) {
+    const ordered = [...runs].sort((a, b) => (b.run_number ?? 0) - (a.run_number ?? 0) || String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')));
+    return ordered.find(r => eligible(r.head_sha))?.head_sha ?? null;
+}
 export function nextAllocation(manifests, train, now = Date.now()) {
     const ordinal = 1 + Math.max(0, ...manifests.filter(m => m.train === train).map(m => m.ordinal));
     // Preserve the existing direct-Mac YYYYMMDDHHmm update ordering.
