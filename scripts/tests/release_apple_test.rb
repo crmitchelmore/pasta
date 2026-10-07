@@ -3,7 +3,7 @@ require_relative '../release-apple'
 
 class ReleaseAppleTest < Minitest::Test
   class FakeClient
-    attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id, :app_localization, :review_source, :store_review
+    attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id, :app_localization, :review_source, :store_review, :primary_locale
     attr_reader :posts, :patches, :post_bodies, :patch_bodies, :events
     def initialize
       @bundle_id='com.pasta.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false
@@ -21,7 +21,7 @@ class ReleaseAppleTest < Minitest::Test
         return {'data'=>{'id'=>'alpha-review','attributes'=>{}}}
       end
       return {'data'=>(store_review && {'id'=>'stable-store-review','attributes'=>store_review})} if path.end_with?('/appStoreReviewDetail')
-      return {'data'=>{'attributes'=>{'bundleId'=>bundle_id}}} if path.start_with?('/v1/apps/')
+      return {'data'=>{'attributes'=>{'bundleId'=>bundle_id,'primaryLocale'=>primary_locale}}} if path.start_with?('/v1/apps/')
       {'data'=>{'attributes'=>{'externalBuildState'=>assigned ? 'IN_BETA_TESTING' : beta_state}}}
     end
     def list(path)
@@ -29,7 +29,7 @@ class ReleaseAppleTest < Minitest::Test
         return review_busy ? [build] : [] if path.include?('betaAppReviewSubmission')
         return [build]
       end
-      return app_localization ? [app_localization] : [] if path.include?('/betaAppLocalizations')
+      return [app_localization].flatten.compact if path.include?('/betaAppLocalizations')
       return [] if path.end_with?('/betaBuildLocalizations')
       return [{'id'=>'stable-version','attributes'=>{'platform'=>'IOS','versionString'=>'1.8.0','createdDate'=>'2026-09-01T00:00:00Z'}}] if path.include?('/6759037470/appStoreVersions')
       return [{'id'=>'public-alpha','attributes'=>{'name'=>'Public Alpha','isInternalGroup'=>false,'publicLink'=>'https://testflight.apple.com/join/example'}}] if path.include?('/apps/')
@@ -168,6 +168,20 @@ class ReleaseAppleTest < Minitest::Test
     delivery(client).distribute(wait_seconds:0)
     index=client.posts.index('/v1/betaAppLocalizations')
     assert_equal 'en-US', client.post_bodies[index].dig(:data, :attributes, :locale)
+  end
+  def test_alpha_completes_primary_locale_beta_information
+    client=FakeClient.new
+    client.primary_locale='en-GB'
+    client.app_localization=[{'id'=>'gb-localization','attributes'=>{'locale'=>'en-GB','description'=>'Old description'}}]
+    delivery(client).distribute(wait_seconds:0)
+    gb=client.patch_bodies[client.patches.index('/v1/betaAppLocalizations/gb-localization')].dig(:data, :attributes)
+    assert_equal AppleRelease::BETA_FEEDBACK_EMAIL, gb[:feedbackEmail]
+    assert_equal AppleRelease::BETA_PRIVACY_POLICY_URL, gb[:privacyPolicyUrl]
+    us=client.post_bodies[client.posts.index('/v1/betaAppLocalizations')].dig(:data, :attributes)
+    assert_equal 'en-US', us[:locale]
+    build_locales=client.post_bodies.each_with_index.select { |_, i| client.posts[i] == '/v1/betaBuildLocalizations' }.map { |b, _| b.dig(:data, :attributes, :locale) }
+    assert_equal %w[en-US en-GB], build_locales
+    assert_operator client.events.index([:patch, '/v1/betaAppLocalizations/gb-localization']), :<, client.events.index([:post, '/v1/betaAppReviewSubmissions'])
   end
   def test_rejected_beta_is_actionable_not_indefinitely_pending
     client=FakeClient.new;client.beta_state='BETA_REJECTED';d=delivery(client)

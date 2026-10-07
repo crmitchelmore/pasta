@@ -61,8 +61,11 @@ module AppleRelease
       raise "Alpha App Store Connect record not configured for #{surface}" unless @app
       config = JSON.parse(File.read('Sources/PastaCore/Resources/ReleaseTrains.json')).fetch(@train)
       @bundle = config.fetch(surface == 'ios' ? 'iosBundleIdentifier' : 'storeMacBundleIdentifier')
-      actual = client.get("/v1/apps/#{@app}").dig('data', 'attributes', 'bundleId')
-      raise 'App record belongs to different identity' unless actual == @bundle
+      app_attributes = client.get("/v1/apps/#{@app}").dig('data', 'attributes') || {}
+      raise 'App record belongs to different identity' unless app_attributes['bundleId'] == @bundle
+      # Apple validates external submissions against the app's primary locale
+      # (en-GB for Pasta), so TestFlight text is kept complete there too.
+      @beta_locales = [BETA_BUILD_LOCALE, app_attributes['primaryLocale']].compact.uniq
     end
 
     def build
@@ -117,12 +120,14 @@ module AppleRelease
       ensure_beta_app_description
       ensure_beta_review_detail
       locales = @client.list("/v1/builds/#{id}/betaBuildLocalizations")
-      locale = locales.find { |l| l.dig('attributes', 'locale') == BETA_BUILD_LOCALE }
       attrs = {whatsNew: @item.fetch('storeNotes')}
-      if locale
-        @client.patch("/v1/betaBuildLocalizations/#{locale['id']}", data: {type: 'betaBuildLocalizations', id: locale['id'], attributes: attrs})
-      else
-        @client.post('/v1/betaBuildLocalizations', data: {type: 'betaBuildLocalizations', attributes: attrs.merge(locale: BETA_BUILD_LOCALE), relationships: {build: AppleRelease.relationship('builds', id)}})
+      @beta_locales.each do |code|
+        locale = locales.find { |l| l.dig('attributes', 'locale') == code }
+        if locale
+          @client.patch("/v1/betaBuildLocalizations/#{locale['id']}", data: {type: 'betaBuildLocalizations', id: locale['id'], attributes: attrs})
+        else
+          @client.post('/v1/betaBuildLocalizations', data: {type: 'betaBuildLocalizations', attributes: attrs.merge(locale: code), relationships: {build: AppleRelease.relationship('builds', id)}})
+        end
       end
       groups = @client.list("/v1/apps/#{@app}/betaGroups?limit=200")
       targets = groups.select { |g| g.dig('attributes', 'name') == 'Public Alpha' && !g.dig('attributes', 'isInternalGroup') }
@@ -170,20 +175,22 @@ module AppleRelease
 
     def ensure_beta_app_description
       localizations = @client.list("/v1/apps/#{@app}/betaAppLocalizations?limit=200")
-      localization = localizations.find { |entry| entry.dig('attributes', 'locale') == 'en-US' }
       attributes = {
         description: BETA_APP_DESCRIPTION,
         feedbackEmail: BETA_FEEDBACK_EMAIL,
         marketingUrl: BETA_MARKETING_URL,
         privacyPolicyUrl: BETA_PRIVACY_POLICY_URL
       }
-      if localization
-        @client.patch("/v1/betaAppLocalizations/#{localization.fetch('id')}",
-          data: {type: 'betaAppLocalizations', id: localization.fetch('id'), attributes: attributes})
-      else
-        @client.post('/v1/betaAppLocalizations',
-          data: {type: 'betaAppLocalizations', attributes: attributes.merge(locale: 'en-US'),
-            relationships: {app: AppleRelease.relationship('apps', @app)}})
+      @beta_locales.each do |code|
+        localization = localizations.find { |entry| entry.dig('attributes', 'locale') == code }
+        if localization
+          @client.patch("/v1/betaAppLocalizations/#{localization.fetch('id')}",
+            data: {type: 'betaAppLocalizations', id: localization.fetch('id'), attributes: attributes})
+        else
+          @client.post('/v1/betaAppLocalizations',
+            data: {type: 'betaAppLocalizations', attributes: attributes.merge(locale: code),
+              relationships: {app: AppleRelease.relationship('apps', @app)}})
+        end
       end
     end
 
