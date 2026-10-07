@@ -3,12 +3,13 @@ require_relative '../release-apple'
 
 class ReleaseAppleTest < Minitest::Test
   class FakeClient
-    attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id, :app_localization, :review_source
+    attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id, :app_localization, :review_source, :store_review
     attr_reader :posts, :patches, :post_bodies, :patch_bodies, :events
     def initialize
       @bundle_id='com.pasta.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false
       @app_localization=nil
       @review_source={'id'=>'stable-review','attributes'=>{'contactFirstName'=>'Test','contactLastName'=>'Reviewer','contactPhone'=>'+441234567890','contactEmail'=>'review@example.com','demoAccountRequired'=>false,'notes'=>'No sign-in required.'}}
+      @store_review=nil
       @posts=[]; @patches=[]; @post_bodies=[]; @patch_bodies=[]; @events=[]
     end
     def build
@@ -19,6 +20,7 @@ class ReleaseAppleTest < Minitest::Test
         return {'data'=>review_source} if path.include?('/6759037470/')
         return {'data'=>{'id'=>'alpha-review','attributes'=>{}}}
       end
+      return {'data'=>(store_review && {'id'=>'stable-store-review','attributes'=>store_review})} if path.end_with?('/appStoreReviewDetail')
       return {'data'=>{'attributes'=>{'bundleId'=>bundle_id}}} if path.start_with?('/v1/apps/')
       {'data'=>{'attributes'=>{'externalBuildState'=>assigned ? 'IN_BETA_TESTING' : beta_state}}}
     end
@@ -29,6 +31,7 @@ class ReleaseAppleTest < Minitest::Test
       end
       return app_localization ? [app_localization] : [] if path.include?('/betaAppLocalizations')
       return [] if path.end_with?('/betaBuildLocalizations')
+      return [{'id'=>'stable-version','attributes'=>{'platform'=>'IOS','versionString'=>'1.8.0','createdDate'=>'2026-09-01T00:00:00Z'}}] if path.include?('/6759037470/appStoreVersions')
       return [{'id'=>'public-alpha','attributes'=>{'name'=>'Public Alpha','isInternalGroup'=>false,'publicLink'=>'https://testflight.apple.com/join/example'}}] if path.include?('/apps/')
       assigned ? [build] : []
     end
@@ -122,8 +125,31 @@ class ReleaseAppleTest < Minitest::Test
     client=FakeClient.new
     client.review_source={'id'=>'stable-review','attributes'=>{'contactEmail'=>'review@example.com','demoAccountRequired'=>false}}
     error=assert_raises(RuntimeError){delivery(client).distribute(wait_seconds:0)}
-    assert_match 'contactFirstName, contactLastName, contactPhone', error.message
+    assert_match 'Stable Beta App Review Information: contactFirstName, contactLastName, contactPhone', error.message
+    assert_match 'Stable App Store Review Information', error.message
     refute_includes client.posts, '/v1/betaAppReviewSubmissions'
+    refute_includes client.patches, '/v1/betaAppReviewDetails/alpha-review'
+  end
+  def test_alpha_falls_back_to_stable_app_store_review_contact
+    client=FakeClient.new
+    client.review_source={'id'=>'stable-review','attributes'=>{'contactFirstName'=>nil,'contactLastName'=>nil,'contactPhone'=>nil,'contactEmail'=>nil,'demoAccountRequired'=>nil,'notes'=>nil}}
+    client.store_review={'contactFirstName'=>'Store','contactLastName'=>'Reviewer','contactPhone'=>'+441234567890','contactEmail'=>'store@example.com','demoAccountName'=>nil,'demoAccountPassword'=>nil,'demoAccountRequired'=>false,'notes'=>'No sign-in required.'}
+    delivery(client).distribute(wait_seconds:0)
+    patch_index=client.events.index([:patch, '/v1/betaAppReviewDetails/alpha-review'])
+    review_index=client.events.index([:post, '/v1/betaAppReviewSubmissions'])
+    refute_nil patch_index
+    refute_nil review_index
+    assert_operator patch_index, :<, review_index
+    body=client.patch_bodies[client.patches.index('/v1/betaAppReviewDetails/alpha-review')].dig(:data, :attributes)
+    assert_equal({'contactFirstName'=>'Store','contactLastName'=>'Reviewer','contactPhone'=>'+441234567890','contactEmail'=>'store@example.com','notes'=>'No sign-in required.','demoAccountRequired'=>false}, body)
+  end
+  def test_alpha_treats_unset_demo_requirement_as_not_required
+    client=FakeClient.new
+    client.review_source['attributes']['demoAccountRequired']=nil
+    delivery(client).distribute(wait_seconds:0)
+    body=client.patch_bodies[client.patches.index('/v1/betaAppReviewDetails/alpha-review')].dig(:data, :attributes)
+    assert_equal false, body['demoAccountRequired']
+    assert_includes client.posts, '/v1/betaAppReviewSubmissions'
   end
   def test_alpha_updates_existing_beta_app_description
     client=FakeClient.new

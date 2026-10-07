@@ -187,19 +187,49 @@ module AppleRelease
       end
     end
 
+    REVIEW_CONTACT_FIELDS = %w[contactFirstName contactLastName contactPhone contactEmail].freeze
+
+    # Apple rejects external beta submission without review contact details.
+    # Reuse contact metadata already held in App Store Connect (never stored in
+    # the repository): Alpha's own beta detail, then Stable's beta detail, then
+    # Stable's App Store review detail, which is where it lives after a normal
+    # App Store submission. Pasta has no sign-in, so demo credentials are refused.
     def ensure_beta_review_detail
-      source = @client.get("/v1/apps/#{@stable_app}/betaAppReviewDetail").fetch('data')
       target = @client.get("/v1/apps/#{@app}/betaAppReviewDetail").fetch('data')
-      source_attributes = source.fetch('attributes')
-      raise 'Stable Beta App Review Information unexpectedly requires demo credentials' unless source_attributes['demoAccountRequired'] == false
-      allowed = %w[contactFirstName contactLastName contactPhone contactEmail notes]
-      attributes = source_attributes.select { |key, value| allowed.include?(key) && !value.nil? }
-      attributes['demoAccountRequired'] = false
-      required = %w[contactFirstName contactLastName contactPhone contactEmail]
-      missing = required.reject { |key| attributes[key].is_a?(String) && !attributes[key].empty? }
-      raise "Stable Beta App Review Information is incomplete: #{missing.join(', ')}" unless missing.empty?
-      @client.patch("/v1/betaAppReviewDetails/#{target.fetch('id')}",
-        data: {type: 'betaAppReviewDetails', id: target.fetch('id'), attributes: attributes})
+      candidates = [['Alpha Beta App Review Information', -> { target.fetch('attributes') }],
+        ['Stable Beta App Review Information', -> { @client.get("/v1/apps/#{@stable_app}/betaAppReviewDetail").dig('data', 'attributes') }],
+        ['Stable App Store Review Information', -> { stable_app_store_review_attributes }]]
+      missing_by_source = []
+      candidates.each do |label, fetch|
+        attributes = fetch.call || {}
+        raise "#{label} unexpectedly requires demo credentials" if attributes['demoAccountRequired'] == true
+        missing = REVIEW_CONTACT_FIELDS.reject { |key| attributes[key].is_a?(String) && !attributes[key].empty? }
+        unless missing.empty?
+          missing_by_source << "#{label}: #{missing.join(', ')}"
+          next
+        end
+        update = attributes.select { |key, value| (REVIEW_CONTACT_FIELDS + ['notes']).include?(key) && !value.nil? }
+        update['notes'] = target.dig('attributes', 'notes') if update['notes'].nil? && target.dig('attributes', 'notes')
+        update['demoAccountRequired'] = false
+        current = target.fetch('attributes')
+        return if update.all? { |key, value| current[key] == value }
+        @client.patch("/v1/betaAppReviewDetails/#{target.fetch('id')}",
+          data: {type: 'betaAppReviewDetails', id: target.fetch('id'), attributes: update})
+        return
+      end
+      raise "Beta App Review contact information is incomplete (#{missing_by_source.join('; ')}). Fill in App Store Connect → TestFlight → Test Information for the Alpha app."
+    end
+
+    def stable_app_store_review_attributes
+      platform = @surface == 'ios' ? 'IOS' : 'MAC_OS'
+      versions = @client.list("/v1/apps/#{@stable_app}/appStoreVersions?limit=200").select { |v| v.dig('attributes', 'platform') == platform }
+      versions.sort_by { |v| v.dig('attributes', 'createdDate').to_s }.reverse_each do |version|
+        detail = @client.get("/v1/appStoreVersions/#{version.fetch('id')}/appStoreReviewDetail")['data']
+        return detail['attributes'] if detail && detail['attributes']
+      rescue AppleAPI::ApiError => error
+        raise unless error.status == 404
+      end
+      nil
     end
 
     def observe_publication
