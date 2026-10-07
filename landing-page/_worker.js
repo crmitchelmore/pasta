@@ -11,7 +11,8 @@ export default {
     if (!/^alpha-build-[1-9][0-9]*$/.test(pointer.tag) || !/^\d+\.\d+\.\d+$/.test(pointer.version)) {
       return new Response('Invalid Alpha pointer', {status: 503});
     }
-    const asset = path.endsWith('appcast.xml') ? 'appcast.xml' : `Pasta Alpha-${pointer.version}.dmg`;
+    // release.yml names the DMG with spaces replaced by hyphens.
+    const asset = path.endsWith('appcast.xml') ? 'appcast.xml' : `Pasta-Alpha-${pointer.version}.dmg`;
     return new Response(null, {status: 302, headers: {
       Location: `https://github.com/crmitchelmore/pasta/releases/download/${pointer.tag}/${encodeURIComponent(asset)}`,
       'Cache-Control': 'public, max-age=30',
