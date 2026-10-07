@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseCommits } from './release-notes-lib.mjs';
-import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, newestReconcileSource, assertStableVersionAdvance } from './release-train-lib.mjs';
+import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, newestReconcileSource, receiptDelivered, assertStableVersionAdvance } from './release-train-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/pasta';
 const run = runReleaseCommand;
@@ -241,7 +241,7 @@ if(command === 'allocate' || command === 'prepare') {
             if(!asset) {complete=false;break;}
             const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${asset.id}`,'-H','Accept: application/octet-stream'));
             const item=allocatedManifest.surfaces[surface];
-            if(receipt.status !== 'verified' || receipt.source !== allocatedManifest.source || receipt.build !== item.build || receipt.notesHash !== item.notesHash) {complete=false;break;}
+            if(!receiptDelivered(surface,receipt.status) || receipt.source !== allocatedManifest.source || receipt.build !== item.build || receipt.notesHash !== item.notesHash) {complete=false;break;}
         }
         if(complete && !allocatedRelease.draft && pointer && !canAdvance(pointer,allocatedManifest)) { console.log(`Alpha ${source} is complete`); process.exit(0); }
     }
