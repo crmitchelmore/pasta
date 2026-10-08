@@ -7,6 +7,7 @@ this check ensures both entrypoints receive the same reviewed lock.
 import json
 from pathlib import Path
 import re
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 IOS_LOCK = "PastaIOS/PastaIOS.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
@@ -34,12 +35,26 @@ def verify(root=ROOT):
     package = read_pins(root / "Package.resolved")
     xcode = read_pins(root / IOS_LOCK)
     if package != xcode:
-        raise ValueError("SwiftPM and Xcode dependency pins differ; review and commit both locks together")
+        raise ValueError("SwiftPM and Xcode dependency pins differ; run "
+                         "`python3 scripts/ci-verify-dependency-locks.py --sync`, then validate the iOS "
+                         "lock with `scripts/ci-ios-e2e.sh resolve` and commit both locks together")
     return package
+
+
+def sync(root=ROOT):
+    """Copy the reviewed SwiftPM pins (e.g. a Dependabot update) to the iOS lock."""
+    read_pins(root / "Package.resolved")
+    package = json.loads((root / "Package.resolved").read_text())
+    target = root / IOS_LOCK
+    xcode = json.loads(target.read_text())
+    xcode["pins"] = package["pins"]
+    target.write_text(json.dumps(xcode, indent=2) + "\n")
 
 
 if __name__ == "__main__":
     try:
+        if "--sync" in sys.argv[1:]:
+            sync()
         pins = verify()
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise SystemExit(f"::error::Dependency lock verification failed: {error}") from error

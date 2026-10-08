@@ -73,6 +73,15 @@ class DependencyLocksTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 locks.verify(self.root)
 
+    def test_sync_copies_reviewed_pins_to_ios_lock(self):
+        updated = json.loads(json.dumps(self.data))
+        updated["pins"][0]["state"].update(version="6.29.4", revision="f" * 40)
+        self.write("Package.resolved", updated)
+        with self.assertRaisesRegex(ValueError, "--sync"):
+            locks.verify(self.root)
+        locks.sync(self.root)
+        self.assertEqual(locks.verify(self.root)["grdb.swift"][2]["version"], "6.29.4")
+
 
 if __name__ == "__main__":
     unittest.main()

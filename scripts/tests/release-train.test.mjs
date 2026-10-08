@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {digest, validateManifest, nextAllocation, effectiveCommits, notesFor, canAdvance, newestReconcileSource, receiptDelivered} from '../release-train-lib.mjs';
+import {digest, validateManifest, nextAllocation, effectiveCommits, notesFor, canAdvance, newestReconcileSource, receiptDelivered, receiptNeedsRebuild, stableGateSurfaces} from '../release-train-lib.mjs';
 const source='a'.repeat(40), prior='b'.repeat(40);
 test('manifest rejects changed frozen notes and moving source refs',()=>{
  const entry={version:'3.2.0',build:'1001',baseline:prior,notes:'Frozen',notesHash:digest('Frozen'),storeNotes:'Short',storeNotesHash:digest('Short')};
@@ -50,4 +50,12 @@ test('reconciliation leaves Apple review states to the Apple reconciler',()=>{
  for(const status of ['failed','invalid','beta_rejected']) assert.equal(receiptDelivered('ios',status),false);
  assert.equal(receiptDelivered('mac-direct','verified'),true);
  assert.equal(receiptDelivered('mac-direct','beta_review_pending'),false);
+});
+test('Apple-refused iOS uploads wait for an explicit rebuild instead of hourly retries',()=>{
+ for(const status of ['invalid','beta_rejected']) assert.equal(receiptNeedsRebuild('ios',status),true);
+ for(const status of ['failed','missing','processing','verified']) assert.equal(receiptNeedsRebuild('ios',status),false);
+ assert.equal(receiptNeedsRebuild('mac-direct','invalid'),false);
+});
+test('only the direct Sparkle app gates Stable publication',()=>{
+ assert.deepEqual(stableGateSurfaces,['mac-direct']);
 });

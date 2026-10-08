@@ -29,8 +29,11 @@ jobs:
     with:
       manifest: ${{ needs.prepare.outputs.tag }}
     secrets: inherit
+  # The iOS App Store candidate builds after the Sparkle candidate and never
+  # gates Stable publication; Apple submission follows asynchronously.
   ios:
-    needs: prepare
+    needs: [prepare, mac-direct]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' }}
     uses: ./.github/workflows/release-ios.yml
     with:
       manifest: ${{ needs.prepare.outputs.tag }}

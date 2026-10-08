@@ -6,6 +6,7 @@ require_relative 'apple-api'
 require 'time'
 require 'tmpdir'
 require 'digest'
+require 'open3'
 
 module AppleRelease
   BETA_APP_DESCRIPTION = 'Pasta is a privacy-first clipboard history manager. Test clipboard history, search, sync, and experimental features in this public Alpha.'
@@ -274,16 +275,64 @@ module AppleRelease
       end
     end
 
-    def submit
-      raise 'Alpha must never enter App Store review' unless @train == 'stable'
-      # The explicit approval is persisted by Publish Stable before Apple work.
+    # The explicit approval is persisted by Publish Stable before Apple work.
+    def owner_approved?
       Dir.mktmpdir do |dir|
-        raise 'Missing owner approval' unless system('gh','release','download',@manifest['tag'],'--repo',@repo,'--pattern','approval.json','--dir',dir)
+        return false unless system('gh','release','download',@manifest['tag'],'--repo',@repo,'--pattern','approval.json','--dir',dir, out: File::NULL, err: File::NULL)
         approval = JSON.parse(File.read(File.join(dir,'approval.json')))
         expected = Digest::SHA256.hexdigest(JSON.pretty_generate(@manifest) + "\n")
         # Node and Ruby format JSON identically for this manifest (two spaces).
-        raise 'Approval hash or owner mismatch' unless approval['manifestHash'] == expected && approval['actor'] == @repo.split('/').first
+        approval['manifestHash'] == expected && approval['actor'] == @repo.split('/').first
       end
+    end
+
+    # The approved Sparkle release is public and points at the frozen source.
+    def direct_release_published?
+      tag = "v#{@manifest.dig('surfaces','mac-direct','version')}"
+      out, status = Open3.capture2('gh','release','view',tag,'--repo',@repo,'--json','isDraft,isPrerelease', err: File::NULL)
+      return false unless status.success?
+      info = JSON.parse(out)
+      return false if info['isDraft'] || info['isPrerelease']
+      sha, status = Open3.capture2('gh','api',"repos/#{@repo}/commits/#{tag}",'--jq','.sha', err: File::NULL)
+      status.success? && sha.strip == @manifest['source']
+    end
+
+    SUBMITTABLE_STATES = %w[PREPARE_FOR_SUBMISSION].freeze
+    HALTED_STATES = %w[REJECTED METADATA_REJECTED DEVELOPER_REJECTED INVALID_BINARY].freeze
+
+    # Stable iOS follows the Sparkle release asynchronously: submit once the
+    # owner approved the candidate, the direct release is public and Apple has
+    # processed the build. Rejections wait for a human; they are never resubmitted.
+    def submit_if_ready
+      raise 'Alpha must never enter App Store review' unless @train == 'stable'
+      return pending('awaiting owner approval') unless owner_approved?
+      return pending('awaiting public direct Mac release') unless direct_release_published?
+      found = build
+      return pending('no uploaded Stable build') unless found
+      state = found.dig('attributes', 'processingState')
+      return pending("Apple processing is #{state}") unless state == 'VALID'
+      platform = @surface == 'ios' ? 'IOS' : 'MAC_OS'
+      version = @client.list("/v1/apps/#{@app}/appStoreVersions?limit=200").find do |v|
+        v.dig('attributes','platform') == platform && v.dig('attributes','versionString') == @item['version']
+      end
+      app_state = version&.dig('attributes','appStoreState')
+      if HALTED_STATES.include?(app_state)
+        puts "::warning::#{@surface} Stable #{@item['version']} is #{app_state}; resolve it in App Store Connect"
+        return false
+      end
+      return pending("App Store version is #{app_state}") if app_state && !SUBMITTABLE_STATES.include?(app_state)
+      submit
+      true
+    end
+
+    def pending(reason)
+      puts "#{@surface} Stable #{@item['version']} submission pending: #{reason}"
+      false
+    end
+
+    def submit
+      raise 'Alpha must never enter App Store review' unless @train == 'stable'
+      raise 'Missing owner approval or approval hash/owner mismatch' unless owner_approved?
       found = build
       raise 'Stable binary has not processed' unless found&.dig('attributes', 'processingState') == 'VALID'
       platform = @surface == 'ios' ? 'IOS' : 'MAC_OS'
@@ -343,6 +392,7 @@ if $PROGRAM_NAME == __FILE__
     File.open(ENV.fetch('GITHUB_OUTPUT'), 'a') { |file| file.puts("skip_upload=#{!existing.nil?}") }
   when 'observe' then delivery.observe_publication
   when 'submit' then delivery.submit
-  else abort 'Usage: release-apple.rb distribute|reconcile|submit manifest.json ios|mac-store'
+  when 'submit-if-ready' then delivery.submit_if_ready
+  else abort 'Usage: release-apple.rb distribute|reconcile|upload-status|observe|submit|submit-if-ready manifest.json ios|mac-store'
   end
 end

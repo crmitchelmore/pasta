@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseCommits } from './release-notes-lib.mjs';
-import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, newestReconcileSource, receiptDelivered, assertStableVersionAdvance } from './release-train-lib.mjs';
+import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, newestReconcileSource, receiptDelivered, receiptNeedsRebuild, stableGateSurfaces, assertStableVersionAdvance } from './release-train-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/pasta';
 const run = runReleaseCommand;
@@ -69,9 +69,12 @@ if(command === 'allocate' || command === 'prepare') {
         const release=all.find(r=>r.tag_name===alpha.tag);
         for(const surface of surfaces) {
             const asset=release?.assets.find(a=>a.name===`${surface}-receipt.json`);
-            if(!asset) throw Error(`Selected Alpha has no delivery receipt: ${surface}`);
-            const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${asset.id}`,'-H','Accept: application/octet-stream'));
-            if(receipt.status !== 'verified' || receipt.source !== alpha.source || receipt.build !== alpha.surfaces[surface].build || receipt.notesHash !== alpha.surfaces[surface].notesHash) throw Error(`Selected Alpha is not verified: ${surface}`);
+            const receipt=asset ? JSON.parse(gh('api',`repos/${repo}/releases/assets/${asset.id}`,'-H','Accept: application/octet-stream')) : null;
+            const verified=receipt?.status === 'verified' && receipt.source === alpha.source && receipt.build === alpha.surfaces[surface].build && receipt.notesHash === alpha.surfaces[surface].notesHash;
+            if(verified) continue;
+            // Apple beta review must not hold back the Sparkle release.
+            if(!stableGateSurfaces.includes(surface)) { console.log(`::warning::Selected Alpha ${surface} is ${receipt?.status ?? 'missing'}; its Stable candidate follows asynchronously`); continue; }
+            throw Error(asset ? `Selected Alpha is not verified: ${surface}` : `Selected Alpha has no delivery receipt: ${surface}`);
         }
     }
     const tagNames=git('tag','--list',train === 'alpha'?'alpha-build-*':'stable-candidate-*').split('\n').filter(Boolean);
@@ -140,6 +143,23 @@ if(command === 'allocate' || command === 'prepare') {
         if(receipt.source === manifest.source && receipt.build === manifest.surfaces[surface].build && receipt.notesHash === manifest.surfaces[surface].notesHash) status=receipt.status;
     }
     output('status',status);
+} else if(command === 'plan') {
+    // Retries only rebuild surfaces that still need delivery, so an Apple
+    // retry never re-signs or republishes an already verified Sparkle build.
+    const manifest=manifestFor(required('tag'));
+    const release=releases().find(r=>r.tag_name===manifest.tag);
+    const statusOf=surface=>{
+        const asset=release?.assets.find(a=>a.name===`${surface}-receipt.json`);
+        if(!asset) return 'missing';
+        const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${asset.id}`,'-H','Accept: application/octet-stream'));
+        const item=manifest.surfaces[surface];
+        return receipt.source === manifest.source && receipt.build === item.build && receipt.notesHash === item.notesHash ? receipt.status : 'missing';
+    };
+    const mac=statusOf('mac-direct'), ios=statusOf('ios');
+    const macDone=mac === 'verified' && (manifest.train !== 'alpha' || release?.draft === false);
+    if(receiptNeedsRebuild('ios',ios)) console.log(`::warning::${manifest.tag} iOS is ${ios}; dispatch with rebuild=true for a new Apple build`);
+    output('mac_direct',String(!macDone));
+    output('ios',String(!receiptDelivered('ios',ios) && !receiptNeedsRebuild('ios',ios)));
 } else if(command === 'receipt') {
     const manifest=manifestFor(required('tag')); const surface=required('surface');
     const receipt={source:manifest.source,build:manifest.surfaces[surface].build,notesHash:manifest.surfaces[surface].notesHash,run:process.env.GITHUB_RUN_ID,status:required('status'),assets:{}};
@@ -177,13 +197,13 @@ if(command === 'allocate' || command === 'prepare') {
     const all=releases();
     for(const release of all.filter(r=>r.tag_name.startsWith('stable-candidate-'))) {
         const newer=manifestFor(release.tag_name);
-        if(newer.ordinal > manifest.ordinal && surfaces.some(s=>newer.surfaces[s].version === manifest.surfaces[s].version)) {
+        if(newer.ordinal > manifest.ordinal && stableGateSurfaces.some(s=>newer.surfaces[s].version === manifest.surfaces[s].version)) {
             throw Error('A newer candidate supersedes this platform/version; prepare it again to select this source explicitly');
         }
     }
     const directory=join(temp,'approved'); mkdirSync(directory);
     gh('release','download',manifest.tag,'--repo',repo,'--dir',directory);
-    for(const surface of surfaces) {
+    for(const surface of stableGateSurfaces) {
         const receipt=json(join(directory,`${surface}-receipt.json`));
         if(receipt.source !== manifest.source || receipt.build !== manifest.surfaces[surface].build || receipt.notesHash !== manifest.surfaces[surface].notesHash || receipt.status !== 'verified') throw Error(`Candidate not verified: ${surface}`);
         for(const [asset,hash] of Object.entries(receipt.assets)) {
@@ -241,7 +261,9 @@ if(command === 'allocate' || command === 'prepare') {
             if(!asset) {complete=false;break;}
             const receipt=JSON.parse(gh('api',`repos/${repo}/releases/assets/${asset.id}`,'-H','Accept: application/octet-stream'));
             const item=allocatedManifest.surfaces[surface];
-            if(!receiptDelivered(surface,receipt.status) || receipt.source !== allocatedManifest.source || receipt.build !== item.build || receipt.notesHash !== item.notesHash) {complete=false;break;}
+            const current=receipt.source === allocatedManifest.source && receipt.build === item.build && receipt.notesHash === item.notesHash;
+            if(current && receiptNeedsRebuild(surface,receipt.status)) { console.log(`::warning::${allocatedRelease.tag_name} ${surface} is ${receipt.status}; it needs an explicit rebuild`); continue; }
+            if(!receiptDelivered(surface,receipt.status) || !current) {complete=false;break;}
         }
         if(complete && !allocatedRelease.draft && pointer && !canAdvance(pointer,allocatedManifest)) { console.log(`Alpha ${source} is complete`); process.exit(0); }
     }

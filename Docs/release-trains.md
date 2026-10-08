@@ -16,8 +16,14 @@ yet" until the first `alpha-latest` pointer exists). Enabling is not delivery
 evidence: signed archives, device coexistence and an installed N to N+1 Sparkle
 update must still be recorded from real runs. The owner can also commission a
 specific successful main source manually.
+Each Alpha surface is built independently: the direct Mac app runs first and
+the iOS lane queues behind it on the shared runner, so a slow or failing TestFlight
+upload never delays the Alpha Sparkle feed. A retry (`release-train.mjs plan`)
+rebuilds only the surfaces whose receipts are not yet delivered.
 A failed upload keeps its receipt and build number; retries reuse an existing
-Apple build, while an invalid binary requires a new allocation.
+Apple build, while an invalid binary requires a new allocation (dispatch Alpha
+with `rebuild`). The owner can retry just the iOS lane with **Release iOS
+(TestFlight)** and the manifest tag.
 Reconciliation only retries the newest successful main source and only submits
 the newest Alpha for TestFlight beta review; superseded sources are never
 rebuilt with current workflows. An iOS receipt still processing or awaiting
@@ -34,23 +40,31 @@ the existing Sparkle feed and App Store remain Stable.
 ## Stable promotion
 
 1. Run **Prepare Stable** on main with a verified Alpha tag and explicit macOS and
-   iOS marketing versions. Both Alpha surface receipts must be verified.
+   iOS marketing versions. Only the Alpha direct Mac receipt must be verified;
+   an iOS Alpha that is still in Apple review does not block a Sparkle release.
 2. Review the candidate's frozen manifest and complete cumulative notes. Each
    surface starts from its last published Stable source, not its latest upload,
    rejected review or Alpha build. Paired reverts cancel and platform-specific
    changes stay on their surface. The tested source and dependency lock are frozen.
 3. Candidate workers rebuild that source using Stable identities and stage signed,
-   verified assets and processed App Store candidates. Stable builds are never
+   verified assets and processed App Store candidates. The Mac candidate builds
+   first; the iOS candidate follows and its receipt is not required to publish. Stable builds are never
    assigned to TestFlight groups; Alpha alone uses its Public Alpha group.
    Validate Stable archives and runtime separately before owner approval.
 4. Run **Publish Stable** with the candidate tag and the exact reviewed manifest
    SHA-256. Only the repository owner may approve. Changed notes/assets or a newer
    candidate for the same version invalidate publication.
 5. Direct publication updates GitHub Latest, the Stable feed and Homebrew, then
-   downloads and verifies the live signed DMG. Apple submission uses the selected
-   build and `AFTER_APPROVAL`. Processing, submission and public availability have
-   separate receipts; reconciliation advances Apple's notes boundary only after
-   observed public availability. Alpha can continue while Apple reviews Stable.
+   downloads and verifies the live signed DMG. Publication gates only on the
+   direct Mac surface. App Store submission is asynchronous: `release-apple.rb
+   submit-if-ready` runs best-effort after publication and again from the hourly
+   Apple reconciler for the newest owner-approved candidate. It submits only once
+   the owner approval is recorded, the matching direct release is public and the
+   Stable build is `VALID`, using `AFTER_APPROVAL`. Apple rejections are reported
+   as warnings and never resubmitted automatically. Processing, submission and
+   public availability have separate receipts; reconciliation advances Apple's
+   notes boundary only after observed public availability. Alpha can continue
+   while Apple reviews Stable.
 
 No Stable candidate is approved merely by merging this implementation.
 
