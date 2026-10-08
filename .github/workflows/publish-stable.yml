@@ -43,7 +43,7 @@ jobs:
           const { verifyCurrentLandingSource } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
           await verifyCurrentLandingSource({ github, ...context.repo, sha: context.sha });
     - name: Deploy landing page with updated appcast
-      uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd
+      uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0
       with:
         wranglerVersion: 4.129.1
         apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
