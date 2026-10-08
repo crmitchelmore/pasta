@@ -31,6 +31,9 @@ struct DetectionRulesSettingsTab: View {
     @State private var jevAPIKey: String = ""
     @State private var jevKeyStatus: String?
     @State private var showJevKeyError = false
+    @State private var jevHasStoredKey = false
+    @State private var jevIsTesting = false
+    @State private var jevTestResult: (success: Bool, message: String)?
 
     @State private var advancedDetector: BuiltInDetectorKind? = nil
     @State private var advancedEnabledDraft: Bool = false
@@ -163,8 +166,9 @@ struct DetectionRulesSettingsTab: View {
                         jevConfiguration.save()
                     }
                 ))
+                .disabled(!jevHasStoredKey && !jevConfiguration.isEnabled)
 
-                SecureField("Jev API key", text: $jevAPIKey)
+                SecureField(jevHasStoredKey ? "Replace TypeSafe API key" : "TypeSafe API key", text: $jevAPIKey)
                     .textFieldStyle(.roundedBorder)
 
                 HStack {
@@ -172,24 +176,46 @@ struct DetectionRulesSettingsTab: View {
                         do {
                             try JevKeychain.save(jevAPIKey.trimmingCharacters(in: .whitespacesAndNewlines))
                             jevAPIKey = ""
+                            jevHasStoredKey = true
                             jevKeyStatus = "API key saved in the macOS Keychain."
+                            testJevConnection()
                         } catch {
                             errorMessage = error.localizedDescription
                             showJevKeyError = true
                         }
                     }
                     .disabled(jevAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Test Connection") {
+                        testJevConnection()
+                    }
+                    .disabled(!jevHasStoredKey || jevIsTesting)
                     Button("Remove Key", role: .destructive) {
                         try? JevKeychain.remove()
-                        jevKeyStatus = "API key removed."
+                        jevHasStoredKey = false
+                        jevTestResult = nil
+                        jevConfiguration.isEnabled = false
+                        jevConfiguration.save()
+                        jevKeyStatus = "API key removed and Jev comparison disabled."
+                    }
+                    .disabled(!jevHasStoredKey)
+                    if jevIsTesting {
+                        ProgressView().controlSize(.small)
                     }
                 }
 
-                TextField("Jev endpoint", text: Binding(
+                if let jevTestResult {
+                    Label(jevTestResult.message, systemImage: jevTestResult.success ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                        .font(.caption)
+                        .foregroundStyle(jevTestResult.success ? Color.green : Color.red)
+                        .textSelection(.enabled)
+                }
+
+                TextField("Endpoint", text: Binding(
                     get: { jevConfiguration.endpoint },
                     set: {
                         jevConfiguration.endpoint = $0
                         jevConfiguration.save()
+                        jevTestResult = nil
                     }
                 ))
                 TextField("Model", text: Binding(
@@ -197,10 +223,27 @@ struct DetectionRulesSettingsTab: View {
                     set: {
                         jevConfiguration.model = $0
                         jevConfiguration.save()
+                        jevTestResult = nil
+                    }
+                ))
+                if jevConfiguration.endpoint != JevConfiguration.defaultEndpoint || jevConfiguration.model != JevConfiguration.defaultModel {
+                    Button("Reset Endpoint and Model to Defaults") {
+                        jevConfiguration.endpoint = JevConfiguration.defaultEndpoint
+                        jevConfiguration.model = JevConfiguration.defaultModel
+                        jevConfiguration.save()
+                        jevTestResult = nil
+                    }
+                }
+
+                Toggle("Include sensitive entries (API keys, tokens, env vars, cards, IBANs)", isOn: Binding(
+                    get: { jevConfiguration.includeSensitiveContent },
+                    set: {
+                        jevConfiguration.includeSensitiveContent = $0
+                        jevConfiguration.save()
                     }
                 ))
 
-                Text("Experimental comparisons send supported text clipboard entries to Jev. Existing Pasta classifications remain unchanged. The API key is stored only in Keychain.")
+                Text("Jev is TypeSafe's classification model. While enabled, new text entries and user-started history comparisons send clipboard text (truncated to \(JevSystemOneRequest.maxContentCharacters) characters) to \(jevConfiguration.endpointHost ?? "the configured endpoint"). Images are never sent. Pasta's classifications remain unchanged. The API key is stored only in Keychain.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if let jevKeyStatus {
@@ -250,12 +293,32 @@ struct DetectionRulesSettingsTab: View {
         .onAppear {
             configuration = DetectorConfigurationStore.load()
             jevConfiguration = .load()
+            jevHasStoredKey = ((try? JevKeychain.read()) ?? nil)?.isEmpty == false
         }
         .onChange(of: newCustomPattern) { _, _ in
             scheduleNewPatternEvaluation()
         }
         .onChange(of: newCustomCaseInsensitive) { _, _ in
             scheduleNewPatternEvaluation()
+        }
+    }
+
+    private func testJevConnection() {
+        let configuration = jevConfiguration
+        jevIsTesting = true
+        jevTestResult = nil
+        Task { @MainActor in
+            defer { jevIsTesting = false }
+            do {
+                guard let key = try JevKeychain.read(), !key.isEmpty else {
+                    throw JevConfigurationError.missingAPIKey
+                }
+                let result = try await JevClassifier().validate(configuration: configuration, apiKey: key)
+                let confidence = result.confidence.map { " (\(Int(($0 * 100).rounded()))% confidence)" } ?? ""
+                jevTestResult = (true, "Connected to \(result.modelVersion ?? configuration.effectiveModel). Test sample classified as \(result.rawChoice)\(confidence) in \(Int((result.latency * 1000).rounded())) ms.")
+            } catch {
+                jevTestResult = (false, error.localizedDescription)
+            }
         }
     }
 
