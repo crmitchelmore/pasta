@@ -15,7 +15,7 @@ jobs:
       with:
         fetch-depth: 0
     - name: Require current website CI before changing its Stable feed
-      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
       with:
         script: |-
           const { verifyManifestPublication } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
@@ -37,7 +37,7 @@ jobs:
         VERSION=$(node -p 'require(process.env.RUNNER_TEMP + "/release-manifest.json").surfaces["mac-direct"].version')
         echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
     - name: Reject superseded website source
-      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
       with:
         script: |-
           const { verifyCurrentLandingSource } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-verify-landing-deploy.mjs`);
