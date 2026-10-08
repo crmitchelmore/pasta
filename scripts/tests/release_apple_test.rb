@@ -189,6 +189,14 @@ class ReleaseAppleTest < Minitest::Test
     assert_equal 'beta_rejected',d.receipts.last.first
     refute client.assigned
   end
+  def test_receipt_persistence_retries_transient_upload_failures
+    d=delivery(FakeClient.new)
+    results=[false,false,true]
+    assert d.retrying(delay: 0) { results.shift }
+    calls=0
+    refute d.retrying(attempts: 3, delay: 0) { calls+=1; false }
+    assert_equal 3, calls
+  end
   def test_invalid_upload_requires_a_new_build_number
     client=FakeClient.new;client.processing='INVALID';d=delivery(client)
     assert_raises(RuntimeError){d.distribute(wait_seconds:0)}

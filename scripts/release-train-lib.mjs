@@ -56,6 +56,13 @@ export function newestReconcileSource(runs, eligible = () => true) {
     const ordered = [...runs].sort((a, b) => (b.run_number ?? 0) - (a.run_number ?? 0) || String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')));
     return ordered.find(r => eligible(r.head_sha))?.head_sha ?? null;
 }
+// Apple-side states that reconcile-apple-releases.rb advances on its own
+// schedule. Redispatching the Alpha workflow cannot hasten Apple's review and
+// would rebuild every surface hourly, so these count as delivered.
+const appleOwnedStates = new Set(['processing', 'beta_processing', 'waiting_for_beta_review_slot', 'beta_review_pending']);
+export function receiptDelivered(surface, status) {
+    return status === 'verified' || (surface === 'ios' && appleOwnedStates.has(status));
+}
 export function nextAllocation(manifests, train, now = Date.now()) {
     const ordinal = 1 + Math.max(0, ...manifests.filter(m => m.train === train).map(m => m.ordinal));
     // Preserve the existing direct-Mac YYYYMMDDHHmm update ordering.

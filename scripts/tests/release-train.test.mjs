@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {digest, validateManifest, nextAllocation, effectiveCommits, notesFor, canAdvance, newestReconcileSource} from '../release-train-lib.mjs';
+import {digest, validateManifest, nextAllocation, effectiveCommits, notesFor, canAdvance, newestReconcileSource, receiptDelivered} from '../release-train-lib.mjs';
 const source='a'.repeat(40), prior='b'.repeat(40);
 test('manifest rejects changed frozen notes and moving source refs',()=>{
  const entry={version:'3.2.0',build:'1001',baseline:prior,notes:'Frozen',notesHash:digest('Frozen'),storeNotes:'Short',storeNotesHash:digest('Short')};
@@ -44,4 +44,10 @@ test('reconciliation retries only the newest eligible main source',()=>{
  assert.equal(newestReconcileSource(runs,sha=>sha!=='newest'),'mid');
  assert.equal(newestReconcileSource(runs,()=>false),null);
  assert.equal(newestReconcileSource([]),null);
+});
+test('reconciliation leaves Apple review states to the Apple reconciler',()=>{
+ for(const status of ['processing','beta_processing','waiting_for_beta_review_slot','beta_review_pending']) assert.equal(receiptDelivered('ios',status),true);
+ for(const status of ['failed','invalid','beta_rejected']) assert.equal(receiptDelivered('ios',status),false);
+ assert.equal(receiptDelivered('mac-direct','verified'),true);
+ assert.equal(receiptDelivered('mac-direct','beta_review_pending'),false);
 });

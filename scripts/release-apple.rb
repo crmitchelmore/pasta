@@ -85,9 +85,19 @@ module AppleRelease
       Dir.mktmpdir('apple-release-') do |dir|
         path = File.join(dir, "#{@surface}-receipt.json")
         File.write(path, JSON.pretty_generate(data) + "\n")
-        raise 'Cannot persist Apple receipt' unless system('gh', 'release', 'upload', @manifest.fetch('tag'), path, '--clobber', '--repo', @repo)
+        raise 'Cannot persist Apple receipt' unless retrying { system('gh', 'release', 'upload', @manifest.fetch('tag'), path, '--clobber', '--repo', @repo) }
       end
       puts "#{@surface}: #{status} (#{@item.fetch('version')} #{@item.fetch('build')})"
+    end
+
+    # GitHub's upload endpoint returns transient 5xx errors; losing a receipt
+    # after a successful Apple upload would fail the whole delivery lane.
+    def retrying(attempts: 4, delay: 5)
+      attempts.times do |attempt|
+        return true if yield
+        sleep(delay * (attempt + 1)) if attempt + 1 < attempts
+      end
+      false
     end
 
     def distribute(wait_seconds: 600)
