@@ -19,7 +19,8 @@ specific successful main source manually.
 Each Alpha surface is built independently: the direct Mac app runs first and
 the iOS lane queues behind it on the shared runner, so a slow or failing TestFlight
 upload never delays the Alpha Sparkle feed. A retry (`release-train.mjs plan`)
-rebuilds only the surfaces whose receipts are not yet delivered.
+rebuilds only the surfaces whose receipts are not yet delivered; a verified Mac
+build interrupted before publication only reruns the idempotent `publish-alpha`.
 A failed upload keeps its receipt and build number; retries reuse an existing
 Apple build, while an invalid binary requires a new allocation (dispatch Alpha
 with `rebuild`). The owner can retry just the iOS lane with **Release iOS

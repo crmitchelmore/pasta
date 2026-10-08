@@ -302,7 +302,10 @@ module AppleRelease
 
     # Stable iOS follows the Sparkle release asynchronously: submit once the
     # owner approved the candidate, the direct release is public and Apple has
-    # processed the build. Rejections wait for a human; they are never resubmitted.
+    # processed the build. As publish-stable always did, `submit` creates the
+    # approved version (or reuses an editable one) when none exists yet; an
+    # existing version must still be editable. Rejections of this version wait
+    # for a human; they are never resubmitted.
     def submit_if_ready
       raise 'Alpha must never enter App Store review' unless @train == 'stable'
       return pending('awaiting owner approval') unless owner_approved?

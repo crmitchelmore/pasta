@@ -30,7 +30,9 @@ test('Publish Stable submits iOS best effort; the reconciler finishes it later',
 
 test('Alpha retries rebuild only surfaces still awaiting delivery', () => {
   const workflow = read('alpha-release.yml');
-  assert.match(job(workflow, 'allocate'), /release-train\.mjs plan --tag/);
+  const allocate = job(workflow, 'allocate');
+  assert.match(allocate, /release-train\.mjs plan --tag/);
+  assert.match(allocate, /if: steps\.plan\.outputs\.publish_alpha == 'true'\n\s+env:[\s\S]*?release-train\.mjs publish-alpha --tag/);
   assert.match(job(workflow, 'mac-direct'), /needs\.allocate\.outputs\.mac_direct == 'true'/);
   const ios = job(workflow, 'ios');
   assert.match(ios, /needs: \[allocate, mac-direct\]/);

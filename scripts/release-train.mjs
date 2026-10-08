@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseCommits } from './release-notes-lib.mjs';
-import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, newestReconcileSource, receiptDelivered, receiptNeedsRebuild, stableGateSurfaces, assertStableVersionAdvance } from './release-train-lib.mjs';
+import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, newestReconcileSource, receiptDelivered, receiptNeedsRebuild, stableGateSurfaces, alphaPublicationPending, assertStableVersionAdvance } from './release-train-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/pasta';
 const run = runReleaseCommand;
@@ -156,9 +156,15 @@ if(command === 'allocate' || command === 'prepare') {
         return receipt.source === manifest.source && receipt.build === item.build && receipt.notesHash === item.notesHash ? receipt.status : 'missing';
     };
     const mac=statusOf('mac-direct'), ios=statusOf('ios');
-    const macDone=mac === 'verified' && (manifest.train !== 'alpha' || release?.draft === false);
+    let publish=false;
+    if(mac === 'verified' && manifest.train === 'alpha') {
+        const pointerAsset=releases().find(r=>r.tag_name==='alpha-latest')?.assets.find(a=>a.name==='alpha-pointer.json');
+        const pointer=pointerAsset ? JSON.parse(gh('api',`repos/${repo}/releases/assets/${pointerAsset.id}`,'-H','Accept: application/octet-stream')) : null;
+        publish=alphaPublicationPending(release,pointer,manifest);
+    }
     if(receiptNeedsRebuild('ios',ios)) console.log(`::warning::${manifest.tag} iOS is ${ios}; dispatch with rebuild=true for a new Apple build`);
-    output('mac_direct',String(!macDone));
+    output('mac_direct',String(mac !== 'verified'));
+    output('publish_alpha',String(publish));
     output('ios',String(!receiptDelivered('ios',ios) && !receiptNeedsRebuild('ios',ios)));
 } else if(command === 'receipt') {
     const manifest=manifestFor(required('tag')); const surface=required('surface');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {digest, validateManifest, nextAllocation, effectiveCommits, notesFor, canAdvance, newestReconcileSource, receiptDelivered, receiptNeedsRebuild, stableGateSurfaces} from '../release-train-lib.mjs';
+import {digest, validateManifest, nextAllocation, effectiveCommits, notesFor, canAdvance, newestReconcileSource, receiptDelivered, receiptNeedsRebuild, stableGateSurfaces, alphaPublicationPending} from '../release-train-lib.mjs';
 const source='a'.repeat(40), prior='b'.repeat(40);
 test('manifest rejects changed frozen notes and moving source refs',()=>{
  const entry={version:'3.2.0',build:'1001',baseline:prior,notes:'Frozen',notesHash:digest('Frozen'),storeNotes:'Short',storeNotesHash:digest('Short')};
@@ -58,4 +58,13 @@ test('Apple-refused iOS uploads wait for an explicit rebuild instead of hourly r
 });
 test('only the direct Sparkle app gates Stable publication',()=>{
  assert.deepEqual(stableGateSurfaces,['mac-direct']);
+});
+
+test('a verified Alpha interrupted before publication is repaired, not rebuilt', () => {
+ const manifest={build:'202610080900'};
+ assert.equal(alphaPublicationPending({draft:false},{build:'202610080900'},manifest),false);
+ assert.equal(alphaPublicationPending({draft:false},{build:'202610081000'},manifest),false);
+ assert.equal(alphaPublicationPending({draft:false},{build:'202610070900'},manifest),true);
+ assert.equal(alphaPublicationPending({draft:false},null,manifest),true);
+ assert.equal(alphaPublicationPending({draft:true},{build:'202610080900'},manifest),true);
 });

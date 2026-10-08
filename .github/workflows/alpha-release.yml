@@ -53,6 +53,14 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         TAG: ${{ steps.allocate.outputs.tag }}
       run: node scripts/release-train.mjs plan --tag "$TAG"
+    # A verified Mac build interrupted before publish-alpha only needs its
+    # (idempotent) publication step, not a new signed build.
+    - name: Repair interrupted Alpha publication
+      if: steps.plan.outputs.publish_alpha == 'true'
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ steps.allocate.outputs.tag }}
+      run: node scripts/release-train.mjs publish-alpha --tag "$TAG"
   mac-direct:
     needs: allocate
     if: needs.allocate.outputs.tag != '' && needs.allocate.outputs.mac_direct == 'true'

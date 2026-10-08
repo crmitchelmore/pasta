@@ -223,6 +223,14 @@ class ReleaseAppleTest < Minitest::Test
   end
   def test_stable_ios_submits_asynchronously_once_ready
     d=gated(FakeClient.new)
+    assert d.submit_if_ready, 'approved version is created when none exists, as publish-stable always did'
+    assert d.submitted
+    client=FakeClient.new
+    client.define_singleton_method(:list) do |path|
+      next [{'id'=>'v','attributes'=>{'platform'=>'IOS','versionString'=>'3.2.0','appStoreState'=>'PREPARE_FOR_SUBMISSION'}}] if path.include?('/appStoreVersions')
+      super(path)
+    end
+    d=gated(client)
     assert d.submit_if_ready
     assert d.submitted
   end

@@ -71,6 +71,12 @@ export function receiptNeedsRebuild(surface, status) {
 // Only the direct Sparkle app gates Stable publication. The iOS candidate is
 // submitted to App Store review asynchronously once Apple has processed it.
 export const stableGateSurfaces = ['mac-direct'];
+// A verified direct Alpha is only live once its release is public and the
+// alpha-latest pointer has reached it (or a newer build). An interrupted run can
+// stop between those steps, so retries repair publication without rebuilding.
+export function alphaPublicationPending(release, pointer, manifest) {
+    return release?.draft !== false || canAdvance(pointer, manifest);
+}
 export function nextAllocation(manifests, train, now = Date.now()) {
     const ordinal = 1 + Math.max(0, ...manifests.filter(m => m.train === train).map(m => m.ordinal));
     // Preserve the existing direct-Mac YYYYMMDDHHmm update ordering.
