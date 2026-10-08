@@ -246,6 +246,39 @@ class ReleaseAppleTest < Minitest::Test
       refute d.submitted, state
     end
   end
+  class SubmitClient < FakeClient
+    attr_accessor :conflict
+    def list(path)
+      return [{'id'=>'v','attributes'=>{'platform'=>'IOS','versionString'=>'3.2.0','appStoreState'=>'PREPARE_FOR_SUBMISSION'}}] if path.include?('/appStoreVersions?')
+      return [{'id'=>'loc','attributes'=>{'locale'=>'en-US'}}] if path.end_with?('/appStoreVersionLocalizations')
+      return [] if path.include?('/reviewSubmissions')
+      super(path)
+    end
+    def get(path)
+      return {'data'=>{'attributes'=>{'state'=>'WAITING_FOR_REVIEW'}}} if path.start_with?('/v1/reviewSubmissions/')
+      super(path)
+    end
+    def post(path, body); super; path == '/v1/reviewSubmissions' ? {'data'=>{'id'=>'review'}} : {'data'=>{}}; end
+    def patch(path, body)
+      super
+      raise AppleAPI::ConflictError.new("PATCH #{path} failed (409): #{conflict}", status: 409) if conflict && path.include?('appStoreVersionLocalizations')
+      {'data'=>{}}
+    end
+  end
+  class ApprovedDelivery < Delivery
+    def owner_approved?; true; end
+  end
+  def test_first_app_store_version_submits_without_whats_new
+    client=SubmitClient.new; client.bundle_id=client.bundle_id.delete_suffix('.alpha')
+    client.conflict="Attribute 'whatsNew' cannot be edited at this time"
+    notes='Frozen notes'
+    manifest={'train'=>'stable','source'=>'a'*40,'tag'=>'stable-candidate-1','surfaces'=>{'ios'=>{'version'=>'3.2.0','build'=>'1000.0.1','notes'=>notes,'notesHash'=>Digest::SHA256.hexdigest(notes),'storeNotes'=>notes,'storeNotesHash'=>Digest::SHA256.hexdigest(notes)}}}
+    out, _ = capture_io { ApprovedDelivery.new(client:client,manifest:manifest,surface:'ios').submit }
+    assert_match(/What's New/, out)
+    assert_includes client.patches, '/v1/reviewSubmissions/review'
+    client=SubmitClient.new; client.bundle_id=client.bundle_id.delete_suffix('.alpha'); client.conflict='another resource is locked'
+    assert_raises(AppleAPI::ConflictError) { ApprovedDelivery.new(client:client,manifest:manifest,surface:'ios').submit }
+  end
   def test_alpha_never_submits_through_async_gate
     assert_raises(RuntimeError) { delivery(FakeClient.new).submit_if_ready }
   end

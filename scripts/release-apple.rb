@@ -362,7 +362,13 @@ module AppleRelease
       locales.each do |locale|
         # Notes are reviewed English copy. Do not silently overwrite translations.
         next unless locale.dig('attributes','locale').start_with?('en')
-        @client.patch("/v1/appStoreVersionLocalizations/#{locale['id']}", data:{type:'appStoreVersionLocalizations',id:locale['id'],attributes:{whatsNew:@item['storeNotes']}})
+        begin
+          @client.patch("/v1/appStoreVersionLocalizations/#{locale['id']}", data:{type:'appStoreVersionLocalizations',id:locale['id'],attributes:{whatsNew:@item['storeNotes']}})
+        rescue AppleAPI::ConflictError => e
+          # Apple refuses "What's New" on an app's first App Store version.
+          raise unless e.message.include?('whatsNew')
+          puts "::warning::#{@surface}: Apple does not accept What's New for #{@item['version']} (first App Store version); submitting without it"
+        end
       end
       submissions=@client.list("/v1/apps/#{@app}/reviewSubmissions?limit=200")
       review=submissions.find { |r| r.dig('attributes','platform') == platform && r.dig('attributes','state') == 'READY_FOR_REVIEW' }
