@@ -16,6 +16,8 @@ jobs:
       cancel-in-progress: false
     outputs:
       tag: ${{ steps.allocate.outputs.tag }}
+      mac_direct: ${{ steps.plan.outputs.mac_direct }}
+      ios: ${{ steps.plan.outputs.ios }}
     steps:
     - uses: actions/checkout@v7.0.1
       with:
@@ -44,16 +46,33 @@ jobs:
           exit 0
         fi
         node scripts/release-train.mjs allocate --source "$SOURCE" --rebuild "$REBUILD"
+    - name: Select surfaces still awaiting delivery
+      id: plan
+      if: steps.allocate.outputs.tag != ''
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ steps.allocate.outputs.tag }}
+      run: node scripts/release-train.mjs plan --tag "$TAG"
+    # A verified Mac build interrupted before publish-alpha only needs its
+    # (idempotent) publication step, not a new signed build.
+    - name: Repair interrupted Alpha publication
+      if: steps.plan.outputs.publish_alpha == 'true'
+      env:
+        GH_TOKEN: ${{ github.token }}
+        TAG: ${{ steps.allocate.outputs.tag }}
+      run: node scripts/release-train.mjs publish-alpha --tag "$TAG"
   mac-direct:
     needs: allocate
-    if: needs.allocate.outputs.tag != ''
+    if: needs.allocate.outputs.tag != '' && needs.allocate.outputs.mac_direct == 'true'
     uses: ./.github/workflows/release.yml
     with:
       manifest: ${{ needs.allocate.outputs.tag }}
     secrets: inherit
+  # iOS waits for the direct Mac lane so Sparkle is never queued behind the
+  # longer XCUITest/TestFlight run on the shared release runner.
   ios:
-    needs: allocate
-    if: needs.allocate.outputs.tag != ''
+    needs: [allocate, mac-direct]
+    if: ${{ !cancelled() && needs.allocate.outputs.tag != '' && needs.allocate.outputs.ios == 'true' }}
     uses: ./.github/workflows/release-ios.yml
     with:
       manifest: ${{ needs.allocate.outputs.tag }}

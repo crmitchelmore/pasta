@@ -202,4 +202,51 @@ class ReleaseAppleTest < Minitest::Test
     assert_raises(RuntimeError){d.distribute(wait_seconds:0)}
     assert_equal 'invalid',d.receipts.last.first
   end
+  class GatedDelivery < Delivery
+    attr_accessor :approved, :published, :submitted
+    def owner_approved?; approved; end
+    def direct_release_published?; published; end
+    def submit; @submitted = true; end
+  end
+  def gated(client, approved: true, published: true)
+    client.bundle_id=client.bundle_id.delete_suffix('.alpha')
+    notes='Frozen notes'
+    manifest={'train'=>'stable','source'=>'a'*40,'tag'=>'stable-candidate-1','surfaces'=>{'mac-direct'=>{'version'=>'3.2.0'},'ios'=>{'version'=>'3.2.0','build'=>'1000.0.1','notes'=>notes,'notesHash'=>Digest::SHA256.hexdigest(notes),'storeNotes'=>notes,'storeNotesHash'=>Digest::SHA256.hexdigest(notes)}}}
+    d=GatedDelivery.new(client:client,manifest:manifest,surface:'ios'); d.approved=approved; d.published=published; d
+  end
+  def test_stable_ios_submission_waits_for_approval_sparkle_and_processing
+    refute gated(FakeClient.new, approved: false).submit_if_ready
+    refute gated(FakeClient.new, published: false).submit_if_ready
+    client=FakeClient.new; client.processing='PROCESSING'; d=gated(client)
+    refute d.submit_if_ready
+    refute d.submitted
+  end
+  def test_stable_ios_submits_asynchronously_once_ready
+    d=gated(FakeClient.new)
+    assert d.submit_if_ready, 'approved version is created when none exists, as publish-stable always did'
+    assert d.submitted
+    client=FakeClient.new
+    client.define_singleton_method(:list) do |path|
+      next [{'id'=>'v','attributes'=>{'platform'=>'IOS','versionString'=>'3.2.0','appStoreState'=>'PREPARE_FOR_SUBMISSION'}}] if path.include?('/appStoreVersions')
+      super(path)
+    end
+    d=gated(client)
+    assert d.submit_if_ready
+    assert d.submitted
+  end
+  def test_stable_ios_never_resubmits_rejected_or_active_reviews
+    %w[REJECTED METADATA_REJECTED WAITING_FOR_REVIEW READY_FOR_SALE].each do |state|
+      client=FakeClient.new
+      client.define_singleton_method(:list) do |path|
+        next [{'id'=>'v','attributes'=>{'platform'=>'IOS','versionString'=>'3.2.0','appStoreState'=>state}}] if path.include?('/appStoreVersions')
+        super(path)
+      end
+      d=gated(client)
+      refute d.submit_if_ready, state
+      refute d.submitted, state
+    end
+  end
+  def test_alpha_never_submits_through_async_gate
+    assert_raises(RuntimeError) { delivery(FakeClient.new).submit_if_ready }
+  end
 end

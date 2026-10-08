@@ -19,6 +19,9 @@ env:
 jobs:
   preflight:
     name: "Preflight \u2014 iOS E2E (XCUITest)"
+    # The github context belongs to the caller in reusable runs, so only a
+    # direct dispatch of this workflow has to come from the owner on main.
+    if: github.workflow != 'Release iOS (TestFlight)' || (github.actor == github.repository_owner && github.ref == 'refs/heads/main')
     runs-on: pasta-local
     timeout-minutes: 45
     env:
@@ -401,5 +404,13 @@ jobs:
   workflow_call:
     inputs:
       manifest:
+        required: true
+        type: string
+  # Retries the iOS surface of an existing manifest on its own, so TestFlight
+  # or App Store delivery never requires rebuilding the Sparkle release.
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Existing alpha-build-N or stable-candidate-N tag
         required: true
         type: string

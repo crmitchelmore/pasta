@@ -111,9 +111,13 @@ jobs:
         GH_TOKEN: ${{ github.token }}
         CANDIDATE: ${{ inputs.candidate }}
       run: node scripts/release-train.mjs withdraw --tag "$CANDIDATE"
+  # Best effort: the Sparkle release above is already live. If the iOS
+  # candidate is still processing (or this step fails), the hourly Apple
+  # reconciler submits the approved candidate later.
   submit-apple:
     needs: publish
     runs-on: macos-15
+    continue-on-error: true
     steps:
     - uses: actions/checkout@v7.0.1
       with:
@@ -130,13 +134,13 @@ jobs:
         umask 077
         mkdir -p "$HOME/.appstoreconnect/private_keys"
         printf '%s' "$KEY_DATA" | base64 --decode > "$HOME/.appstoreconnect/private_keys/AuthKey_B3BM4F88FJ.p8"
-    - name: Submit approved Stable Apple builds
+    - name: Submit approved Stable iOS build when Apple has processed it
       env:
         GH_TOKEN: ${{ github.token }}
         APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
         APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
       run: |
-        ruby scripts/release-apple.rb submit "$RUNNER_TEMP/release-manifest.json" "ios"
+        ruby scripts/release-apple.rb submit-if-ready "$RUNNER_TEMP/release-manifest.json" "ios"
 'on':
   workflow_dispatch:
     inputs:

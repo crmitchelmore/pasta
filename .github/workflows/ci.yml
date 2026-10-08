@@ -10,6 +10,10 @@ on:
   # the macOS "Build & Test" job.
   workflow_dispatch:
 
+# Read-only by default; jobs that need more declare it explicitly.
+permissions:
+  contents: read
+
 jobs:
   # ============================================================================
   # LANDING PAGE / UPDATE SURFACE (cheap ubuntu jobs; see landing-page/README.md)

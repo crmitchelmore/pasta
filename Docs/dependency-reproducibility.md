@@ -34,12 +34,18 @@ An iOS signed archive still needs its release validation.
 ## Intentional updates
 
 On a Mac, update dependencies deliberately with `swift package update`. Review
-the source revision changes, copy the resulting lock to the iOS workspace lock
-path, then run `scripts/ci-ios-e2e.sh resolve` to validate it with Xcode using
+the source revision changes, copy the resulting pins to the iOS workspace lock
+with `python3 scripts/ci-verify-dependency-locks.py --sync`, then run `scripts/ci-ios-e2e.sh resolve` to validate it with Xcode using
 strict resolution. Review and commit both lockfiles together. Run
 `python3 scripts/ci-verify-dependency-locks.py`, then normal CI. Xcode may change
 the lock schema or ordering; the verifier compares dependency pins, not JSON
 formatting. Cache keys include both locks.
+
+Dependabot only updates the root `Package.resolved`, so its Swift PRs fail the
+lock gate until someone runs `--sync` on the branch (and, for major versions,
+updates the Xcode project's package requirement). That is deliberate: Dependabot
+runs without a release token and its updates are reviewed rather than
+auto-rewritten.
 
 This pins the Swift dependency graph. Hosted runner images, Xcode selection,
 GitHub Actions tags and Homebrew tools remain separate reproducibility and
