@@ -15,26 +15,75 @@ two-device clipboard journey. Use this map when describing release confidence.
 | Sparkle release | Live feed/DMG verification checks metadata, signatures, notarization and launch; failure drafts the GitHub release. | No installed older app is driven through Sparkle's update UI and relaunch. Drafting does not undo already-downloaded copies. |
 | TestFlight | Processing must report `VALID`; rejection or unverified timeout fails. | Upload has already occurred. `VALID` is processing acceptance, not an installed-device journey or external tester approval. Timeout does not cancel processing. |
 
-## Experimental Jev comparison
+## Remote classification and comparison
 
 In Settings → Detection, save a TypeSafe API key. Saving runs a real connection
 test using the harmless sample `https://example.com`; **Test Connection** repeats
 it. Only a successful test of the current key, HTTPS endpoint and model unlocks
-**Enable Jev comparison**. Replacing the key or changing the endpoint/model
-disables comparison and requires another test, including after relaunch.
+**Enable Jev**. Replacing the key or changing the endpoint/model
+disables the provider and requires another test, including after relaunch.
 The defaults are `https://api.typesafe.ai/v1/systemone` and `jev-latest`.
 Legacy endpoint/model settings migrate with comparison disabled.
 
-While enabled, eligible newly captured text is sent to TypeSafe. **Compare
-Classification with Jev…** confirms the destination and eligible history count
+Jev's new-entry mode defaults to **Compare only** for existing installations.
+It sends no background captures; history is sent only after explicit confirmation.
+**Use Jev by default** asynchronously applies known Jev decisions after durable
+local capture. **Use Jev when local confidence is low** sends only captures with
+local confidence strictly below the adjustable threshold (75% by default).
+Local confidence is a detector heuristic, not a calibrated probability.
+Failures and Unknown retain the local result and failures are surfaced.
+Requests are serialized with a bounded live queue; overflow retains the local
+result and shows an error. Authoritative modes preserve original env-var blocks;
+disabled/comparison-only modes keep the legacy per-variable splitting.
+
+**Compare Classifiers…** confirms every destination and eligible history count
 before a bounded-concurrency run with progress and cancellation. Images,
-extracted children, empty entries and locally detected secrets/financial data
+file pastes, extracted children, empty entries and locally detected secrets/financial data
 are skipped by default; sending sensitive types requires the separate opt-in.
-Text is truncated to 20,000 characters. Local classifications remain unchanged,
-and JSON/CSV reports exclude clipboard content and the key.
+Text is truncated to 20,000 characters. History comparisons run the current local
+detectors afresh and do not change saved classifications. JSON/CSV reports exclude
+clipboard content and keys.
+
+**Reclassify History with Jev…** separately confirms mutation of saved history.
+Known completed decisions rebuild metadata/extracted children transactionally,
+preserving original content, identity, timestamps, copy counts, pins and sharing
+consent. Changed/deleted snapshots are not overwritten or resurrected. Cancellation
+stops remaining work; already applied updates are retained. The final report
+shows updated, retained, changed/deleted and failed counts. Changing provider,
+detector or extraction settings stops application of stale decisions. Changed
+rows remain pending sync; an older upload cannot mark a newer classification synced.
+Classification writes share the macOS sync gate, so an in-flight downloaded
+payload finishes before a delayed provider result can update its saved snapshot.
+Retired extracted children have durable CloudKit deletion records, drained before
+upload/pull and protected from delayed cloud replay, including after a restart.
+
+### Microsoft Decision-1
+
+The separate **Microsoft Decision-1 Comparison** section is opt-in and
+comparison-only. The [official announcement](https://commandline.microsoft.com/microsoft-decision-1-model-foundry/)
+and [Foundry model card](https://ai.azure.com/catalog/models/Microsoft-Decision-1)
+identify the text-only fixed-choice decision model, not MAI-Thinking-1.
+Configure your deployment's **full System One-compatible HTTPS endpoint** and its
+own API key; the model defaults to `microsoft-decision-1`. This implements the
+`state`/`questions`/`criteria` contract used by the
+[published Decision-1 example](https://github.com/jennifermarsman/GitHubIssueClassifier/blob/2ce498b07d1ed99c119cde4090f5245dd436e0dc/server/classifier.ts).
+There is no invented shared Foundry endpoint, no assumption that chat completions
+accept this contract, and no reuse of the TypeSafe credential. A successful
+connection test must return a served model identifying itself as Microsoft-Decision-1
+before it can be enabled. Native Foundry endpoints with a different wire contract
+are not supported by this adapter; use the deployment's System One-compatible
+endpoint rather than guessing a path.
+
+With both providers enabled, comparison displays **local detectors, Jev and
+Microsoft Decision-1 side by side**, with separate confidence, latency, model,
+failure and skip information. Either provider can be compared alone. Sensitive
+content consent and validation are independent per provider. Microsoft Decision-1
+is called only during explicitly confirmed comparisons, never on background capture
+or Jev history reclassification. Live Microsoft connectivity still requires a
+real compatible deployment and key; mock transport tests do not establish it.
 
 Select a comparison row to inspect its original clipboard item in the detail
-pane, alongside the Pasta and Jev classifications. The preview uses the local
+pane, alongside all enabled classifications. The preview uses the local
 snapshot taken for that run, so later history changes do not replace the item
 you are judging. It sends no additional provider requests and remains excluded
 from JSON/CSV exports. Copy is available in the preview and the row context menu.
@@ -42,7 +91,7 @@ from JSON/CSV exports. Copy is available in the preview and the row context menu
 Use **Remove Key** in the same settings section to delete the credential from
 Keychain and disable comparison. A deletion error is shown rather than reported
 as success. Keys are never stored in defaults; only a validation fingerprint is
-persisted there. `swift test --filter JevClassificationTests` covers the transport,
+persisted there. `swift test --filter 'JevClassificationTests|JevReclassificationE2ETests|JevComparisonViewTests'` covers the transport,
 validation gate, retries, cancellation, report statistics and exports with a
 mock API. These tests do not establish accuracy or connectivity to the live
 provider; verify those with a real key and non-sensitive sample history.

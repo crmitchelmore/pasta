@@ -106,6 +106,7 @@ struct E2ECapturePipeline {
     var storeImages = true
     var extractContent = true
     var deduplicate = true
+    var preserveEnvVarBlock = false
 
     func enrich(_ captured: ClipboardEntry) throws -> Result {
         var entry = captured
@@ -123,7 +124,7 @@ struct E2ECapturePipeline {
 
         let output = detector.detect(in: entry.content, configuration: configuration)
 
-        if output.primaryType == .envVarBlock, !output.splitEntries.isEmpty {
+        if !preserveEnvVarBlock, output.primaryType == .envVarBlock, !output.splitEntries.isEmpty {
             let split = output.splitEntries.map { piece in
                 ClipboardEntry(
                     content: piece.content,
@@ -152,7 +153,9 @@ struct E2ECapturePipeline {
                     timestamp: entry.timestamp,
                     sourceApp: entry.sourceApp,
                     metadata: item.metadataJSON,
-                    parentEntryId: entry.id
+                    parentEntryId: entry.id,
+                    cloudSyncAllowed: entry.cloudSyncAllowed,
+                    receivedViaTailnet: entry.receivedViaTailnet
                 )
             }
         }
@@ -166,8 +169,12 @@ struct E2ECapturePipeline {
     @discardableResult
     func ingest(_ captured: ClipboardEntry) throws -> Result {
         var result = try enrich(captured)
-        for entry in result.allEntries {
-            result.persisted.append(try database.insert(entry, deduplicate: deduplicate).entry)
+        var primaryID: UUID?
+        for var entry in result.allEntries {
+            if entry.parentEntryId != nil, let primaryID { entry.parentEntryId = primaryID }
+            let stored = try database.insert(entry, deduplicate: deduplicate).entry
+            if entry.parentEntryId == nil { primaryID = stored.id }
+            result.persisted.append(stored)
         }
         return result
     }

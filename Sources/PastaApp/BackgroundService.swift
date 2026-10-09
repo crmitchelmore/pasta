@@ -61,12 +61,14 @@ final class BackgroundService: ObservableObject {
 
     private nonisolated static func jevLiveConfiguration() -> (configuration: JevConfiguration, apiKey: String)? {
         let configuration = JevConfiguration.load()
-        guard configuration.isEnabled,
-              let apiKey = try? JevKeychain.read(),
-              configuration.isComparisonAllowed(apiKey: apiKey) else {
+        guard configuration.isEnabled, configuration.mode != .comparison else { return nil }
+        do {
+            guard let apiKey = try JevKeychain.read(), configuration.isComparisonAllowed(apiKey: apiKey) else { return nil }
+            return (configuration, apiKey)
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Could not read the enabled Jev API key")
             return nil
         }
-        return (configuration, apiKey)
     }
     
     private enum Defaults {
@@ -195,6 +197,34 @@ final class BackgroundService: ObservableObject {
         }
     }
 
+    func applyJevClassification(
+        _ classification: JevClassification,
+        to snapshot: ClipboardEntry,
+        configuration: JevConfiguration,
+        apiKey: String,
+        detectorConfiguration: DetectorConfiguration,
+        extractContent: Bool
+    ) async throws -> JevReclassificationService.Outcome {
+        try await syncReceiver.runWhenAvailable {
+            let db = self.database
+            let result = await withCancellableDetachedTask(priority: .utility) {
+                Result {
+                    try Task.checkCancellation()
+                    guard Self.isCurrentJevConfiguration(configuration, apiKey: apiKey),
+                          DetectorConfigurationStore.load() == detectorConfiguration,
+                          UserDefaults.standard.bool(forKey: Defaults.extractContent) == extractContent else {
+                        throw JevConfigurationError.validationRequired
+                    }
+                    return try JevReclassificationService().apply(
+                        classification, to: snapshot, database: db, configuration: configuration,
+                        detectorConfiguration: detectorConfiguration, extractContent: extractContent
+                    )
+                }
+            }
+            return try result.get()
+        }
+    }
+
     /// Upload pending local rows before applying cloud versions of those IDs.
     /// Automatic attempts use the same order as manual sync: receiving first
     /// could overwrite an offline local change or image with its older cloud row.
@@ -203,7 +233,7 @@ final class BackgroundService: ObservableObject {
         try await syncManager.setupZone()
         let database = database
         let syncManager = syncManager
-        _ = try await database.backfillUnsynced { entries, onBatchSynced in
+        _ = try await database.backfillUnsynced(deleting: { id in try await syncManager.deleteEntry(id: id) }) { entries, onBatchSynced in
             try await syncManager.pushEntries(entries, onBatchSynced: onBatchSynced)
         }
         try Task.checkCancellation()
@@ -475,6 +505,7 @@ final class BackgroundService: ObservableObject {
                 let extractContent = UserDefaults.standard.bool(forKey: Defaults.extractContent)
                 let detectorConfiguration = self.detectorConfiguration
                 let syncManager = self.syncManager
+                let jevConfiguration = JevConfiguration.load()
                 
                 Task.detached {
                     let result: EnrichResult
@@ -485,40 +516,20 @@ final class BackgroundService: ObservableObject {
                             imageStorage: storage,
                             storeImages: storeImages,
                             extractContent: extractContent,
-                            detectorConfiguration: detectorConfiguration
+                            detectorConfiguration: detectorConfiguration,
+                            preserveEnvVarBlock: jevConfiguration.isEnabled && jevConfiguration.mode != .comparison
                         )
                     } catch {
                         PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Failed to enrich entry")
                         result = EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: [])
                     }
 
-                    if let jev = Self.jevLiveConfiguration(),
-                       !(skipAPIKeys && result.primaryEntry.contentType == .apiKey),
-                       JevEligibility.skipReason(for: result.primaryEntry, configuration: jev.configuration) == nil {
-                        let localCategory = result.primaryEntry.contentType
-                        let content = result.primaryEntry.content
-                        Task.detached(priority: .utility) {
-                            let current = JevConfiguration.load()
-                            guard current == jev.configuration, current.isComparisonAllowed(apiKey: jev.apiKey) else { return }
-                            do {
-                                let classification = try await JevClassifier().classify(
-                                    content: content,
-                                    configuration: jev.configuration,
-                                    apiKey: jev.apiKey
-                                )
-                                let confidence = classification.confidence.map { String(format: "%.2f", $0) } ?? "n/a"
-                                let latencyMs = Int((classification.latency * 1000).rounded())
-                                PastaLogger.clipboard.info("Jev comparison completed: local=\(localCategory.rawValue), jev=\(classification.rawChoice), agree=\(localCategory == classification.category), confidence=\(confidence), model=\(classification.modelVersion ?? "unknown"), latencyMs=\(latencyMs), attempts=\(classification.attempts)")
-                            } catch {
-                                PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Jev comparison failed")
-                            }
-                        }
-                    }
-
                     // Insert all entries
                     var insertedEntries: [ClipboardEntry] = []
                     var firstInsertionError: PastaError?
-                    for e in result.allEntries {
+                    var persistedPrimaryID: UUID?
+                    for var e in result.allEntries {
+                        if e.parentEntryId != nil, let persistedPrimaryID { e.parentEntryId = persistedPrimaryID }
                         // Skip API keys if setting is enabled
                         if skipAPIKeys && e.contentType == .apiKey {
                             PastaLogger.clipboard.debug("Skipped API key entry - disabled in settings")
@@ -531,6 +542,7 @@ final class BackgroundService: ObservableObject {
                             // own UUID never reached the database. Uploading `e`
                             // created phantom remote records (pasta-109).
                             let outcome = try db.insert(e, deduplicate: deduplicate)
+                            if e.parentEntryId == nil { persistedPrimaryID = outcome.entry.id }
                             insertedEntries.append(outcome.entry)
                             PastaLogger.clipboard.debug("\(outcome.isNewRow ? "Inserted" : "Deduplicated") entry: \(e.contentType.rawValue)\(e.isExtracted ? " (extracted)" : "")")
                         } catch {
@@ -546,15 +558,58 @@ final class BackgroundService: ObservableObject {
                         let db = self.database
                         let entriesToPush = insertedEntries
                         Task.detached(priority: .utility) {
-                            var syncedIDs: [UUID] = []
+                            var syncedEntries: [ClipboardEntry] = []
                             for entry in entriesToPush {
                                 do {
                                     try await syncManager.pushEntry(entry)
-                                    syncedIDs.append(entry.id)
+                                    syncedEntries.append(entry)
                                 } catch {}
                             }
-                            if !syncedIDs.isEmpty {
-                                try? db.markSynced(ids: syncedIDs)
+                            do {
+                                try db.markSynced(matching: syncedEntries)
+                            } catch {
+                                PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to acknowledge clipboard upload")
+                            }
+                            if let jev = Self.jevLiveConfiguration(), jev.configuration == jevConfiguration {
+                                for snapshot in entriesToPush where snapshot.parentEntryId == nil {
+                                    let local = detector.detect(in: snapshot.content, configuration: detectorConfiguration)
+                                    let localCategory = local.primaryType
+                                    guard jev.configuration.shouldClassify(localConfidence: local.confidence),
+                                          JevEligibility.skipReason(for: snapshot, configuration: jev.configuration) == nil,
+                                          JevEligibility.skipReason(contentType: local.primaryType, content: snapshot.content, configuration: jev.configuration) == nil else { continue }
+                                    let accepted = await JevLiveQueue.shared.enqueue {
+                                        guard Self.isCurrentJevConfiguration(jev.configuration, apiKey: jev.apiKey),
+                                              DetectorConfigurationStore.load() == detectorConfiguration else { return }
+                                        do {
+                                            let classification = try await JevClassifier().classify(content: snapshot.content, configuration: jev.configuration, apiKey: jev.apiKey,
+                                                                                                    authorizationCheck: {
+                                                Self.isCurrentJevConfiguration(jev.configuration, apiKey: jev.apiKey)
+                                                    && DetectorConfigurationStore.load() == detectorConfiguration
+                                            })
+                                            guard Self.isCurrentJevConfiguration(jev.configuration, apiKey: jev.apiKey),
+                                                  DetectorConfigurationStore.load() == detectorConfiguration,
+                                                  UserDefaults.standard.bool(forKey: Defaults.extractContent) == extractContent else { return }
+                                            if jev.configuration.mode != .comparison {
+                                                let outcome = try await self.applyJevClassification(
+                                                    classification, to: snapshot, configuration: jev.configuration, apiKey: jev.apiKey,
+                                                    detectorConfiguration: detectorConfiguration, extractContent: extractContent
+                                                )
+                                                if outcome == .applied {
+                                                    await MainActor.run { NotificationCenter.default.post(name: Notification.Name("pasta.entriesDidChange"), object: nil) }
+                                                }
+                                            }
+                                            PastaLogger.clipboard.info("Jev completed: local=\(localCategory.rawValue), jev=\(classification.rawChoice), model=\(classification.modelVersion ?? "unknown"), mode=\(jev.configuration.mode.rawValue)")
+                                        } catch {
+                                            PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Jev classification failed; local result retained")
+                                            await MainActor.run { self.lastError = .unknown(underlying: error) }
+                                        }
+                                    }
+                                    if !accepted {
+                                        let error = NSError(domain: "Pasta.Jev", code: 1, userInfo: [NSLocalizedDescriptionKey: "Jev's live request queue is full. This clipboard item's local classification was retained."])
+                                        PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Jev request not queued")
+                                        await MainActor.run { self.lastError = .unknown(underlying: error) }
+                                    }
+                                }
                             }
                         }
                     }
@@ -746,7 +801,8 @@ final class BackgroundService: ObservableObject {
         imageStorage: ImageStorageManager,
         storeImages: Bool,
         extractContent: Bool,
-        detectorConfiguration: DetectorConfiguration
+        detectorConfiguration: DetectorConfiguration,
+        preserveEnvVarBlock: Bool = false
     ) throws -> EnrichResult {
         var entry = entry
 
@@ -770,7 +826,7 @@ final class BackgroundService: ObservableObject {
         let output = detector.detect(in: entry.content, configuration: detectorConfiguration)
 
         // Handle env var block splitting (legacy behavior - these don't have parent links)
-        if output.primaryType == .envVarBlock, !output.splitEntries.isEmpty {
+        if !preserveEnvVarBlock, output.primaryType == .envVarBlock, !output.splitEntries.isEmpty {
             let splitEntries = output.splitEntries.map { split in
                 ClipboardEntry(
                     content: split.content,
@@ -780,6 +836,7 @@ final class BackgroundService: ObservableObject {
                     metadata: split.metadataJSON
                 )
             }
+
             return EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: splitEntries)
         }
 
@@ -803,13 +860,24 @@ final class BackgroundService: ObservableObject {
                     timestamp: entry.timestamp,
                     sourceApp: entry.sourceApp,
                     metadata: item.metadataJSON,
-                    parentEntryId: entry.id // Link to parent
+                    parentEntryId: entry.id,
+                    cloudSyncAllowed: entry.cloudSyncAllowed,
+                    receivedViaTailnet: entry.receivedViaTailnet
                 )
             }
             PastaLogger.clipboard.debug("Extracted \(extractedEntries.count) items from entry")
         }
 
         return EnrichResult(primaryEntry: entry, extractedEntries: extractedEntries, envVarSplitEntries: [])
+    }
+
+    private nonisolated static func isCurrentJevConfiguration(_ configuration: JevConfiguration, apiKey: String) -> Bool {
+        guard JevConfiguration.load() == configuration, configuration.isComparisonAllowed(apiKey: apiKey) else { return false }
+        do { return try JevKeychain.read() == apiKey }
+        catch {
+            PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Could not recheck Jev credentials")
+            return false
+        }
     }
     
     // MARK: - Delete Operations
