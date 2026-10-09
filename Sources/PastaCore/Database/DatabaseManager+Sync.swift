@@ -35,6 +35,9 @@ extension DatabaseManager {
 
         try dbWriter.write { db in
             for entry in modified where !deletedIDs.contains(entry.id) {
+                let retired = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM classification_cloud_deletions WHERE id = ?)",
+                                               arguments: [entry.id.uuidString]) ?? false
+                guard !retired else { continue }
                 try db.execute(
                     sql: """
                     INSERT INTO \(ClipboardEntry.databaseTableName)
@@ -91,6 +94,8 @@ extension DatabaseManager {
                     sql: "DELETE FROM \(ClipboardEntry.databaseTableName) WHERE id IN (\(placeholders))",
                     arguments: StatementArguments(chunk.map { $0.uuidString })
                 )
+                try db.execute(sql: "DELETE FROM classification_cloud_deletions WHERE id IN (\(placeholders))",
+                               arguments: StatementArguments(chunk.map { $0.uuidString }))
             }
 
             if let checkpoint {
@@ -131,16 +136,41 @@ extension DatabaseManager {
     /// durable row remains pending, so callers cannot pull older cloud payloads
     /// over local changes that have not reached the server.
     @discardableResult
-    public func backfillUnsynced(using uploader: UnsyncedEntryUploader) async throws -> Int {
+    public func backfillUnsynced(
+        deleting deleter: (@Sendable (UUID) async throws -> Void)? = nil,
+        using uploader: UnsyncedEntryUploader
+    ) async throws -> Int {
+        while true {
+            let retired = try pendingClassificationDeletions()
+            guard !retired.isEmpty else { break }
+            guard let deleter else {
+                throw NSError(domain: "Pasta.Sync", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "Extracted-item deletions must be uploaded before downloading clipboard history."
+                ])
+            }
+            for id in retired {
+                try Task.checkCancellation()
+                try await deleter(id)
+                try await dbWriter.write { db in
+                    try db.execute(sql: "UPDATE classification_cloud_deletions SET needsUpload = 0 WHERE id = ?", arguments: [id.uuidString])
+                }
+            }
+        }
         let pending = try fetchUnsynced()
         guard !pending.isEmpty else { return 0 }
 
+        let snapshots = Dictionary(uniqueKeysWithValues: pending.map { ($0.id, $0) })
         let uploaded = try await uploader(pending) { [self] ids in
-            try? markSynced(ids: ids)
+            do {
+                try markSynced(matching: ids.compactMap { snapshots[$0] })
+            } catch {
+                PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to acknowledge uploaded snapshots")
+            }
         }
         try Task.checkCancellation()
         let remaining = try unsyncedCount()
-        guard remaining == 0 else { throw PendingSyncUploadsError(count: remaining) }
+        let deletions = try pendingClassificationDeletions().count
+        guard remaining == 0 && deletions == 0 else { throw PendingSyncUploadsError(count: remaining + deletions) }
         return uploaded
     }
 
@@ -153,6 +183,35 @@ extension DatabaseManager {
                 sql: "UPDATE \(ClipboardEntry.databaseTableName) SET isSynced = 1 WHERE id IN (\(placeholders))",
                 arguments: StatementArguments(ids.map { $0.uuidString })
             )
+        }
+    }
+
+    /// An older upload must not acknowledge a newer classification or sharing policy.
+    public func markSynced(matching snapshots: [ClipboardEntry]) throws {
+        try dbWriter.write { db in
+            for snapshot in snapshots {
+                guard let current = try ClipboardEntry.fetchOne(db, key: snapshot.id.uuidString) else { continue }
+                let timestampMatches = try Bool.fetchOne(db, sql: "SELECT timestamp = ? FROM clipboard_entries WHERE id = ?",
+                                                         arguments: [snapshot.timestamp, snapshot.id.uuidString]) ?? false
+                let matches = current.content == snapshot.content && current.contentType == snapshot.contentType
+                    && current.metadata == snapshot.metadata && current.rawData == snapshot.rawData
+                    && timestampMatches && current.copyCount == snapshot.copyCount
+                    && current.cloudSyncAllowed == snapshot.cloudSyncAllowed
+                    && current.receivedViaTailnet == snapshot.receivedViaTailnet
+                // A stale upload could have replaced the remote record after a newer
+                // upload completed. Keep the current row pending for reconciliation.
+                try db.execute(sql: "UPDATE clipboard_entries SET isSynced = ? WHERE id = ?",
+                               arguments: [matches, snapshot.id.uuidString])
+            }
+        }
+    }
+
+    public func pendingClassificationDeletions() throws -> [UUID] {
+        try dbWriter.read { db in
+            try String.fetchAll(db, sql: "SELECT id FROM classification_cloud_deletions WHERE needsUpload = 1 ORDER BY id LIMIT 500").map {
+                guard let id = UUID(uuidString: $0) else { throw CocoaError(.coderReadCorrupt) }
+                return id
+            }
         }
     }
 

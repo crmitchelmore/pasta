@@ -391,6 +391,137 @@ final class JevClassificationTests: XCTestCase {
 
     // MARK: Helpers
 
+    func testClassificationModesPersistWithComparisonOnlyMigrationAndAdjustableThreshold() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        XCTAssertEqual(JevConfiguration.load(defaults: defaults).mode, .comparison)
+        XCTAssertFalse(JevConfiguration(isEnabled: true, mode: .comparison).shouldClassify(localConfidence: 0))
+        var configuration = JevConfiguration(isEnabled: true, mode: .fallback)
+        configuration.save(defaults: defaults)
+        let loaded = JevConfiguration.load(defaults: defaults)
+        XCTAssertEqual(loaded.mode, .fallback)
+        XCTAssertEqual(loaded.fallbackThreshold, 0.75)
+        XCTAssertTrue(loaded.shouldClassify(localConfidence: 0.7499))
+        XCTAssertFalse(loaded.shouldClassify(localConfidence: 0.75))
+        XCTAssertFalse(loaded.shouldClassify(localConfidence: 0.9))
+        configuration.fallbackThreshold = 0.6
+        configuration.save(defaults: defaults)
+        XCTAssertEqual(JevConfiguration.load(defaults: defaults).fallbackThreshold, 0.6)
+        configuration.mode = .primary
+        XCTAssertTrue(configuration.shouldClassify(localConfidence: 1))
+        configuration.isEnabled = false
+        XCTAssertFalse(configuration.shouldClassify(localConfidence: 0))
+        XCTAssertEqual(JevConfiguration(fallbackThreshold: .nan).fallbackThreshold, 0.75)
+        XCTAssertEqual(JevConfiguration(fallbackThreshold: 2).fallbackThreshold, 1)
+    }
+
+    func testMicrosoftSettingsAndValidationAreIsolatedFromJevAndNeverGuessEndpoint() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        let empty = JevConfiguration.load(provider: .microsoftDecision, defaults: defaults)
+        XCTAssertEqual(JevConfiguration(provider: .microsoftDecision).endpoint, "")
+        XCTAssertEqual(JevConfiguration(provider: .microsoftDecision).effectiveModel, "microsoft-decision-1")
+        XCTAssertNil(empty.endpointURL)
+        XCTAssertEqual(empty.effectiveModel, "microsoft-decision-1")
+        XCTAssertFalse(empty.isEnabled)
+        let jev = JevConfiguration(isEnabled: true, mode: .primary)
+        jev.save(defaults: defaults)
+        jev.recordSuccessfulValidation(apiKey: "jev-test-key", defaults: defaults)
+        let microsoft = JevConfiguration(isEnabled: true, endpoint: "https://decision.example/v1/systemone",
+                                         model: "microsoft-decision-1", provider: .microsoftDecision)
+        microsoft.save(defaults: defaults)
+        XCTAssertFalse(microsoft.isValidated(apiKey: "jev-test-key", defaults: defaults))
+        microsoft.recordSuccessfulValidation(apiKey: "decision-test-key", defaults: defaults)
+        XCTAssertTrue(microsoft.isComparisonAllowed(apiKey: "decision-test-key", defaults: defaults))
+        XCTAssertFalse(microsoft.shouldClassify(localConfidence: 0))
+        JevConfiguration.invalidateValidation(provider: .microsoftDecision, defaults: defaults)
+        XCTAssertTrue(jev.isComparisonAllowed(apiKey: "jev-test-key", defaults: defaults))
+        XCTAssertFalse(JevConfiguration.load(provider: .microsoftDecision, defaults: defaults).isEnabled)
+        XCTAssertEqual(JevConfiguration.load(defaults: defaults).mode, .primary)
+    }
+
+    func testMicrosoftUsesSameChoiceContractWithItsOwnEndpointAndModel() async throws {
+        let body = Self.successBody(choice: "url").replacingOccurrences(of: "jev-1.13.0", with: "Microsoft-Decision-1")
+        JevMockURLProtocol.enqueue(status: 200, body: body)
+        let configuration = JevConfiguration(endpoint: "https://decision.example/v1/systemone",
+                                             model: "microsoft-decision-1", provider: .microsoftDecision)
+        let result = try await makeClassifier().validate(configuration: configuration, apiKey: "decision-test-key")
+        XCTAssertEqual(result.category, .url)
+        XCTAssertEqual(result.modelVersion, "Microsoft-Decision-1")
+        XCTAssertEqual(JevMockURLProtocol.requests.first?.url?.absoluteString, configuration.endpoint)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(JevMockURLProtocol.bodies.first)) as? [String: Any])
+        XCTAssertEqual(payload["model"] as? String, "microsoft-decision-1")
+        XCTAssertNotNil(payload["questions"])
+    }
+
+    func testMicrosoftCannotValidateByAccidentallyCallingJev() async {
+        JevMockURLProtocol.enqueue(status: 200, body: Self.successBody(choice: "url"))
+        let configuration = JevConfiguration(endpoint: "https://decision.example/v1/systemone",
+                                             model: "microsoft-decision-1", provider: .microsoftDecision)
+        await XCTAssertThrowsJevError(try await makeClassifier().validate(configuration: configuration, apiKey: "key")) {
+            guard case .invalidResponse = $0 else { return XCTFail("Wrong model must not validate") }
+        }
+    }
+
+    func testInvalidConfidenceCannotCrashComparisonRendering() async {
+        JevMockURLProtocol.enqueue(status: 200, body: Self.successBody(choice: "url", confidence: 1e100))
+        await XCTAssertThrowsJevError(try await makeClassifier().classify(content: "x", configuration: .init(), apiKey: "key")) {
+            guard case .invalidResponse = $0 else { return XCTFail("Invalid probability accepted") }
+        }
+    }
+
+    func testRevokedAuthorizationStopsComparisonBeforeSending() async {
+        let report = await JevComparisonService(classifier: makeClassifier(), maxConcurrentRequests: 1).compare(
+            entries: [entry(.text), entry(.prose)], configuration: .init(), apiKey: "key",
+            authorizationCheck: { false }
+        )
+        XCTAssertNotNil(report.abortReason)
+        XCTAssertEqual(report.failed, 1)
+        XCTAssertTrue(JevMockURLProtocol.requests.isEmpty)
+    }
+
+    func testRevokedAuthorizationPreventsTransportRetry() async {
+        JevMockURLProtocol.enqueue(status: 503, body: "{}")
+        JevMockURLProtocol.enqueue(status: 200, body: Self.successBody(choice: "prose"))
+        let report = await JevComparisonService(classifier: makeClassifier(), maxConcurrentRequests: 1).compare(
+            entries: [entry(.text)], configuration: .init(), apiKey: "key",
+            authorizationCheck: { JevMockURLProtocol.requests.isEmpty }
+        )
+        XCTAssertNotNil(report.abortReason)
+        XCTAssertEqual(report.failed, 1)
+        XCTAssertEqual(JevMockURLProtocol.requests.count, 1)
+    }
+
+    func testMultiProviderExportsKeepResultsSeparateWithoutOriginalContent() throws {
+        let original = entry(.text, content: "LOCAL_ONLY_THREE_PROVIDER_SENTINEL")
+        let jevRow = JevComparisonRow(id: original.id, timestamp: original.timestamp, sourceApp: nil,
+                                     localCategory: .text, jevCategory: .prose, confidence: 0.8, jevModel: "jev-1.13.0")
+        let decisionRow = JevComparisonRow(id: original.id, timestamp: original.timestamp, sourceApp: nil,
+                                          localCategory: .text, jevCategory: .code, confidence: 0.9, jevModel: "Microsoft-Decision-1")
+        let decision = JevComparisonReport(generatedAt: Date(), requestedModel: "microsoft-decision-1", total: 1,
+                                           rows: [decisionRow], provider: .microsoftDecision)
+        let report = JevComparisonReport(generatedAt: Date(), total: 1, rows: [jevRow]).including([decision])
+        XCTAssertEqual(report.disagreements, 1)
+        XCTAssertEqual(report.additionalReports?.first?.rows.first?.jevCategory, .code)
+        let json = String(decoding: try report.jsonData(), as: UTF8.self)
+        XCTAssertTrue(json.contains("microsoftDecision"))
+        XCTAssertFalse(json.contains(original.content))
+        let csv = report.csv()
+        XCTAssertTrue(csv.contains("microsoftDecision_category"))
+        XCTAssertTrue(csv.contains("Microsoft-Decision-1"))
+        XCTAssertFalse(csv.contains(original.content))
+        let decoded = try JSONDecoder().decode(JevComparisonReport.self, from: JSONEncoder().encode(report))
+        XCTAssertEqual(decoded, report)
+    }
+
+    func testEmbeddedDetectedSecretsAndFilePastesStayLocal() {
+        let mixed = ClipboardEntry(content: "Mixed text", contentType: .prose, metadata: #"{"apiKeys":[{"key":"mock-secret"}]}"#)
+        XCTAssertEqual(JevEligibility.skipReason(for: mixed, configuration: .init()), .sensitiveContent)
+        XCTAssertNil(JevEligibility.skipReason(for: mixed, configuration: .init(includeSensitiveContent: true)))
+        XCTAssertEqual(JevEligibility.skipReason(for: entry(.filePath), configuration: .init(includeSensitiveContent: true)), .fileContent)
+        XCTAssertNil(JevConfiguration(endpoint: "https://user:password@example.com/v1/systemone").endpointURL)
+    }
+
     private func makeDefaults() throws -> (UserDefaults, () -> Void) {
         let suiteName = "JevClassificationTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

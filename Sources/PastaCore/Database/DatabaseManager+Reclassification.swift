@@ -2,6 +2,69 @@ import Foundation
 import GRDB
 
 extension DatabaseManager {
+    /// A delayed provider response may update only the primary version it classified.
+    /// Copy counts, timestamps, pins and device-local sharing policy are preserved.
+    @discardableResult
+    public func applyClassification(
+        matching snapshot: ClipboardEntry,
+        contentType: ContentType,
+        metadata: String?,
+        extractedEntries: [ClipboardEntry]
+    ) throws -> Bool {
+        try dbWriter.write { db in
+            guard let current = try ClipboardEntry.fetchOne(db, key: snapshot.id.uuidString),
+                  current.parentEntryId == nil,
+                  current.content == snapshot.content,
+                  current.contentType == snapshot.contentType,
+                  current.metadata == snapshot.metadata,
+                  current.rawData == snapshot.rawData,
+                  current.imagePath == snapshot.imagePath,
+                  current.cloudSyncAllowed == snapshot.cloudSyncAllowed,
+                  current.receivedViaTailnet == snapshot.receivedViaTailnet else { return false }
+            try db.execute(
+                sql: """
+                UPDATE clipboard_entries SET contentType = ?, metadata = ?, contentTypeMask = ?, isSynced = 0
+                WHERE id = ?
+                """,
+                arguments: [contentType.rawValue, metadata, MetadataParser.typeMask(for: metadata), snapshot.id.uuidString]
+            )
+            try db.execute(
+                sql: """
+                INSERT OR IGNORE INTO classification_cloud_deletions (id)
+                SELECT id FROM clipboard_entries WHERE parentEntryId = ? AND cloudSyncAllowed = 1
+                """,
+                arguments: [snapshot.id.uuidString]
+            )
+            try db.execute(sql: "DELETE FROM clipboard_entries WHERE parentEntryId = ?", arguments: [snapshot.id.uuidString])
+            for var child in extractedEntries {
+                guard child.parentEntryId == snapshot.id else {
+                    throw DatabaseError(resultCode: .SQLITE_CONSTRAINT, message: "Extracted classification item does not reference the classified parent.")
+                }
+                child.cloudSyncAllowed = current.cloudSyncAllowed
+                child.receivedViaTailnet = current.receivedViaTailnet
+                child.isSynced = false
+                try insertReclassifiedEntry(child, in: db)
+            }
+            return true
+        }
+    }
+
+    private func insertReclassifiedEntry(_ entry: ClipboardEntry, in db: Database) throws {
+        try db.execute(
+            sql: """
+            INSERT INTO clipboard_entries
+            (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata,
+             contentHash, parentEntryId, isSynced, contentTypeMask, cloudSyncAllowed, receivedViaTailnet, isPinned)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+            """,
+            arguments: [
+                entry.id.uuidString, entry.content, entry.contentType.rawValue, entry.rawData, entry.imagePath,
+                entry.timestamp, entry.copyCount, entry.sourceApp, entry.metadata, entry.contentHash,
+                entry.parentEntryId?.uuidString, entry.contentTypeMask, entry.cloudSyncAllowed, entry.receivedViaTailnet, entry.isPinned
+            ]
+        )
+    }
+
     public struct ReclassificationUpdate: Sendable {
         public let entryID: UUID
         public let contentType: ContentType
@@ -131,28 +194,7 @@ extension DatabaseManager {
 
             var insertedExtractedEntries = 0
             for entry in extractedEntries {
-                try db.execute(
-                    sql: """
-                    INSERT INTO \(ClipboardEntry.databaseTableName)
-                    (id, content, contentType, rawData, imagePath, timestamp, copyCount, sourceApp, metadata, contentHash, parentEntryId, isSynced, contentTypeMask)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    arguments: [
-                        entry.id.uuidString,
-                        entry.content,
-                        entry.contentType.rawValue,
-                        entry.rawData,
-                        entry.imagePath,
-                        entry.timestamp,
-                        entry.copyCount,
-                        entry.sourceApp,
-                        entry.metadata,
-                        entry.contentHash,
-                        entry.parentEntryId?.uuidString,
-                        0,
-                        entry.contentTypeMask,
-                    ]
-                )
+                try insertReclassifiedEntry(entry, in: db)
                 insertedExtractedEntries += 1
             }
 

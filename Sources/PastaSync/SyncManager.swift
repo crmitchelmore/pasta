@@ -320,9 +320,13 @@ public final class SyncManager: ObservableObject {
     
     /// Deletes an entry from CloudKit.
     public func deleteEntry(id: UUID) async throws {
-        guard resolveContainer(), let database else { return }
+        guard resolveContainer(), let database else { throw CKError(.notAuthenticated) }
         let recordID = CKRecord.ID(recordName: id.uuidString, zoneID: Self.zoneID)
-        try await database.deleteRecord(withID: recordID)
+        do {
+            try await database.deleteRecord(withID: recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            // Retrying a durable deletion is idempotent.
+        }
         logger.debug("Deleted entry \(id.uuidString) from CloudKit")
     }
     

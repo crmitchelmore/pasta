@@ -234,7 +234,7 @@ final class AppState: ObservableObject {
             },
             sync: {
                 self.syncFeedbackMessage = afterReset ? "Sync reset. Syncing history…" : "Syncing history…"
-                let backfilled = try await database.backfillUnsynced { entries, onBatchSynced in
+                let backfilled = try await database.backfillUnsynced(deleting: { id in try await syncManager.deleteEntry(id: id) }) { entries, onBatchSynced in
                     try await syncManager.pushEntries(entries, onBatchSynced: onBatchSynced)
                 }
                 if backfilled > 0 {

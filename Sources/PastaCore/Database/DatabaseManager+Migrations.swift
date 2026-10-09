@@ -248,6 +248,13 @@ extension DatabaseManager {
                 """)
         }
 
+        migrator.registerMigration("classificationCloudDeletions") { db in
+            try db.create(table: "classification_cloud_deletions") { t in
+                t.column("id", .text).primaryKey().notNull()
+                t.column("needsUpload", .boolean).notNull().defaults(to: true)
+            }
+        }
+
         return migrator
     }
 }
