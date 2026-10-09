@@ -35,11 +35,57 @@ final class JevClassificationTests: XCTestCase {
 
         let configuration = JevConfiguration.load(defaults: defaults)
 
-        XCTAssertTrue(configuration.isEnabled)
+        XCTAssertFalse(configuration.isEnabled)
         XCTAssertEqual(configuration.endpoint, JevConfiguration.defaultEndpoint)
         XCTAssertEqual(configuration.model, JevConfiguration.defaultModel)
         XCTAssertEqual(defaults.string(forKey: "pasta.jev.endpoint"), JevConfiguration.defaultEndpoint)
         XCTAssertEqual(defaults.string(forKey: "pasta.jev.model"), JevConfiguration.defaultModel)
+    }
+
+    func testComparisonRequiresValidationForCurrentKeyEndpointAndModel() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        var configuration = JevConfiguration(isEnabled: true)
+
+        XCTAssertFalse(configuration.isComparisonAllowed(apiKey: "test-key", defaults: defaults))
+        configuration.recordSuccessfulValidation(apiKey: "test-key", defaults: defaults)
+        configuration.save(defaults: defaults)
+
+        let reloaded = JevConfiguration.load(defaults: defaults)
+        XCTAssertTrue(reloaded.isComparisonAllowed(apiKey: "test-key", defaults: defaults))
+        XCTAssertFalse(reloaded.isComparisonAllowed(apiKey: "replacement-key", defaults: defaults))
+        XCTAssertFalse(reloaded.isComparisonAllowed(apiKey: "", defaults: defaults))
+        XCTAssertFalse(defaults.dictionaryRepresentation().values.contains { ($0 as? String)?.contains("test-key") == true })
+
+        configuration.endpoint = "https://proxy.example.com/v1/systemone"
+        XCTAssertFalse(configuration.isComparisonAllowed(apiKey: "test-key", defaults: defaults))
+        configuration.endpoint = JevConfiguration.defaultEndpoint
+        configuration.model = "jev-preview"
+        XCTAssertFalse(configuration.isComparisonAllowed(apiKey: "test-key", defaults: defaults))
+    }
+
+    func testInvalidatingValidationDisablesComparisonAcrossRelaunch() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        let configuration = JevConfiguration(isEnabled: true)
+        configuration.save(defaults: defaults)
+        configuration.recordSuccessfulValidation(apiKey: "test-key", defaults: defaults)
+
+        JevConfiguration.invalidateValidation(defaults: defaults)
+
+        XCTAssertFalse(configuration.isValidated(apiKey: "test-key", defaults: defaults))
+        XCTAssertFalse(JevConfiguration.load(defaults: defaults).isEnabled)
+        XCTAssertFalse(configuration.isComparisonAllowed(apiKey: "test-key", defaults: defaults))
+    }
+
+    func testValidationDoesNotEnableComparisonWithoutUserOptIn() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        let configuration = JevConfiguration()
+        configuration.recordSuccessfulValidation(apiKey: "test-key", defaults: defaults)
+
+        XCTAssertTrue(configuration.isValidated(apiKey: " test-key \n", defaults: defaults))
+        XCTAssertFalse(configuration.isComparisonAllowed(apiKey: "test-key", defaults: defaults))
     }
 
     func testLoadKeepsCustomEndpointAndModel() throws {
@@ -156,6 +202,7 @@ final class JevClassificationTests: XCTestCase {
 
         await XCTAssertThrowsJevError(try await makeClassifier().classify(content: "x", configuration: JevConfiguration(), apiKey: "key")) { error in
             XCTAssertEqual(error, .validation("body.model: Unknown model"))
+            XCTAssertTrue(error.isFatal)
             XCTAssertFalse(error.isRetryable)
         }
         XCTAssertEqual(JevMockURLProtocol.requests.count, 1)
@@ -184,6 +231,24 @@ final class JevClassificationTests: XCTestCase {
             XCTAssertEqual(error, .overloaded)
         }
         XCTAssertEqual(JevMockURLProtocol.requests.count, 3)
+    }
+
+    func testRetriesHonorMillisecondHeaderBeforeSecondsHeader() async throws {
+        let delays = DelayRecorder()
+        JevMockURLProtocol.enqueue(status: 429, body: "{}", headers: ["retry-after-ms": "1500", "Retry-After": "9"])
+        JevMockURLProtocol.enqueue(status: 200, body: Self.successBody(choice: "text"))
+
+        _ = try await makeClassifier(delays: delays).classify(content: "hello", configuration: JevConfiguration(), apiKey: "key")
+
+        let recorded = await delays.values
+        XCTAssertEqual(recorded, [1.5])
+    }
+
+    func testInvalidMillisecondHeaderFallsBackToSeconds() throws {
+        for value in ["invalid", "-100", "nan", "inf"] {
+            let response = try XCTUnwrap(HTTPURLResponse(url: URL(string: JevConfiguration.defaultEndpoint)!, statusCode: 429, httpVersion: nil, headerFields: ["retry-after-ms": value, "Retry-After": "3"]))
+            XCTAssertEqual(JevClassifier.retryAfter(from: response), 3)
+        }
     }
 
     func testBackoffIsExponentialAndCapped() {
@@ -271,7 +336,7 @@ final class JevClassificationTests: XCTestCase {
     }
 
     func testCompareStopsAfterConsecutiveFailures() async {
-        JevMockURLProtocol.respond { _ in (422, #"{"detail":"bad"}"#) }
+        JevMockURLProtocol.respond { _ in (400, #"{"detail":"bad"}"#) }
         let entries = (0..<30).map { _ in entry(.text, content: "hello") }
 
         let report = await JevComparisonService(classifier: makeClassifier(), maxConcurrentRequests: 1, maxConsecutiveFailures: 3)
@@ -280,6 +345,19 @@ final class JevClassificationTests: XCTestCase {
         XCTAssertEqual(report.failed, 3)
         XCTAssertEqual(JevMockURLProtocol.requests.count, 3)
         XCTAssertTrue(report.abortReason?.contains("3 consecutive failures") == true)
+    }
+
+    func testCompareStopsImmediatelyOnValidationFailure() async {
+        JevMockURLProtocol.respond { _ in (422, #"{"detail":"Unknown model"}"#) }
+        let entries = (0..<30).map { _ in entry(.text, content: "hello") }
+
+        let report = await JevComparisonService(classifier: makeClassifier(), maxConcurrentRequests: 1)
+            .compare(entries: entries, configuration: JevConfiguration(model: "invalid"), apiKey: "key")
+
+        XCTAssertEqual(report.failed, 1)
+        XCTAssertEqual(JevMockURLProtocol.requests.count, 1)
+        XCTAssertTrue(report.abortReason?.contains("422") == true)
+        XCTAssertEqual(report.rows.filter { $0.skipReason == .notAttempted }.count, 29)
     }
 
     func testCancellationStopsScheduling() async {

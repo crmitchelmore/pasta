@@ -32,8 +32,11 @@ struct DetectionRulesSettingsTab: View {
     @State private var jevKeyStatus: String?
     @State private var showJevKeyError = false
     @State private var jevHasStoredKey = false
+    @State private var jevHasValidatedKey = false
     @State private var jevIsTesting = false
     @State private var jevTestResult: (success: Bool, message: String)?
+    @State private var jevValidationTask: Task<Void, Never>?
+    @State private var jevValidationID: UUID?
 
     @State private var advancedDetector: BuiltInDetectorKind? = nil
     @State private var advancedEnabledDraft: Bool = false
@@ -162,11 +165,11 @@ struct DetectionRulesSettingsTab: View {
                 Toggle("Enable Jev comparison", isOn: Binding(
                     get: { jevConfiguration.isEnabled },
                     set: {
-                        jevConfiguration.isEnabled = $0
+                        jevConfiguration.isEnabled = $0 && jevHasValidatedKey
                         jevConfiguration.save()
                     }
                 ))
-                .disabled(!jevHasStoredKey && !jevConfiguration.isEnabled)
+                .disabled(!jevHasValidatedKey && !jevConfiguration.isEnabled)
 
                 SecureField(jevHasStoredKey ? "Replace TypeSafe API key" : "TypeSafe API key", text: $jevAPIKey)
                     .textFieldStyle(.roundedBorder)
@@ -175,6 +178,7 @@ struct DetectionRulesSettingsTab: View {
                     Button("Save API Key") {
                         do {
                             try JevKeychain.save(jevAPIKey.trimmingCharacters(in: .whitespacesAndNewlines))
+                            invalidateJevValidation()
                             jevAPIKey = ""
                             jevHasStoredKey = true
                             jevKeyStatus = "API key saved in the macOS Keychain."
@@ -190,12 +194,15 @@ struct DetectionRulesSettingsTab: View {
                     }
                     .disabled(!jevHasStoredKey || jevIsTesting)
                     Button("Remove Key", role: .destructive) {
-                        try? JevKeychain.remove()
-                        jevHasStoredKey = false
-                        jevTestResult = nil
-                        jevConfiguration.isEnabled = false
-                        jevConfiguration.save()
-                        jevKeyStatus = "API key removed and Jev comparison disabled."
+                        do {
+                            try JevKeychain.remove()
+                            invalidateJevValidation()
+                            jevHasStoredKey = false
+                            jevKeyStatus = "API key removed and Jev comparison disabled."
+                        } catch {
+                            errorMessage = error.localizedDescription
+                            showJevKeyError = true
+                        }
                     }
                     .disabled(!jevHasStoredKey)
                     if jevIsTesting {
@@ -213,25 +220,25 @@ struct DetectionRulesSettingsTab: View {
                 TextField("Endpoint", text: Binding(
                     get: { jevConfiguration.endpoint },
                     set: {
+                        invalidateJevValidation()
                         jevConfiguration.endpoint = $0
                         jevConfiguration.save()
-                        jevTestResult = nil
                     }
                 ))
                 TextField("Model", text: Binding(
                     get: { jevConfiguration.model },
                     set: {
+                        invalidateJevValidation()
                         jevConfiguration.model = $0
                         jevConfiguration.save()
-                        jevTestResult = nil
                     }
                 ))
                 if jevConfiguration.endpoint != JevConfiguration.defaultEndpoint || jevConfiguration.model != JevConfiguration.defaultModel {
                     Button("Reset Endpoint and Model to Defaults") {
+                        invalidateJevValidation()
                         jevConfiguration.endpoint = JevConfiguration.defaultEndpoint
                         jevConfiguration.model = JevConfiguration.defaultModel
                         jevConfiguration.save()
-                        jevTestResult = nil
                     }
                 }
 
@@ -246,6 +253,11 @@ struct DetectionRulesSettingsTab: View {
                 Text("Jev is TypeSafe's classification model. While enabled, new text entries and user-started history comparisons send clipboard text (truncated to \(JevSystemOneRequest.maxContentCharacters) characters) to \(jevConfiguration.endpointHost ?? "the configured endpoint"). Images are never sent. Pasta's classifications remain unchanged. The API key is stored only in Keychain.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if !jevHasValidatedKey {
+                    Text("A successful connection test is required before enabling comparison. Changing the key, endpoint or model disables comparison until tested again.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if let jevKeyStatus {
                     Text(jevKeyStatus).font(.caption).foregroundStyle(.secondary)
                 }
@@ -293,7 +305,23 @@ struct DetectionRulesSettingsTab: View {
         .onAppear {
             configuration = DetectorConfigurationStore.load()
             jevConfiguration = .load()
-            jevHasStoredKey = ((try? JevKeychain.read()) ?? nil)?.isEmpty == false
+            do {
+                let key = try JevKeychain.read() ?? ""
+                jevHasStoredKey = !key.isEmpty
+                jevHasValidatedKey = jevConfiguration.isValidated(apiKey: key)
+                if !jevHasValidatedKey {
+                    jevConfiguration.isEnabled = false
+                    jevConfiguration.save()
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+                showJevKeyError = true
+            }
+        }
+        .onDisappear {
+            jevValidationTask?.cancel()
+            jevValidationID = nil
+            jevIsTesting = false
         }
         .onChange(of: newCustomPattern) { _, _ in
             scheduleNewPatternEvaluation()
@@ -304,22 +332,42 @@ struct DetectionRulesSettingsTab: View {
     }
 
     private func testJevConnection() {
+        invalidateJevValidation()
         let configuration = jevConfiguration
+        let validationID = UUID()
+        jevValidationID = validationID
         jevIsTesting = true
         jevTestResult = nil
-        Task { @MainActor in
-            defer { jevIsTesting = false }
+        jevValidationTask = Task { @MainActor in
+            defer {
+                if jevValidationID == validationID { jevIsTesting = false }
+            }
             do {
                 guard let key = try JevKeychain.read(), !key.isEmpty else {
                     throw JevConfigurationError.missingAPIKey
                 }
                 let result = try await JevClassifier().validate(configuration: configuration, apiKey: key)
+                guard !Task.isCancelled, jevValidationID == validationID else { return }
+                configuration.recordSuccessfulValidation(apiKey: key)
+                jevHasValidatedKey = true
                 let confidence = result.confidence.map { " (\(Int(($0 * 100).rounded()))% confidence)" } ?? ""
                 jevTestResult = (true, "Connected to \(result.modelVersion ?? configuration.effectiveModel). Test sample classified as \(result.rawChoice)\(confidence) in \(Int((result.latency * 1000).rounded())) ms.")
             } catch {
+                guard !Task.isCancelled, jevValidationID == validationID else { return }
                 jevTestResult = (false, error.localizedDescription)
             }
         }
+    }
+
+    private func invalidateJevValidation() {
+        jevValidationTask?.cancel()
+        jevValidationID = nil
+        jevIsTesting = false
+        jevHasValidatedKey = false
+        jevTestResult = nil
+        JevConfiguration.invalidateValidation()
+        jevConfiguration.isEnabled = false
+        jevConfiguration.save()
     }
 
     private func detectorRow(for detector: BuiltInDetectorKind) -> DetectorRuleRow {

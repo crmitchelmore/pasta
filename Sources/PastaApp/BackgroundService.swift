@@ -63,7 +63,7 @@ final class BackgroundService: ObservableObject {
         let configuration = JevConfiguration.load()
         guard configuration.isEnabled,
               let apiKey = try? JevKeychain.read(),
-              !apiKey.isEmpty else {
+              configuration.isComparisonAllowed(apiKey: apiKey) else {
             return nil
         }
         return (configuration, apiKey)
@@ -498,6 +498,8 @@ final class BackgroundService: ObservableObject {
                         let localCategory = result.primaryEntry.contentType
                         let content = result.primaryEntry.content
                         Task.detached(priority: .utility) {
+                            let current = JevConfiguration.load()
+                            guard current == jev.configuration, current.isComparisonAllowed(apiKey: jev.apiKey) else { return }
                             do {
                                 let classification = try await JevClassifier().classify(
                                     content: content,

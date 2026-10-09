@@ -29,6 +29,10 @@ extension AppDelegate {
                 return
             }
             apiKey = storedKey
+            guard configuration.isValidated(apiKey: apiKey) else {
+                showJevMessage(title: "TypeSafe connection test required", message: JevConfigurationError.validationRequired.localizedDescription)
+                return
+            }
         } catch {
             showJevMessage(title: "Could not read the TypeSafe API key", message: error.localizedDescription)
             return
@@ -50,6 +54,10 @@ extension AppDelegate {
     }
 
     private func confirmAndRunJevComparison(entries: [ClipboardEntry], configuration: JevConfiguration, apiKey: String) {
+        guard JevConfiguration.load() == configuration, configuration.isComparisonAllowed(apiKey: apiKey) else {
+            showJevMessage(title: "Jev configuration changed", message: JevConfigurationError.validationRequired.localizedDescription)
+            return
+        }
         let eligible = entries.filter { JevEligibility.skipReason(for: $0, configuration: configuration) == nil }.count
         let destination = configuration.endpointHost ?? configuration.endpoint
         guard eligible > 0 else {

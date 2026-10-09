@@ -11,12 +11,17 @@ public enum JevConfigurationError: LocalizedError, Sendable, Equatable {
     case missingAPIKey
     case invalidEndpoint
     case invalidResponse
+    case validationRequired
+    case keychainFailure(operation: String, status: Int32)
 
     public var errorDescription: String? {
         switch self {
         case .missingAPIKey: return "Configure a TypeSafe API key before running a Jev comparison."
         case .invalidEndpoint: return "The Jev endpoint is not a valid HTTPS URL."
         case .invalidResponse: return "Jev returned an invalid classification response."
+        case .validationRequired: return "Test the current TypeSafe API key, endpoint and model in Settings → Detection before enabling Jev comparison."
+        case .keychainFailure(let operation, let status):
+            return "Could not \(operation) the TypeSafe API key in Keychain (status \(status))."
         }
     }
 }
@@ -33,6 +38,7 @@ public struct JevConfiguration: Sendable, Equatable {
         static let endpoint = "pasta.jev.endpoint"
         static let model = "pasta.jev.model"
         static let includeSensitiveContent = "pasta.jev.includeSensitiveContent"
+        static let validatedConfiguration = "pasta.jev.validatedConfiguration"
     }
 
     public var isEnabled: Bool
@@ -65,6 +71,7 @@ public struct JevConfiguration: Sendable, Equatable {
             migrated = migrated || !model.isEmpty
             model = defaultModel
         }
+        if migrated { invalidateValidation(defaults: defaults) }
         let configuration = JevConfiguration(
             isEnabled: defaults.bool(forKey: Keys.enabled),
             endpoint: endpoint,
@@ -97,6 +104,29 @@ public struct JevConfiguration: Sendable, Equatable {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? Self.defaultModel : trimmed
     }
+
+    public func isValidated(apiKey: String, defaults: UserDefaults = .standard) -> Bool {
+        guard endpointURL != nil, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        return defaults.string(forKey: Keys.validatedConfiguration) == validationFingerprint(apiKey: apiKey)
+    }
+
+    public func isComparisonAllowed(apiKey: String, defaults: UserDefaults = .standard) -> Bool {
+        isEnabled && isValidated(apiKey: apiKey, defaults: defaults)
+    }
+
+    public func recordSuccessfulValidation(apiKey: String, defaults: UserDefaults = .standard) {
+        defaults.set(validationFingerprint(apiKey: apiKey), forKey: Keys.validatedConfiguration)
+    }
+
+    public static func invalidateValidation(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: Keys.validatedConfiguration)
+        defaults.set(false, forKey: Keys.enabled)
+    }
+
+    private func validationFingerprint(apiKey: String) -> String {
+        let values = [endpoint.trimmingCharacters(in: .whitespacesAndNewlines), effectiveModel, apiKey.trimmingCharacters(in: .whitespacesAndNewlines)]
+        return ClipboardEntry.sha256Hex(values.map { "\($0.utf8.count):\($0)" }.joined())
+    }
 }
 
 public enum JevKeychain {
@@ -115,7 +145,7 @@ public enum JevKeychain {
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = result as? Data else {
-            throw JevConfigurationError.missingAPIKey
+            throw JevConfigurationError.keychainFailure(operation: "read", status: status)
         }
         return String(data: data, encoding: .utf8)
 #else
@@ -136,11 +166,12 @@ public enum JevKeychain {
         ]
         let status = SecItemAdd(query.merging(values) { _, new in new } as CFDictionary, nil)
         if status == errSecDuplicateItem {
-            guard SecItemUpdate(query as CFDictionary, values as CFDictionary) == errSecSuccess else {
-                throw JevConfigurationError.missingAPIKey
+            let updateStatus = SecItemUpdate(query as CFDictionary, values as CFDictionary)
+            guard updateStatus == errSecSuccess else {
+                throw JevConfigurationError.keychainFailure(operation: "save", status: updateStatus)
             }
         } else if status != errSecSuccess {
-            throw JevConfigurationError.missingAPIKey
+            throw JevConfigurationError.keychainFailure(operation: "save", status: status)
         }
 #endif
     }
@@ -154,7 +185,7 @@ public enum JevKeychain {
         ]
         let status = SecItemDelete(query as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw JevConfigurationError.missingAPIKey
+            throw JevConfigurationError.keychainFailure(operation: "remove", status: status)
         }
 #endif
     }
@@ -205,7 +236,7 @@ public enum JevAPIError: LocalizedError, Sendable, Equatable {
     /// A fatal error will fail every subsequent request too, so batch runs stop immediately.
     public var isFatal: Bool {
         switch self {
-        case .unauthorized, .forbidden, .endpointNotFound:
+        case .unauthorized, .forbidden, .endpointNotFound, .validation:
             return true
         case .network(let code, _):
             return Self.fatalNetworkCodes.contains(code)
@@ -549,11 +580,16 @@ public struct JevClassifier: Sendable {
     }
 
     static func retryAfter(from response: HTTPURLResponse) -> TimeInterval? {
+        if let value = response.value(forHTTPHeaderField: "retry-after-ms"),
+           let milliseconds = TimeInterval(value.trimmingCharacters(in: .whitespaces)),
+           milliseconds.isFinite, milliseconds >= 0 {
+            return milliseconds / 1000
+        }
         guard let value = response.value(forHTTPHeaderField: "Retry-After")?.trimmingCharacters(in: .whitespaces),
               !value.isEmpty else {
             return nil
         }
-        if let seconds = TimeInterval(value) { return seconds }
+        if let seconds = TimeInterval(value), seconds.isFinite, seconds >= 0 { return seconds }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "GMT")
@@ -802,7 +838,10 @@ public struct JevComparisonReport: Codable, Sendable, Equatable {
         let formatter = ISO8601DateFormatter()
         let header = "id,timestamp,source_app,outcome,pasta_category,jev_category,jev_choice,confidence,latency_ms,jev_model,attempts,error,skip_reason"
         let lines = rows.map { row -> String in
-            [
+            let confidence = row.confidence.map { String(format: "%.4f", $0) } ?? ""
+            let latency = row.latency.map { String(Int(($0 * 1000).rounded())) } ?? ""
+            let attempts = row.attempts.map { String($0) } ?? ""
+            let fields: [String] = [
                 row.id.uuidString,
                 formatter.string(from: row.timestamp),
                 row.sourceApp ?? "",
@@ -810,15 +849,14 @@ public struct JevComparisonReport: Codable, Sendable, Equatable {
                 row.localCategory.rawValue,
                 row.jevCategory?.rawValue ?? "",
                 row.jevChoice ?? "",
-                row.confidence.map { String(format: "%.4f", $0) } ?? "",
-                row.latency.map { String(Int(($0 * 1000).rounded())) } ?? "",
+                confidence,
+                latency,
                 row.jevModel ?? "",
-                row.attempts.map(String.init) ?? "",
+                attempts,
                 row.error ?? "",
                 row.skipReason?.rawValue ?? ""
             ]
-            .map(Self.csvField)
-            .joined(separator: ",")
+            return fields.map(Self.csvField).joined(separator: ",")
         }
         return ([header] + lines).joined(separator: "\n") + "\n"
     }
