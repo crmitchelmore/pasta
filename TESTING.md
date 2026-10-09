@@ -33,6 +33,12 @@ are skipped by default; sending sensitive types requires the separate opt-in.
 Text is truncated to 20,000 characters. Local classifications remain unchanged,
 and JSON/CSV reports exclude clipboard content and the key.
 
+Select a comparison row to inspect its original clipboard item in the detail
+pane, alongside the Pasta and Jev classifications. The preview uses the local
+snapshot taken for that run, so later history changes do not replace the item
+you are judging. It sends no additional provider requests and remains excluded
+from JSON/CSV exports. Copy is available in the preview and the row context menu.
+
 Use **Remove Key** in the same settings section to delete the credential from
 Keychain and disable comparison. A deletion error is shown rather than reported
 as success. Keys are never stored in defaults; only a validation fingerprint is
