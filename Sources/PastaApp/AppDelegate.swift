@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var settingsWindow: NSWindow?
     var snippetExpansion: SnippetExpansionController?
     var jevComparisonWindow: NSWindow?
+    var jevComparisonTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         PastaLogger.app.info("Pasta app initializing...")

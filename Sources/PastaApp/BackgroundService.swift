@@ -63,7 +63,7 @@ final class BackgroundService: ObservableObject {
         let configuration = JevConfiguration.load()
         guard configuration.isEnabled,
               let apiKey = try? JevKeychain.read(),
-              !apiKey.isEmpty else {
+              configuration.isComparisonAllowed(apiKey: apiKey) else {
             return nil
         }
         return (configuration, apiKey)
@@ -492,17 +492,23 @@ final class BackgroundService: ObservableObject {
                         result = EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: [])
                     }
 
-                    if let jev = Self.jevLiveConfiguration() {
+                    if let jev = Self.jevLiveConfiguration(),
+                       !(skipAPIKeys && result.primaryEntry.contentType == .apiKey),
+                       JevEligibility.skipReason(for: result.primaryEntry, configuration: jev.configuration) == nil {
                         let localCategory = result.primaryEntry.contentType
                         let content = result.primaryEntry.content
                         Task.detached(priority: .utility) {
+                            let current = JevConfiguration.load()
+                            guard current == jev.configuration, current.isComparisonAllowed(apiKey: jev.apiKey) else { return }
                             do {
                                 let classification = try await JevClassifier().classify(
                                     content: content,
                                     configuration: jev.configuration,
                                     apiKey: jev.apiKey
                                 )
-                                PastaLogger.clipboard.info("Jev comparison completed: local=\(localCategory.rawValue), jev=\(classification.category.rawValue)")
+                                let confidence = classification.confidence.map { String(format: "%.2f", $0) } ?? "n/a"
+                                let latencyMs = Int((classification.latency * 1000).rounded())
+                                PastaLogger.clipboard.info("Jev comparison completed: local=\(localCategory.rawValue), jev=\(classification.rawChoice), agree=\(localCategory == classification.category), confidence=\(confidence), model=\(classification.modelVersion ?? "unknown"), latencyMs=\(latencyMs), attempts=\(classification.attempts)")
                             } catch {
                                 PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Jev comparison failed")
                             }

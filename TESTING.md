@@ -15,6 +15,32 @@ two-device clipboard journey. Use this map when describing release confidence.
 | Sparkle release | Live feed/DMG verification checks metadata, signatures, notarization and launch; failure drafts the GitHub release. | No installed older app is driven through Sparkle's update UI and relaunch. Drafting does not undo already-downloaded copies. |
 | TestFlight | Processing must report `VALID`; rejection or unverified timeout fails. | Upload has already occurred. `VALID` is processing acceptance, not an installed-device journey or external tester approval. Timeout does not cancel processing. |
 
+## Experimental Jev comparison
+
+In Settings → Detection, save a TypeSafe API key. Saving runs a real connection
+test using the harmless sample `https://example.com`; **Test Connection** repeats
+it. Only a successful test of the current key, HTTPS endpoint and model unlocks
+**Enable Jev comparison**. Replacing the key or changing the endpoint/model
+disables comparison and requires another test, including after relaunch.
+The defaults are `https://api.typesafe.ai/v1/systemone` and `jev-latest`.
+Legacy endpoint/model settings migrate with comparison disabled.
+
+While enabled, eligible newly captured text is sent to TypeSafe. **Compare
+Classification with Jev…** confirms the destination and eligible history count
+before a bounded-concurrency run with progress and cancellation. Images,
+extracted children, empty entries and locally detected secrets/financial data
+are skipped by default; sending sensitive types requires the separate opt-in.
+Text is truncated to 20,000 characters. Local classifications remain unchanged,
+and JSON/CSV reports exclude clipboard content and the key.
+
+Use **Remove Key** in the same settings section to delete the credential from
+Keychain and disable comparison. A deletion error is shown rather than reported
+as success. Keys are never stored in defaults; only a validation fingerprint is
+persisted there. `swift test --filter JevClassificationTests` covers the transport,
+validation gate, retries, cancellation, report statistics and exports with a
+mock API. These tests do not establish accuracy or connectivity to the live
+provider; verify those with a real key and non-sensitive sample history.
+
 ## Gate failure handling
 
 `scripts/tests/test_ci_gates.py` invokes production shell entrypoints with
