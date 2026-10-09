@@ -59,12 +59,25 @@ public struct JevComparisonView: View {
 
     public let report: JevComparisonReport
     public let onExport: ((ExportFormat) -> Void)?
+    private let originalEntries: [UUID: ClipboardEntry]
+    private let rowsByID: [UUID: JevComparisonRow]
+    private let onCopy: ((ClipboardEntry) -> Void)?
     @State private var filter: Filter = .all
     @State private var pair: JevCategoryPair?
+    @State private var selectedRowID: UUID?
 
-    public init(report: JevComparisonReport, onExport: ((ExportFormat) -> Void)? = nil) {
+    public init(
+        report: JevComparisonReport,
+        originalEntries: [UUID: ClipboardEntry] = [:],
+        onCopy: ((ClipboardEntry) -> Void)? = nil,
+        onExport: ((ExportFormat) -> Void)? = nil
+    ) {
         self.report = report
+        self.originalEntries = originalEntries
+        self.rowsByID = report.rows.reduce(into: [:]) { $0[$1.id] = $1 }
+        self.onCopy = onCopy
         self.onExport = onExport
+        _selectedRowID = State(initialValue: report.rows.first?.id)
     }
 
     public var body: some View {
@@ -95,6 +108,7 @@ public struct JevComparisonView: View {
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: filter) { _, newValue in
+                    selectedRowID = nil
                     if newValue != .differences { pair = nil }
                 }
 
@@ -108,32 +122,45 @@ public struct JevComparisonView: View {
                 .frame(maxWidth: 280)
                 .disabled(report.disagreementPairs.isEmpty)
                 .onChange(of: pair) { _, newValue in
+                    selectedRowID = nil
                     if newValue != nil { filter = .differences }
                 }
             }
 
             HSplitView {
-                Table(filteredRows) {
-                    TableColumn("Date") { row in
-                        Text(row.timestamp, format: .dateTime.year().month().day().hour().minute())
+                VSplitView {
+                    Table(filteredRows, selection: $selectedRowID) {
+                        TableColumn("Date") { row in
+                            Text(row.timestamp, format: .dateTime.year().month().day().hour().minute())
+                        }
+                        TableColumn("Source") { row in
+                            Text(row.sourceApp ?? "Unknown")
+                        }
+                        TableColumn("Pasta") { row in
+                            Text(row.localCategory.displayTitle)
+                        }
+                        TableColumn("Jev") { row in
+                            jevCell(row)
+                        }
+                        TableColumn("Confidence") { row in
+                            Text(row.confidence.map(percent) ?? "—")
+                                .monospacedDigit()
+                        }
+                        TableColumn("Latency") { row in
+                            Text(row.latency.map(milliseconds) ?? "—")
+                                .monospacedDigit()
+                        }
                     }
-                    TableColumn("Source") { row in
-                        Text(row.sourceApp ?? "Unknown")
+                    .contextMenu(forSelectionType: UUID.self) { ids in
+                        if ids.count == 1, let id = ids.first,
+                           let entry = originalEntry(for: id), let onCopy {
+                            Button("Copy Original Item") { onCopy(entry) }
+                        }
                     }
-                    TableColumn("Pasta") { row in
-                        Text(row.localCategory.displayTitle)
-                    }
-                    TableColumn("Jev") { row in
-                        jevCell(row)
-                    }
-                    TableColumn("Confidence") { row in
-                        Text(row.confidence.map(percent) ?? "—")
-                            .monospacedDigit()
-                    }
-                    TableColumn("Latency") { row in
-                        Text(row.latency.map(milliseconds) ?? "—")
-                            .monospacedDigit()
-                    }
+                    .frame(minHeight: 160)
+
+                    itemDetail
+                        .frame(minHeight: 200, idealHeight: 280)
                 }
                 .frame(minWidth: 560)
 
@@ -142,7 +169,60 @@ public struct JevComparisonView: View {
             }
         }
         .padding(20)
-        .frame(minWidth: 900, minHeight: 540)
+        .frame(minWidth: 900, minHeight: 640)
+    }
+
+    @ViewBuilder
+    private var itemDetail: some View {
+        if let selectedRowID, let row = rowsByID[selectedRowID] {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Original item").font(.headline)
+                    Spacer()
+                    Text("Local preview · not included in exports")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 16) {
+                    Text("Pasta: \(row.localCategory.displayTitle)")
+                    HStack(spacing: 4) {
+                        Text("Jev:")
+                        jevCell(row)
+                    }
+                }
+                .font(.callout)
+                .textSelection(.enabled)
+
+                if let entry = originalEntry(for: selectedRowID) {
+                    if entry.content.prefix(JevSystemOneRequest.maxContentCharacters + 1).count > JevSystemOneRequest.maxContentCharacters,
+                       row.jevCategory != nil {
+                        Text("Jev classified only the first \(JevSystemOneRequest.maxContentCharacters.formatted()) characters.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    PreviewPanelView(entry: entry, onCopy: onCopy)
+                        .id(entry.id)
+                } else {
+                    ContentUnavailableView(
+                        "Original item unavailable",
+                        systemImage: "doc",
+                        description: Text("This report has no local history snapshot for the selected item.")
+                    )
+                }
+            }
+            .padding(.top, 10)
+        } else {
+            ContentUnavailableView(
+                "Select a comparison",
+                systemImage: "doc.text.magnifyingglass",
+                description: Text("Select a row to inspect the original clipboard item and judge the classifications.")
+            )
+        }
+    }
+
+    func originalEntry(for rowID: UUID?) -> ClipboardEntry? {
+        guard let rowID, rowsByID[rowID] != nil else { return nil }
+        return originalEntries[rowID]
     }
 
     private var header: some View {

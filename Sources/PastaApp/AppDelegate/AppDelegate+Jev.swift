@@ -90,20 +90,27 @@ extension AppDelegate {
                 }
             }
             guard let self else { return }
+            let originalEntries = await Task.detached(priority: .userInitiated) {
+                entries.reduce(into: [UUID: ClipboardEntry]()) { $0[$1.id] = $1 }
+            }.value
             self.jevComparisonTask = nil
             window.close()
-            self.showJevReport(report)
+            self.showJevReport(report, originalEntries: originalEntries)
         }
         state.onCancel = { [weak self] in self?.jevComparisonTask?.cancel() }
     }
 
-    private func showJevReport(_ report: JevComparisonReport) {
-        let view = JevComparisonView(report: report) { [weak self] format in
+    private func showJevReport(_ report: JevComparisonReport, originalEntries: [UUID: ClipboardEntry]) {
+        let view = JevComparisonView(report: report, originalEntries: originalEntries, onCopy: { [weak self] entry in
+            if !PasteService().copy(entry) {
+                self?.showJevMessage(title: "Could not copy the original item", message: "The clipboard item could not be copied. Its image or file may no longer be available locally.")
+            }
+        }) { [weak self] format in
             self?.exportJevReport(report, format: format)
         }
         let window = makeJevWindow(title: "Jev Classification Comparison", rootView: view)
         window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
-        window.setContentSize(NSSize(width: 1000, height: 620))
+        window.setContentSize(NSSize(width: 1000, height: 760))
         window.center()
         presentJevWindow(window)
     }
