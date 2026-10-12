@@ -50,7 +50,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   await verifyMergeWindow({ api, repo, expectedMain: main.object.sha, workflows });
   if (flags.includes('--check')) console.log(`Publication lanes idle; PR #${pr} required checks passed.`);
   else {
-    gh(['pr', 'merge', pr, '--repo', repo, '--squash', '--match-head-commit', pull.headRefOid]);
+    gh(['pr', 'merge', pr, '--repo', repo, '--squash', '--match-head-commit', pull.headRefOid,
+      '--body', 'Merged after required PR checks passed and publication lanes were idle.']);
     console.log(`Merged PR #${pr}; wait for both releases and live verification before the next merge.`);
   }
 }
