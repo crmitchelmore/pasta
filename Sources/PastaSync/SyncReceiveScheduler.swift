@@ -55,4 +55,21 @@ public final class SyncReceiveScheduler {
         defer { isOperationRunning = false }
         try await operation()
     }
+
+    /// Classification writes must not race an already-fetched cloud payload.
+    public func runWhenAvailable<T: Sendable>(
+        timeout: TimeInterval = 60,
+        _ operation: @MainActor () async throws -> T
+    ) async throws -> T {
+        let deadline = Date().addingTimeInterval(timeout)
+        while isOperationRunning {
+            try Task.checkCancellation()
+            guard Date() < deadline else { throw SyncPullService.PullError.alreadyInProgress }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        try Task.checkCancellation()
+        isOperationRunning = true
+        defer { isOperationRunning = false }
+        return try await operation()
+    }
 }

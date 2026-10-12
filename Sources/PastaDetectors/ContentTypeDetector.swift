@@ -123,7 +123,7 @@ public struct ContentTypeDetector {
     /// clipboard entry *is*; the entry itself still stores the full content.
     static let maxAnalysisLength = 30_000
 
-    public func detect(in text: String, configuration: DetectorConfiguration = .default) -> Output {
+    public func detect(in text: String, configuration: DetectorConfiguration = .default, primaryTypeOverride: ContentType? = nil) -> Output {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return Output(primaryType: .unknown, confidence: 0.0)
@@ -133,7 +133,7 @@ public struct ContentTypeDetector {
         // short-circuit before paying for ~14 detector passes (each scanning the
         // string, building NSRanges, etc.).
         if trimmed.count < 2 {
-            return Output(primaryType: .text, confidence: 0.5)
+            return Output(primaryType: primaryTypeOverride ?? .text, confidence: 0.5)
         }
 
         // Clamp once, here, rather than relying on each detector to clamp itself
@@ -226,7 +226,7 @@ public struct ContentTypeDetector {
 
         // Extract individual items from mixed content (only if content is "mixed" - i.e. prose/text with embedded items)
         let extractedItems = makeExtractedItems(
-            primaryType: primary,
+            primaryType: primaryTypeOverride ?? primary,
             analysisText: analysisText,
             emails: emails,
             urls: urls,
@@ -239,7 +239,7 @@ public struct ContentTypeDetector {
         )
 
         return Output(
-            primaryType: primary,
+            primaryType: primaryTypeOverride ?? primary,
             confidence: confidence,
             metadataJSON: metadataJSON,
             splitEntries: splitEntries,

@@ -63,7 +63,7 @@ struct PastaApp: App {
         }
         .commands {
             CommandMenu("Tools") {
-                Button("Compare Classification with Jev…") {
+                Button("Compare Classifiers…") {
                     appDelegate.compareClassificationWithJev()
                 }
             }

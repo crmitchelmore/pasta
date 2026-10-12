@@ -31,6 +31,7 @@ final class SyncReceiveSchedulerTests: XCTestCase {
         let manualGate = ReceiveTestClock()
         let manualStarted = expectation(description: "manual sync started")
         let intervalStarted = expectation(description: "busy background attempt skipped")
+        intervalStarted.assertForOverFulfill = false
         let received = expectation(description: "receiving resumes after manual sync")
         let scheduler = SyncReceiveScheduler {
             intervalStarted.fulfill()
@@ -103,6 +104,59 @@ final class SyncReceiveSchedulerTests: XCTestCase {
         try await scheduler.run {}
         await Task.yield()
         XCTAssertEqual(attempts, 1)
+    }
+
+    func testClassificationWriteWaitsForCloudReceiveAndReturnsItsResult() async throws {
+        let gate = ReceiveTestClock()
+        let started = expectation(description: "cloud pull is active")
+        let scheduler = SyncReceiveScheduler()
+        var cloudFinished = false
+        let cloud = Task {
+            try await scheduler.run {
+                started.fulfill()
+                try await gate.wait()
+                cloudFinished = true
+            }
+        }
+        await fulfillment(of: [started], timeout: 2)
+        let write = Task {
+            try await scheduler.runWhenAvailable {
+                XCTAssertTrue(cloudFinished, "A delayed cloud payload must commit before a classification write")
+                return 42
+            }
+        }
+        await gate.advance()
+        try await cloud.value
+        let result = try await write.value
+        XCTAssertEqual(result, 42)
+    }
+
+    func testWaitingClassificationIsCancellableAndTimeoutNeverRunsWrite() async throws {
+        let gate = ReceiveTestClock()
+        let started = expectation(description: "cloud pull holds transport")
+        let scheduler = SyncReceiveScheduler()
+        let cloud = Task {
+            try await scheduler.run {
+                started.fulfill()
+                try await gate.wait()
+            }
+        }
+        await fulfillment(of: [started], timeout: 2)
+        do {
+            try await scheduler.runWhenAvailable(timeout: 0) { XCTFail("Timed-out write must not run") }
+            XCTFail("Busy classification should time out")
+        } catch SyncPullService.PullError.alreadyInProgress {}
+        let cancelled = Task {
+            try await scheduler.runWhenAvailable { XCTFail("Cancelled write must not run") }
+        }
+        cancelled.cancel()
+        do {
+            try await cancelled.value
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {}
+        await gate.advance()
+        try await cloud.value
+        try await scheduler.run {}
     }
 
     private enum TestError: Error { case accountUnavailable }

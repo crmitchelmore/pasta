@@ -8,12 +8,17 @@ final class JevComparisonViewTests: XCTestCase {
     @MainActor
     func testComparisonViewRendersWithLocalSnapshot() throws {
         let original = ClipboardEntry(content: "Original text for judging this classification.", contentType: .text)
-        let report = JevComparisonReport(generatedAt: Date(), total: 1, rows: [comparisonRow(for: original)])
+        let microsoftRow = JevComparisonRow(id: original.id, timestamp: original.timestamp, sourceApp: nil,
+                                            localCategory: .text, jevCategory: .code, confidence: 0.91,
+                                            latency: 0.08, jevModel: "Microsoft-Decision-1")
+        let microsoft = JevComparisonReport(generatedAt: Date(), requestedModel: "microsoft-decision-1",
+                                            total: 1, rows: [microsoftRow], provider: .microsoftDecision)
+        let report = JevComparisonReport(generatedAt: Date(), total: 1, rows: [comparisonRow(for: original)]).including([microsoft])
         let view = JevComparisonView(report: report, originalEntries: [original.id: original], onCopy: { _ in })
             .background(Color(nsColor: .windowBackgroundColor))
         _ = NSApplication.shared
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: 1220, height: 760),
             styleMask: [.titled], backing: .buffered, defer: false
         )
         window.isReleasedWhenClosed = false

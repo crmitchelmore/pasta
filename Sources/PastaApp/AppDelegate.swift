@@ -64,6 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         NotificationCenter.default.addObserver(self, selector: #selector(openSnippetPicker), name: .openSnippetPicker, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(compareClassificationWithJev), name: .compareRemoteClassifiers, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(reclassifyHistoryWithJev), name: .reclassifyHistoryWithJev, object: nil)
 
         // Start background clipboard monitoring (runs even when panel is closed)
         BackgroundService.shared.start()

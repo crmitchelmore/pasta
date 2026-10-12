@@ -6,11 +6,16 @@ public final class JevComparisonRunState: ObservableObject {
     @Published public var progress: JevComparisonProgress
     @Published public var isCancelling = false
     public let destination: String
+    @Published public var title: String
+    @Published public var detail: String
     public var onCancel: (() -> Void)?
 
-    public init(total: Int, destination: String) {
+    public init(total: Int, destination: String, title: String = "Comparing with Jev", changesHistory: Bool = false) {
         self.progress = JevComparisonProgress(total: total, completed: 0, agreements: 0, failed: 0)
         self.destination = destination
+        self.title = title
+        self.detail = changesHistory ? "Sending supported entries to \(destination). Completed, known decisions update unchanged saved entries."
+            : "Sending supported entries to \(destination). Saved classifications are not changed."
     }
 }
 
@@ -23,12 +28,16 @@ public struct JevComparisonProgressView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Comparing with Jev")
+            Text(state.title)
                 .font(.headline)
-            Text("Sending supported entries to \(state.destination). Pasta's classifications are not changed.")
+            Text(state.detail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            ProgressView(value: state.progress.fraction)
+            if state.progress.total == 0 {
+                ProgressView().progressViewStyle(.linear)
+            } else {
+                ProgressView(value: state.progress.fraction)
+            }
             HStack {
                 Text("\(state.progress.completed) of \(state.progress.total) · \(state.progress.remaining) remaining")
                 Spacer()
@@ -47,7 +56,7 @@ public struct JevComparisonProgressView: View {
             }
         }
         .padding(20)
-        .frame(width: 440)
+        .frame(width: 480)
     }
 }
 
@@ -61,6 +70,8 @@ public struct JevComparisonView: View {
     public let onExport: ((ExportFormat) -> Void)?
     private let originalEntries: [UUID: ClipboardEntry]
     private let rowsByID: [UUID: JevComparisonRow]
+    private let additionalReport: JevComparisonReport?
+    private let additionalRows: [UUID: JevComparisonRow]
     private let onCopy: ((ClipboardEntry) -> Void)?
     @State private var filter: Filter = .all
     @State private var pair: JevCategoryPair?
@@ -75,6 +86,8 @@ public struct JevComparisonView: View {
         self.report = report
         self.originalEntries = originalEntries
         self.rowsByID = report.rows.reduce(into: [:]) { $0[$1.id] = $1 }
+        self.additionalReport = report.additionalReports?.first
+        self.additionalRows = (report.additionalReports?.first?.rows ?? []).reduce(into: [:]) { $0[$1.id] = $1 }
         self.onCopy = onCopy
         self.onExport = onExport
         _selectedRowID = State(initialValue: report.rows.first?.id)
@@ -83,6 +96,10 @@ public struct JevComparisonView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+            if let applicationSummary = report.applicationSummary {
+                Label(applicationSummary, systemImage: "tray.full")
+                    .font(.callout).textSelection(.enabled)
+            }
 
             if let banner = statusBanner {
                 Label(banner, systemImage: "exclamationmark.triangle.fill")
@@ -97,7 +114,17 @@ public struct JevComparisonView: View {
                 summary("Differences", "\(report.disagreements)")
                 summary("Failed", "\(report.failed)")
                 summary("Skipped", "\(report.skipped)", detail: skipDetail)
-                summary("Jev latency", latencyText, detail: report.latencySummary.map { "p95 \(milliseconds($0.p95))" })
+                summary("\(report.providerTitle) latency", latencyText, detail: report.latencySummary.map { "p95 \(milliseconds($0.p95))" })
+            }
+            if let additionalReport {
+                HStack(spacing: 16) {
+                    Text(additionalReport.providerTitle).fontWeight(.semibold)
+                    Text("\(additionalReport.compared) compared · \(percent(additionalReport.agreementRate)) agreement · \(additionalReport.failed) failed · \(additionalReport.skipped) skipped")
+                    if let latency = additionalReport.latencySummary {
+                        Text("Median \(milliseconds(latency.median)) · p95 \(milliseconds(latency.p95))")
+                    }
+                }
+                .font(.caption).foregroundStyle(.secondary)
             }
 
             HStack {
@@ -112,7 +139,7 @@ public struct JevComparisonView: View {
                     if newValue != .differences { pair = nil }
                 }
 
-                Picker("Pair", selection: $pair) {
+                Picker("\(report.providerTitle) pair", selection: $pair) {
                     Text("All pairs").tag(JevCategoryPair?.none)
                     ForEach(report.disagreementPairs.prefix(40)) { value in
                         Text("\(value.local.displayTitle) → \(value.jev.displayTitle) (\(value.count))")
@@ -129,28 +156,7 @@ public struct JevComparisonView: View {
 
             HSplitView {
                 VSplitView {
-                    Table(filteredRows, selection: $selectedRowID) {
-                        TableColumn("Date") { row in
-                            Text(row.timestamp, format: .dateTime.year().month().day().hour().minute())
-                        }
-                        TableColumn("Source") { row in
-                            Text(row.sourceApp ?? "Unknown")
-                        }
-                        TableColumn("Pasta") { row in
-                            Text(row.localCategory.displayTitle)
-                        }
-                        TableColumn("Jev") { row in
-                            jevCell(row)
-                        }
-                        TableColumn("Confidence") { row in
-                            Text(row.confidence.map(percent) ?? "—")
-                                .monospacedDigit()
-                        }
-                        TableColumn("Latency") { row in
-                            Text(row.latency.map(milliseconds) ?? "—")
-                                .monospacedDigit()
-                        }
-                    }
+                    comparisonTable
                     .contextMenu(forSelectionType: UUID.self) { ids in
                         if ids.count == 1, let id = ids.first,
                            let entry = originalEntry(for: id), let onCopy {
@@ -173,6 +179,53 @@ public struct JevComparisonView: View {
     }
 
     @ViewBuilder
+    private var comparisonTable: some View {
+        if let additionalReport {
+            Table(filteredRows, selection: $selectedRowID) {
+                TableColumn("Date") { row in
+                    Text(row.timestamp, format: .dateTime.year().month().day().hour().minute())
+                }
+                TableColumn("Source") { row in Text(row.sourceApp ?? "Unknown") }
+                TableColumn("Local detectors") { row in Text(row.localCategory.displayTitle) }
+                TableColumn(report.providerTitle) { row in jevCell(row) }
+                TableColumn("Confidence") { row in
+                    Text(row.confidence.map(percent) ?? "—").monospacedDigit()
+                }
+                TableColumn("Latency") { row in
+                    Text(row.latency.map(milliseconds) ?? "—").monospacedDigit()
+                }
+                TableColumn(additionalReport.providerTitle) { row in
+                    if let extra = additionalRows[row.id] {
+                        VStack(alignment: .leading, spacing: 2) {
+                            jevCell(extra)
+                            Text("\(extra.confidence.map(percent) ?? "—") · \(extra.latency.map(milliseconds) ?? "—")")
+                                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                    } else {
+                        Text("Not attempted").foregroundStyle(.secondary)
+                    }
+                }
+                .width(min: 170, ideal: 190)
+            }
+        } else {
+            Table(filteredRows, selection: $selectedRowID) {
+                TableColumn("Date") { row in
+                    Text(row.timestamp, format: .dateTime.year().month().day().hour().minute())
+                }
+                TableColumn("Source") { row in Text(row.sourceApp ?? "Unknown") }
+                TableColumn("Local detectors") { row in Text(row.localCategory.displayTitle) }
+                TableColumn(report.providerTitle) { row in jevCell(row) }
+                TableColumn("Confidence") { row in
+                    Text(row.confidence.map(percent) ?? "—").monospacedDigit()
+                }
+                TableColumn("Latency") { row in
+                    Text(row.latency.map(milliseconds) ?? "—").monospacedDigit()
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var itemDetail: some View {
         if let selectedRowID, let row = rowsByID[selectedRowID] {
             VStack(alignment: .leading, spacing: 8) {
@@ -184,10 +237,18 @@ public struct JevComparisonView: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack(spacing: 16) {
-                    Text("Pasta: \(row.localCategory.displayTitle)")
+                    Text("Local detectors: \(row.localCategory.displayTitle)")
                     HStack(spacing: 4) {
-                        Text("Jev:")
+                        Text("\(report.providerTitle):")
                         jevCell(row)
+                    }
+                    if let extra = additionalRows[row.id], let additionalReport {
+                        HStack(spacing: 4) {
+                            Text("\(additionalReport.providerTitle):")
+                            jevCell(extra)
+                            Text("\(extra.confidence.map(percent) ?? "—") · \(extra.latency.map(milliseconds) ?? "—")")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .font(.callout)
@@ -196,7 +257,7 @@ public struct JevComparisonView: View {
                 if let entry = originalEntry(for: selectedRowID) {
                     if entry.content.prefix(JevSystemOneRequest.maxContentCharacters + 1).count > JevSystemOneRequest.maxContentCharacters,
                        row.jevCategory != nil {
-                        Text("Jev classified only the first \(JevSystemOneRequest.maxContentCharacters.formatted()) characters.")
+                        Text("Remote models classified only the first \(JevSystemOneRequest.maxContentCharacters.formatted()) characters.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -228,7 +289,7 @@ public struct JevComparisonView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Pasta vs Jev")
+                Text("Local vs \(report.providerTitle)\(additionalReport.map { " vs \($0.providerTitle)" } ?? "")")
                     .font(.title2.weight(.semibold))
                 Text(headerDetail)
                     .font(.caption)
@@ -252,12 +313,19 @@ public struct JevComparisonView: View {
         if let host = report.endpointHost { parts.append(host) }
         let models = report.jevModels
         parts.append(models.isEmpty ? "model \(report.requestedModel)" : "model \(models.joined(separator: ", "))")
+        if let additionalReport {
+            let additionalModels = additionalReport.jevModels
+            parts.append(additionalModels.isEmpty ? additionalReport.requestedModel : additionalModels.joined(separator: ", "))
+            if let host = additionalReport.endpointHost { parts.append(host) }
+        }
         return parts.joined(separator: " · ")
     }
 
     private var statusBanner: String? {
-        if let abortReason = report.abortReason { return abortReason }
-        if report.wasCancelled { return "Comparison cancelled. Entries not yet sent are listed as skipped (Not attempted)." }
+        let reports = [report] + (report.additionalReports ?? [])
+        let failures = reports.compactMap { item in item.abortReason.map { "\(item.providerTitle): \($0)" } }
+        if !failures.isEmpty { return failures.joined(separator: "\n") }
+        if reports.contains(where: \.wasCancelled) { return "Comparison cancelled. Entries not yet sent are listed as skipped (Not attempted)." }
         return nil
     }
 
@@ -272,7 +340,7 @@ public struct JevComparisonView: View {
 
     private var categoryBreakdown: some View {
         List {
-            Section("Agreement by Pasta category") {
+            Section("\(report.providerTitle) agreement by local category") {
                 ForEach(report.agreementByPastaCategory) { item in
                     HStack {
                         Text(item.category.displayTitle)
@@ -327,17 +395,17 @@ public struct JevComparisonView: View {
         case .all:
             return report.rows
         case .agreements:
-            return report.rows.filter { $0.outcome == .agreement }
+            return report.rows.filter { $0.outcome == .agreement && (additionalReport == nil || additionalRows[$0.id]?.outcome == .agreement) }
         case .differences:
             return report.rows.filter { row in
+                guard let pair else { return row.outcome == .disagreement || additionalRows[row.id]?.outcome == .disagreement }
                 guard row.outcome == .disagreement else { return false }
-                guard let pair else { return true }
                 return row.localCategory == pair.local && row.jevCategory == pair.jev
             }
         case .failures:
-            return report.rows.filter { $0.outcome == .failed }
+            return report.rows.filter { $0.outcome == .failed || additionalRows[$0.id]?.outcome == .failed }
         case .skipped:
-            return report.rows.filter { $0.outcome == .skipped }
+            return report.rows.filter { $0.outcome == .skipped || additionalRows[$0.id]?.outcome == .skipped }
         }
     }
 

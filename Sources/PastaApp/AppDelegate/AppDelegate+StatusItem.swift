@@ -31,7 +31,7 @@ extension AppDelegate {
 
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Compare Classification with Jev…", action: #selector(compareClassificationWithJev), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Compare Classifiers…", action: #selector(compareClassificationWithJev), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit Pasta", action: #selector(quitApp), keyEquivalent: "q"))
