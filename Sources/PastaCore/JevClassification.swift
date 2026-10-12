@@ -25,8 +25,8 @@ public enum JevClassificationMode: String, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .comparison: return "Compare only"
-        case .primary: return "Use Jev by default"
-        case .fallback: return "Use Jev when local confidence is low"
+        case .primary: return "Use decision model by default"
+        case .fallback: return "Use when legacy confidence is low"
         }
     }
 }
@@ -73,6 +73,7 @@ public struct JevConfiguration: Sendable, Equatable {
     public var provider: RemoteClassificationProvider
     public var mode: JevClassificationMode
     public var fallbackThreshold: Double
+    public var rules: DecisionClassificationRules
 
     public init(
         isEnabled: Bool = false,
@@ -81,25 +82,31 @@ public struct JevConfiguration: Sendable, Equatable {
         includeSensitiveContent: Bool = false,
         provider: RemoteClassificationProvider = .jev,
         mode: JevClassificationMode = .comparison,
-        fallbackThreshold: Double = 0.75
+        fallbackThreshold: Double = 0.75,
+        rules: DecisionClassificationRules = .default
     ) {
         self.isEnabled = isEnabled
         self.endpoint = endpoint ?? provider.defaultEndpoint
         self.model = model ?? provider.defaultModel
         self.includeSensitiveContent = includeSensitiveContent
         self.provider = provider
-        self.mode = provider == .jev ? mode : .comparison
+        self.mode = mode
         self.fallbackThreshold = fallbackThreshold.isFinite ? min(1, max(0, fallbackThreshold)) : 0.75
+        self.rules = rules
     }
 
     public static func load(provider: RemoteClassificationProvider = .jev, defaults: UserDefaults = .standard) -> JevConfiguration {
+        let rules = DecisionClassificationRules.load(defaults: defaults)
         if provider != .jev {
             return JevConfiguration(
                 isEnabled: defaults.bool(forKey: "\(provider.defaultsPrefix).enabled"),
                 endpoint: defaults.string(forKey: "\(provider.defaultsPrefix).endpoint") ?? provider.defaultEndpoint,
                 model: defaults.string(forKey: "\(provider.defaultsPrefix).model") ?? provider.defaultModel,
                 includeSensitiveContent: defaults.bool(forKey: "\(provider.defaultsPrefix).includeSensitiveContent"),
-                provider: provider
+                provider: provider,
+                mode: JevClassificationMode(rawValue: defaults.string(forKey: "\(provider.defaultsPrefix).mode") ?? "") ?? .comparison,
+                fallbackThreshold: defaults.object(forKey: "\(provider.defaultsPrefix).fallbackThreshold") == nil ? 0.75 : defaults.double(forKey: "\(provider.defaultsPrefix).fallbackThreshold"),
+                rules: rules
             )
         }
         var endpoint = defaults.string(forKey: Keys.endpoint)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -120,7 +127,8 @@ public struct JevConfiguration: Sendable, Equatable {
             model: model,
             includeSensitiveContent: defaults.bool(forKey: Keys.includeSensitiveContent),
             mode: JevClassificationMode(rawValue: defaults.string(forKey: "pasta.jev.mode") ?? "") ?? .comparison,
-            fallbackThreshold: defaults.object(forKey: "pasta.jev.fallbackThreshold") == nil ? 0.75 : defaults.double(forKey: "pasta.jev.fallbackThreshold")
+            fallbackThreshold: defaults.object(forKey: "pasta.jev.fallbackThreshold") == nil ? 0.75 : defaults.double(forKey: "pasta.jev.fallbackThreshold"),
+            rules: rules
         )
         if migrated { configuration.save(defaults: defaults) }
         return configuration
@@ -131,11 +139,9 @@ public struct JevConfiguration: Sendable, Equatable {
         defaults.set(endpoint, forKey: "\(provider.defaultsPrefix).endpoint")
         defaults.set(model, forKey: "\(provider.defaultsPrefix).model")
         defaults.set(includeSensitiveContent, forKey: "\(provider.defaultsPrefix).includeSensitiveContent")
-        if provider == .jev {
-            defaults.set(mode.rawValue, forKey: "pasta.jev.mode")
-            let threshold = fallbackThreshold.isFinite ? min(1, max(0, fallbackThreshold)) : 0.75
-            defaults.set(threshold, forKey: "pasta.jev.fallbackThreshold")
-        }
+        defaults.set(mode.rawValue, forKey: "\(provider.defaultsPrefix).mode")
+        let threshold = fallbackThreshold.isFinite ? min(1, max(0, fallbackThreshold)) : 0.75
+        defaults.set(threshold, forKey: "\(provider.defaultsPrefix).fallbackThreshold")
     }
 
     public var endpointURL: URL? {
@@ -156,7 +162,8 @@ public struct JevConfiguration: Sendable, Equatable {
 
     public func isValidated(apiKey: String, defaults: UserDefaults = .standard) -> Bool {
         guard endpointURL != nil, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        return defaults.string(forKey: "\(provider.defaultsPrefix).validatedConfiguration") == validationFingerprint(apiKey: apiKey)
+        guard let fingerprint = try? validationFingerprint(apiKey: apiKey) else { return false }
+        return defaults.string(forKey: "\(provider.defaultsPrefix).validatedConfiguration") == fingerprint
     }
 
     public func isComparisonAllowed(apiKey: String, defaults: UserDefaults = .standard) -> Bool {
@@ -164,7 +171,12 @@ public struct JevConfiguration: Sendable, Equatable {
     }
 
     public func recordSuccessfulValidation(apiKey: String, defaults: UserDefaults = .standard) {
-        defaults.set(validationFingerprint(apiKey: apiKey), forKey: "\(provider.defaultsPrefix).validatedConfiguration")
+        do {
+            defaults.set(try validationFingerprint(apiKey: apiKey), forKey: "\(provider.defaultsPrefix).validatedConfiguration")
+        } catch {
+            Self.invalidateValidation(provider: provider, defaults: defaults)
+            PastaLogger.logError(error, logger: PastaLogger.app, context: "Invalid decision classifier rules; validation not recorded")
+        }
     }
 
     public static func invalidateValidation(provider: RemoteClassificationProvider = .jev, defaults: UserDefaults = .standard) {
@@ -173,7 +185,7 @@ public struct JevConfiguration: Sendable, Equatable {
     }
 
     public func shouldClassify(localConfidence: Double) -> Bool {
-        guard isEnabled, provider == .jev else { return false }
+        guard isEnabled else { return false }
         switch mode {
         case .comparison: return false
         case .primary: return true
@@ -181,9 +193,10 @@ public struct JevConfiguration: Sendable, Equatable {
         }
     }
 
-    private func validationFingerprint(apiKey: String) -> String {
+    private func validationFingerprint(apiKey: String) throws -> String {
         var values = [endpoint.trimmingCharacters(in: .whitespacesAndNewlines), effectiveModel, apiKey.trimmingCharacters(in: .whitespacesAndNewlines)]
         if provider == .microsoftDecision { values.append("api-key") }
+        if rules != .default { values.append(try rules.fingerprint) }
         return ClipboardEntry.sha256Hex(values.map { "\($0.utf8.count):\($0)" }.joined())
     }
 }
@@ -329,19 +342,19 @@ public enum JevAPIError: LocalizedError, Sendable, Equatable {
         case .endpointNotFound:
             return "The classification endpoint returned 404. Check the full System One endpoint in Settings → Detection."
         case .validation(let detail):
-            return Self.join("TypeSafe rejected the request (422).", detail)
+            return Self.join("The classification provider rejected the request (422).", detail)
         case .rateLimited:
-            return "TypeSafe rate limit reached (429) and retries were exhausted."
+            return "The classification provider's rate limit was reached (429) and retries were exhausted."
         case .overloaded:
-            return "TypeSafe is temporarily overloaded (529) and retries were exhausted."
+            return "The classification provider is temporarily overloaded (529) and retries were exhausted."
         case .server(let status):
-            return "TypeSafe returned a server error (\(status)) and retries were exhausted."
+            return "The classification provider returned a server error (\(status)) and retries were exhausted."
         case .unexpectedStatus(let status, let detail):
-            return Self.join("TypeSafe returned HTTP \(status).", detail)
+            return Self.join("The classification provider returned HTTP \(status).", detail)
         case .invalidResponse(let detail):
-            return "Jev returned an unexpected response: \(detail)"
+            return "The classification provider returned an unexpected response: \(detail)"
         case .timedOut:
-            return "The Jev request timed out and retries were exhausted."
+            return "The classification request timed out and retries were exhausted."
         case .network(_, let description):
             return description
         }
@@ -477,14 +490,14 @@ public enum JevSystemOneRequest {
     }
 
     /// Builds the JSON body by hand so criteria keep their deliberate order.
-    public static func body(content: String, model: String) throws -> Data {
+    public static func body(content: String, model: String, rules: DecisionClassificationRules = .default) throws -> Data {
         let (text, isTruncated) = truncated(content)
         var state = "\"clipboard_content\":\(try encode(text))"
         if isTruncated {
             state += ",\"clipboard_content_note\":\(try encode("Only the beginning of a longer clipboard item is included."))"
         }
-        let criteria = try options
-            .map { "\(try encode($0.category.rawValue)):\(try encode($0.description))" }
+        let criteria = try rules.validated().choices
+            .map { "\(try encode($0.id)):\(try encode($0.description))" }
             .joined(separator: ",")
         let json = """
         {"model":\(try encode(model)),"state":{\(state)},"questions":{\(try encode(questionID)):{"type":"choice","instructions":\(try encode(instructions)),"criteria":{\(criteria)}}}}
@@ -579,11 +592,11 @@ public struct JevClassifier: Sendable {
         } else {
             request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         }
-        request.httpBody = try JevSystemOneRequest.body(content: content, model: configuration.effectiveModel)
+        request.httpBody = try JevSystemOneRequest.body(content: content, model: configuration.effectiveModel, rules: configuration.rules)
 
         let started = Date()
         let (data, attempts) = try await send(request, authorizationCheck: authorizationCheck)
-        let result = try Self.decode(data, latency: Date().timeIntervalSince(started), attempts: attempts)
+        let result = try Self.decode(data, latency: Date().timeIntervalSince(started), attempts: attempts, rules: configuration.rules)
         if configuration.provider == .microsoftDecision {
             guard let model = result.modelVersion?.lowercased(),
                   model == "microsoft-decision-1" || model.hasPrefix("microsoft-decision-1-") else {
@@ -598,7 +611,7 @@ public struct JevClassifier: Sendable {
         try await classify(content: Self.validationSample, configuration: configuration, apiKey: apiKey)
     }
 
-    static func decode(_ data: Data, latency: TimeInterval, attempts: Int) throws -> JevClassification {
+    static func decode(_ data: Data, latency: TimeInterval, attempts: Int, rules: DecisionClassificationRules = .default) throws -> JevClassification {
         let response: SystemOneResponse
         do {
             response = try JSONDecoder().decode(SystemOneResponse.self, from: data)
@@ -618,7 +631,7 @@ public struct JevClassifier: Sendable {
            probabilities.values.contains(where: { !$0.isFinite || !(0...1).contains($0) }) {
             throw JevAPIError.invalidResponse("probabilities must be between zero and one.")
         }
-        let category = JevSystemOneRequest.options.first { $0.category.rawValue == choice }?.category ?? .unknown
+        let category = rules.choices.first { $0.id == choice }?.category ?? .unknown
         return JevClassification(
             category: category,
             rawChoice: choice,
@@ -760,6 +773,7 @@ public struct JevComparisonRow: Codable, Sendable, Equatable, Identifiable {
     public let localCategory: ContentType
     public let jevCategory: ContentType?
     public let jevChoice: String?
+    public let decisionLabel: String?
     public let confidence: Double?
     public let latency: TimeInterval?
     public let jevModel: String?
@@ -774,6 +788,7 @@ public struct JevComparisonRow: Codable, Sendable, Equatable, Identifiable {
         localCategory: ContentType,
         jevCategory: ContentType? = nil,
         jevChoice: String? = nil,
+        decisionLabel: String? = nil,
         confidence: Double? = nil,
         latency: TimeInterval? = nil,
         jevModel: String? = nil,
@@ -787,6 +802,7 @@ public struct JevComparisonRow: Codable, Sendable, Equatable, Identifiable {
         self.localCategory = localCategory
         self.jevCategory = jevCategory
         self.jevChoice = jevChoice ?? jevCategory?.rawValue
+        self.decisionLabel = decisionLabel
         self.confidence = confidence
         self.latency = latency
         self.jevModel = jevModel
@@ -960,7 +976,9 @@ public struct JevComparisonReport: Codable, Sendable, Equatable {
             return ["\(prefix)_category", "\(prefix)_confidence", "\(prefix)_latency_ms", "\(prefix)_model", "\(prefix)_error", "\(prefix)_skip_reason"]
         }
         let prefix = (provider ?? .jev).rawValue
-        let header = (["id,timestamp,source_app,outcome,pasta_category,\(prefix)_category,\(prefix)_choice,confidence,latency_ms,\(prefix)_model,attempts,error,skip_reason"] + extraHeaders).joined(separator: ",")
+        let hasCustomLabels = ([self] + extras).contains { $0.rows.contains { $0.decisionLabel != nil } }
+        let labelHeaders = hasCustomLabels ? ([self] + extras).map { "\(($0.provider ?? .jev).rawValue)_custom_label" } : []
+        let header = (["id,timestamp,source_app,outcome,pasta_category,\(prefix)_category,\(prefix)_choice,confidence,latency_ms,\(prefix)_model,attempts,error,skip_reason"] + extraHeaders + labelHeaders).joined(separator: ",")
         let lines: [String] = rows.map { row -> String in
             let confidence = confidenceField(row.confidence)
             let latency = latencyField(row.latency)
@@ -988,6 +1006,10 @@ public struct JevComparisonReport: Codable, Sendable, Equatable {
                 fields.append(extra?.jevModel ?? "")
                 fields.append(extra?.error ?? "")
                 fields.append(extra?.skipReason?.rawValue ?? "")
+            }
+            if hasCustomLabels {
+                fields.append(row.decisionLabel ?? "")
+                for lookup in lookups { fields.append(lookup[row.id]?.decisionLabel ?? "") }
             }
             return fields.map(Self.csvField).joined(separator: ",")
         }
@@ -1141,6 +1163,7 @@ public struct JevComparisonService: Sendable {
                 localCategory: entry.contentType,
                 jevCategory: result.category,
                 jevChoice: result.rawChoice,
+                decisionLabel: configuration.rules.customClassifier(for: result.rawChoice)?.name,
                 confidence: result.confidence,
                 latency: result.latency,
                 jevModel: result.modelVersion,

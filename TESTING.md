@@ -17,18 +17,36 @@ two-device clipboard journey. Use this map when describing release confidence.
 
 ## Remote classification and comparison
 
-In Settings → Detection, save a TypeSafe API key. Saving runs a real connection
+macOS onboarding offers decision-model setup immediately after Welcome. Existing
+local-only users see the optional setup once when they next open the panel.
+Continue/Done or closing setup never grants upload consent; no key is mandatory.
+An enabled existing provider is not migrated to remote primary mode automatically.
+
+Settings → Detection prioritizes **Decision models**, with a preferred-provider
+picker, independent credentials and modes. **Legacy classifiers (local rules)**
+is collapsed by default; expanding it exposes all existing strictness, regex,
+custom-detector and local-history-reparse controls without changing their values.
+Local detectors remain active for privacy checks, extraction and failure fallback.
+Decision models are recommended for context-aware classification, not advertised
+as having a measured universal accuracy advantage.
+
+Save a TypeSafe key with **Save and Test Key**. Saving runs a real connection
 test using the harmless sample `https://example.com`; **Test Connection** repeats
-it. Only a successful test of the current key, HTTPS endpoint and model unlocks
-**Enable Jev**. Replacing the key or changing the endpoint/model
-disables the provider and requires another test, including after relaunch.
+it. Only a successful test of the current key, HTTPS endpoint, model and shared
+rules unlocks **Allow eligible clipboard text to be sent to [provider]**.
+Replacing the key or changing the endpoint/model/shared rules disables the
+provider and requires another test and explicit opt-in, including after relaunch.
 The defaults are `https://api.typesafe.ai/v1/systemone` and `jev-latest`.
 Legacy endpoint/model settings migrate with comparison disabled.
 
-Jev's new-entry mode defaults to **Compare only** for existing installations.
+Existing modes are preserved; installations without a saved mode remain
+comparison-only at runtime until explicitly configured. Fresh setup recommends
+**Use decision model by default**, but never enables it by saving/testing a key.
+Only the selected preferred provider handles new captures.
+**Compare only**
 It sends no background captures; history is sent only after explicit confirmation.
-**Use Jev by default** asynchronously applies known Jev decisions after durable
-local capture. **Use Jev when local confidence is low** sends only captures with
+**Use decision model by default** asynchronously applies known decisions after durable
+local capture. **Use when legacy confidence is low** sends only captures with
 local confidence strictly below the adjustable threshold (75% by default).
 Local confidence is a detector heuristic, not a calibrated probability.
 Failures and Unknown retain the local result and failures are surfaced.
@@ -44,7 +62,7 @@ Text is truncated to 20,000 characters. History comparisons run the current loca
 detectors afresh and do not change saved classifications. JSON/CSV reports exclude
 clipboard content and keys.
 
-**Reclassify History with Jev…** separately confirms mutation of saved history.
+**Reclassify History with [provider]…** separately confirms mutation of saved history.
 Known completed decisions rebuild metadata/extracted children transactionally,
 preserving original content, identity, timestamps, copy counts, pins and sharing
 consent. Changed/deleted snapshots are not overwritten or resurrected. Cancellation
@@ -62,8 +80,9 @@ retired ID queues another deletion without resurrecting the child locally.
 
 ### Microsoft Decision-1
 
-The separate **Microsoft Decision-1 Comparison** section is opt-in and
-comparison-only. The [official announcement](https://commandline.microsoft.com/microsoft-decision-1-model-foundry/)
+Select **Microsoft Decision-1** in the preferred-provider picker to configure it.
+It supports primary, low-legacy-confidence fallback, comparison-only and
+explicit history reclassification, with its own opt-in. The [official announcement](https://commandline.microsoft.com/microsoft-decision-1-model-foundry/)
 and [Foundry model card](https://ai.azure.com/catalog/models/Microsoft-Decision-1)
 identify the text-only fixed-choice decision model, not MAI-Thinking-1.
 Configure the **full HTTPS endpoint** as your Foundry resource endpoint followed
@@ -81,10 +100,43 @@ Microsoft-Decision-1 before it can be enabled.
 With both providers enabled, comparison displays **local detectors, Jev and
 Microsoft Decision-1 side by side**, with separate confidence, latency, model,
 failure and skip information. Either provider can be compared alone. Sensitive
-content consent and validation are independent per provider. Microsoft Decision-1
-is called only during explicitly confirmed comparisons, never on background capture
-or Jev history reclassification. Live Microsoft connectivity still requires a
+content consent and validation are independent per provider. A nonpreferred
+provider is called only during explicitly confirmed comparison/history runs.
+Switching preferred providers revokes queued live requests from the previous one,
+including before transport retries and after waiting for the sync gate.
+Live Microsoft connectivity still requires a
 real compatible deployment and key; mock transport tests do not establish it.
+
+### Shared decision classifier types
+
+**Shared configuration → Shared classifier types** configures both models.
+Built-in type descriptions can be edited, and up to 32 named classifiers can be
+added with natural-language descriptions (no regex). Each custom label maps to
+an existing nonbinary Pasta type; its name appears in the item preview and
+comparison, while its mapped type controls existing filters, previews and sync.
+These are not new sidebar categories and are separate from legacy regex detectors.
+Definitions persist locally, use stable choice IDs, and are sent as System One
+criteria. The explicit Unknown/other choice remains last. Duplicate names/IDs,
+empty or oversized descriptions and unsupported mappings are rejected.
+Changing shared rules disables both providers and invalidates their validation;
+retest and explicitly enable each to resume. Old in-flight results cannot apply.
+History mutation preserves custom names in metadata across restart/sync and removes
+an old custom label when a later built-in decision replaces it.
+Reports include custom label names but never original clipboard text or credentials.
+
+### Other provider research
+
+Official APIs reviewed for this Alpha:
+[Hugging Face zero-shot classification](https://huggingface.co/docs/inference-providers/tasks/zero-shot-classification)
+accepts candidate labels, but needs a different adapter and available inference
+model/endpoint. [Cohere Classify](https://docs.cohere.com/v2/reference/classify)
+requires at least two examples per label or a fine-tuned classifier. Neither is
+System One-compatible or integrated in this Alpha. The settings links describe
+these limitations rather than presenting nonfunctional provider toggles.
+The implemented shared-choice contract follows
+[TypeSafe Choice](https://docs.typesafe.ai/primitives/choice) and
+[Microsoft's Decision-1 quickstart](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/use-foundry-models-microsoft-decision).
+No cloud deployment, credential or account is created by setup.
 
 Select a comparison row to inspect its original clipboard item in the detail
 pane, alongside all enabled classifications. The preview uses the local

@@ -19,8 +19,7 @@ public struct JevReclassificationService {
         extractContent: Bool,
         skipAPIKeys: Bool
     ) throws -> Outcome {
-        guard configuration.provider == .jev,
-              classification.category != .unknown,
+        guard classification.category != .unknown,
               JevEligibility.skipReason(for: snapshot, configuration: configuration) == nil else { return .retained }
         let detector = ContentTypeDetector()
         let local = detector.detect(in: snapshot.content, configuration: detectorConfiguration)
@@ -36,8 +35,22 @@ public struct JevReclassificationService {
                            sourceApp: snapshot.sourceApp, metadata: $0.metadataJSON, parentEntryId: snapshot.id,
                            cloudSyncAllowed: snapshot.cloudSyncAllowed, receivedViaTailnet: snapshot.receivedViaTailnet)
         } : []
+        var metadata = output.metadataJSON
+        if let custom = configuration.rules.customClassifier(for: classification.rawChoice) {
+            var object: [String: Any] = [:]
+            if let data = metadata?.data(using: .utf8) {
+                guard let dictionary = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    throw JevConfigurationError.invalidResponse
+                }
+                object = dictionary
+            }
+            object["decisionClassification"] = ["label": custom.name, "choice": custom.choiceID,
+                                                "provider": configuration.provider.rawValue,
+                                                "model": classification.modelVersion ?? configuration.effectiveModel]
+            metadata = String(decoding: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self)
+        }
         let applied = try database.applyClassification(matching: snapshot, contentType: output.primaryType,
-                                                      metadata: output.metadataJSON, extractedEntries: children)
+                                                      metadata: metadata, extractedEntries: children)
         return applied ? .applied : .changedSinceRequest
     }
 

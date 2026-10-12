@@ -23,7 +23,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
 
     /// Shows onboarding (or brings the existing window forward). `onFinish`
     /// runs exactly once, with `.dismissed` if the window is simply closed.
-    func present(onFinish: @escaping (OnboardingView.Completion) -> Void) {
+    func present(decisionModelsOnly: Bool = false, onFinish: @escaping (OnboardingView.Completion) -> Void) {
         self.onFinish = onFinish
         finished = false
 
@@ -43,7 +43,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
             window.level = .floating
             window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             window.delegate = self
-            window.contentView = NSHostingView(rootView: OnboardingView { [weak self] completion in
+            window.contentView = NSHostingView(rootView: OnboardingView(decisionModelsOnly: decisionModelsOnly) { [weak self] completion in
                 self?.finish(with: completion)
             })
             window.center()

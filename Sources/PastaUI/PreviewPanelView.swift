@@ -37,6 +37,12 @@ public struct PreviewPanelView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         header(entry)
+                        if let decision = metadata?["decisionClassification"] as? [String: Any],
+                           let label = decision["label"] as? String {
+                            Label(label, systemImage: "tag")
+                                .font(.callout.weight(.medium))
+                                .textSelection(.enabled)
+                        }
 
                         if let decoded = decodedPreview(from: metadata), decoded != entry.content {
                             let decodedPreview = truncatedText(decoded, limit: Limits.inlineContentCharacters)

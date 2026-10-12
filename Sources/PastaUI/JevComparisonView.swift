@@ -186,7 +186,7 @@ public struct JevComparisonView: View {
                     Text(row.timestamp, format: .dateTime.year().month().day().hour().minute())
                 }
                 TableColumn("Source") { row in Text(row.sourceApp ?? "Unknown") }
-                TableColumn("Local detectors") { row in Text(row.localCategory.displayTitle) }
+                TableColumn("Legacy classifiers") { row in Text(row.localCategory.displayTitle) }
                 TableColumn(report.providerTitle) { row in jevCell(row) }
                 TableColumn("Confidence") { row in
                     Text(row.confidence.map(percent) ?? "—").monospacedDigit()
@@ -213,7 +213,7 @@ public struct JevComparisonView: View {
                     Text(row.timestamp, format: .dateTime.year().month().day().hour().minute())
                 }
                 TableColumn("Source") { row in Text(row.sourceApp ?? "Unknown") }
-                TableColumn("Local detectors") { row in Text(row.localCategory.displayTitle) }
+                TableColumn("Legacy classifiers") { row in Text(row.localCategory.displayTitle) }
                 TableColumn(report.providerTitle) { row in jevCell(row) }
                 TableColumn("Confidence") { row in
                     Text(row.confidence.map(percent) ?? "—").monospacedDigit()
@@ -237,7 +237,7 @@ public struct JevComparisonView: View {
                         .foregroundStyle(.secondary)
                 }
                 HStack(spacing: 16) {
-                    Text("Local detectors: \(row.localCategory.displayTitle)")
+                    Text("Legacy classifiers: \(row.localCategory.displayTitle)")
                     HStack(spacing: 4) {
                         Text("\(report.providerTitle):")
                         jevCell(row)
@@ -384,6 +384,7 @@ public struct JevComparisonView: View {
 
     private func jevTitle(_ row: JevComparisonRow) -> String {
         guard let category = row.jevCategory else { return row.jevChoice ?? "Unknown" }
+        if let label = row.decisionLabel { return "\(label) (\(category.displayTitle))" }
         if category == .unknown, let choice = row.jevChoice, choice != ContentType.unknown.rawValue {
             return "Unknown (\(choice))"
         }

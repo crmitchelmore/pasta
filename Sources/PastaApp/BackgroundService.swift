@@ -60,13 +60,13 @@ final class BackgroundService: ObservableObject {
     }
 
     private nonisolated static func jevLiveConfiguration() -> (configuration: JevConfiguration, apiKey: String)? {
-        let configuration = JevConfiguration.load()
+        let configuration = DecisionModelSelection.configuration()
         guard configuration.isEnabled, configuration.mode != .comparison else { return nil }
         do {
-            guard let apiKey = try JevKeychain.read(), configuration.isComparisonAllowed(apiKey: apiKey) else { return nil }
+            guard let apiKey = try JevKeychain.read(provider: configuration.provider), configuration.isComparisonAllowed(apiKey: apiKey) else { return nil }
             return (configuration, apiKey)
         } catch {
-            PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Could not read the enabled Jev API key")
+            PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Could not read the selected decision model API key")
             return nil
         }
     }
@@ -204,7 +204,8 @@ final class BackgroundService: ObservableObject {
         apiKey: String,
         detectorConfiguration: DetectorConfiguration,
         extractContent: Bool,
-        skipAPIKeys: Bool
+        skipAPIKeys: Bool,
+        requirePreferredProvider: Bool = false
     ) async throws -> JevReclassificationService.Outcome {
         try await syncReceiver.runWhenAvailable {
             let db = self.database
@@ -212,6 +213,7 @@ final class BackgroundService: ObservableObject {
                 Result {
                     try Task.checkCancellation()
                     guard Self.isCurrentJevConfiguration(configuration, apiKey: apiKey),
+                          !requirePreferredProvider || DecisionModelSelection.provider() == configuration.provider,
                           DetectorConfigurationStore.load() == detectorConfiguration,
                           UserDefaults.standard.bool(forKey: Defaults.extractContent) == extractContent,
                           UserDefaults.standard.bool(forKey: Defaults.skipAPIKeys) == skipAPIKeys else {
@@ -219,7 +221,8 @@ final class BackgroundService: ObservableObject {
                     }
                     return try JevReclassificationService().apply(
                         classification, to: snapshot, database: db, configuration: configuration,
-                        detectorConfiguration: detectorConfiguration, extractContent: extractContent, skipAPIKeys: skipAPIKeys
+                        detectorConfiguration: detectorConfiguration, extractContent: extractContent,
+                        skipAPIKeys: skipAPIKeys
                     )
                 }
             }
@@ -507,7 +510,7 @@ final class BackgroundService: ObservableObject {
                 let extractContent = UserDefaults.standard.bool(forKey: Defaults.extractContent)
                 let detectorConfiguration = self.detectorConfiguration
                 let syncManager = self.syncManager
-                let jevConfiguration = JevConfiguration.load()
+                let jevConfiguration = DecisionModelSelection.configuration()
                 
                 Task.detached {
                     let result: EnrichResult
@@ -580,35 +583,39 @@ final class BackgroundService: ObservableObject {
                                           JevEligibility.skipReason(for: snapshot, configuration: jev.configuration) == nil,
                                           JevEligibility.skipReason(contentType: local.primaryType, content: snapshot.content, configuration: jev.configuration) == nil else { continue }
                                     let accepted = await JevLiveQueue.shared.enqueue {
-                                        guard Self.isCurrentJevConfiguration(jev.configuration, apiKey: jev.apiKey),
+                                        guard DecisionModelSelection.provider() == jev.configuration.provider,
+                                              Self.isCurrentJevConfiguration(jev.configuration, apiKey: jev.apiKey),
                                               DetectorConfigurationStore.load() == detectorConfiguration else { return }
                                         do {
                                             let classification = try await JevClassifier().classify(content: snapshot.content, configuration: jev.configuration, apiKey: jev.apiKey,
                                                                                                     authorizationCheck: {
                                                 Self.isCurrentJevConfiguration(jev.configuration, apiKey: jev.apiKey)
+                                                    && DecisionModelSelection.provider() == jev.configuration.provider
                                                     && DetectorConfigurationStore.load() == detectorConfiguration
                                             })
-                                            guard Self.isCurrentJevConfiguration(jev.configuration, apiKey: jev.apiKey),
+                                            guard DecisionModelSelection.provider() == jev.configuration.provider,
+                                                  Self.isCurrentJevConfiguration(jev.configuration, apiKey: jev.apiKey),
                                                   DetectorConfigurationStore.load() == detectorConfiguration,
                                                   UserDefaults.standard.bool(forKey: Defaults.extractContent) == extractContent else { return }
                                             if jev.configuration.mode != .comparison {
                                                 let outcome = try await self.applyJevClassification(
                                                     classification, to: snapshot, configuration: jev.configuration, apiKey: jev.apiKey,
-                                                    detectorConfiguration: detectorConfiguration, extractContent: extractContent, skipAPIKeys: skipAPIKeys
+                                                    detectorConfiguration: detectorConfiguration, extractContent: extractContent,
+                                                    skipAPIKeys: skipAPIKeys, requirePreferredProvider: true
                                                 )
                                                 if outcome == .applied {
                                                     await MainActor.run { NotificationCenter.default.post(name: Notification.Name("pasta.entriesDidChange"), object: nil) }
                                                 }
                                             }
-                                            PastaLogger.clipboard.info("Jev completed: local=\(localCategory.rawValue), jev=\(classification.rawChoice), model=\(classification.modelVersion ?? "unknown"), mode=\(jev.configuration.mode.rawValue)")
+                                            PastaLogger.clipboard.info("\(jev.configuration.provider.title) completed: local=\(localCategory.rawValue), decision=\(classification.rawChoice), model=\(classification.modelVersion ?? "unknown"), mode=\(jev.configuration.mode.rawValue)")
                                         } catch {
-                                            PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Jev classification failed; local result retained")
+                                            PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Decision model classification failed; local result retained")
                                             await MainActor.run { self.lastError = .unknown(underlying: error) }
                                         }
                                     }
                                     if !accepted {
-                                        let error = NSError(domain: "Pasta.Jev", code: 1, userInfo: [NSLocalizedDescriptionKey: "Jev's live request queue is full. This clipboard item's local classification was retained."])
-                                        PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Jev request not queued")
+                                        let error = NSError(domain: "Pasta.Jev", code: 1, userInfo: [NSLocalizedDescriptionKey: "The decision model's live request queue is full. This clipboard item's local classification was retained."])
+                                        PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Decision model request not queued")
                                         await MainActor.run { self.lastError = .unknown(underlying: error) }
                                     }
                                 }
@@ -874,8 +881,8 @@ final class BackgroundService: ObservableObject {
     }
 
     private nonisolated static func isCurrentJevConfiguration(_ configuration: JevConfiguration, apiKey: String) -> Bool {
-        guard JevConfiguration.load() == configuration, configuration.isComparisonAllowed(apiKey: apiKey) else { return false }
-        do { return try JevKeychain.read() == apiKey }
+        guard JevConfiguration.load(provider: configuration.provider) == configuration, configuration.isComparisonAllowed(apiKey: apiKey) else { return false }
+        do { return try JevKeychain.read(provider: configuration.provider) == apiKey }
         catch {
             PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Could not recheck Jev credentials")
             return false
