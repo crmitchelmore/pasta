@@ -8,7 +8,10 @@ promotions. Never rewrite an update feed to match a failed/unpublished tag.
 Use `scripts/ci-merge-after-release.mjs <PR> --check` after review, then the same
 command without `--check` to merge. The script checks required PR statuses and
 all active publication lanes, including queued runners, and checks main again
-before merging the expected PR head. It never uses an admin bypass. Wait for
+before merging the expected PR head. It supplies an explicit clean squash body
+so historical commit messages cannot suppress the main-push CI required for
+Alpha allocation. Keep PR titles free of CI-skip directives as well. It never
+uses an admin bypass. Wait for
 macOS publication and its external verifier, TestFlight `VALID`, landing
 publication, and the live appcast commit-back before the next merge. This
 applies to docs/build commits as well: commit prefixes cannot establish that a
