@@ -56,7 +56,7 @@ test('Homebrew publication can be retried without failing or adding duplicate co
   const remote = join(root, 'tap.git');
   const tap = join(root, 'tap');
   const script = fileURLToPath(new URL('../ci-commit-homebrew.sh', import.meta.url));
-  const git = (args, cwd = root) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const git = (args, cwd = root) => execFileSync('git', ['-c', 'safe.bareRepository=explicit', ...args], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const publish = (version) => execFileSync('bash', [script, version], { cwd: tap, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   try {
     git(['init', '--bare', remote]);
@@ -70,11 +70,11 @@ test('Homebrew publication can be retried without failing or adding duplicate co
     const first = git(['rev-parse', 'HEAD'], tap);
     assert.match(publish('1.2.3'), /already matches/);
     assert.equal(git(['rev-parse', 'HEAD'], tap), first);
-    assert.equal(git(['rev-parse', 'HEAD'], remote), first);
+    assert.equal(git(['--git-dir', remote, 'rev-parse', 'HEAD']), first);
     writeFileSync(cask, 'version "1.2.4"\nsha256 "second"\n');
     publish('1.2.4');
     assert.notEqual(git(['rev-parse', 'HEAD'], tap), first);
-    assert.equal(git(['rev-parse', 'HEAD'], remote), git(['rev-parse', 'HEAD'], tap));
+    assert.equal(git(['--git-dir', remote, 'rev-parse', 'HEAD']), git(['rev-parse', 'HEAD'], tap));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
