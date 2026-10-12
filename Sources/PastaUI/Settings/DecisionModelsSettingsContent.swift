@@ -181,10 +181,10 @@ private struct DecisionClassifierEditor: View {
                     ForEach(JevSystemOneRequest.options.filter { $0.category != .unknown }, id: \.category) {
                         Text($0.category.displayTitle).tag($0.category)
                     }
-                    if let errorMessage {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle")
-                            .font(.caption).foregroundStyle(.red)
-                    }
+                }
+                if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.red)
                 }
                 Text("The custom name appears in the preview and comparison. The mapped type controls existing filters and previews.")
                     .font(.caption).foregroundStyle(.secondary)
