@@ -82,20 +82,21 @@ asc_get() {
 }
 
 echo "==> Resolving App Store Connect app id for $BUNDLE_ID"
-APP_JSON=$(asc_get "$API/v1/apps?filter%5BbundleId%5D=$BUNDLE_ID&fields%5Bapps%5D=bundleId,name&limit=2") || {
+APP_JSON=$(asc_get "$API/v1/apps?filter%5BbundleId%5D=$BUNDLE_ID&fields%5Bapps%5D=bundleId,name&limit=200") || {
   echo "::error::Could not query App Store Connect for app '$BUNDLE_ID'. Check APP_STORE_CONNECT_* secrets and the key's role."
   echo "$APP_JSON"
   exit 1
 }
 APP_ID=$(printf '%s' "$APP_JSON" | python3 -c '
 import json, sys
-data = json.load(sys.stdin).get("data", [])
-print(data[0]["id"] if data else "")')
-if [ -z "$APP_ID" ]; then
-  echo "::error::No App Store Connect app found with bundle id '$BUNDLE_ID'."
-  echo "$APP_JSON"
+data = json.load(sys.stdin)["data"]
+matches = [app for app in data if app.get("attributes", {}).get("bundleId") == sys.argv[1]]
+if len(matches) != 1 or not matches[0].get("id"):
+    raise SystemExit(f"Expected one exact App Store Connect identity for {sys.argv[1]}; found {len(matches)} matching records")
+print(matches[0]["id"])' "$BUNDLE_ID") || {
+  echo "::error::Could not resolve a unique App Store Connect app for bundle id '$BUNDLE_ID'; refusing to poll another app."
   exit 1
-fi
+}
 echo "    app id: $APP_ID"
 
 QUERY="$API/v1/builds?filter%5Bapp%5D=$APP_ID&filter%5Bversion%5D=$BUILD_NUMBER&filter%5BpreReleaseVersion.version%5D=$VERSION&fields%5Bbuilds%5D=version,processingState,uploadedDate,expired,minOsVersion&sort=-uploadedDate&limit=5"

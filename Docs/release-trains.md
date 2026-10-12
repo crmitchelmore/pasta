@@ -65,7 +65,10 @@ the existing Sparkle feed and App Store remain Stable.
    as warnings and never resubmitted automatically. Processing, submission and
    public availability have separate receipts; reconciliation advances Apple's
    notes boundary only after observed public availability. Alpha can continue
-   while Apple reviews Stable.
+   while Apple reviews Stable. If an earlier Stable version still occupies
+   Apple's review or release slot, the next approved candidate reports pending
+   without changing that submission; reconciliation resumes after Apple releases
+   the slot.
 
 No Stable candidate is approved merely by merging this implementation.
 
@@ -112,6 +115,11 @@ checks. GitHub, Pages and Homebrew publication is not atomic: if post-publicatio
 verification fails, the release is drafted and the failed workflow identifies the
 need to restore the previous verified feed/cask. Inspect existing receipts before
 retrying; never upload a duplicate Apple build or retarget an immutable tag.
+Apple processing polls require exactly one matching bundle identifier, even
+when the API returns Alpha alongside Stable. A missing or ambiguous identity
+fails explicitly instead of polling the first app returned. After an upload
+timeout, the Apple reconciler can verify the existing build and persist its
+receipt without repeating the upload.
 
 Run `node --test scripts/tests/*.test.mjs`,
 `ruby scripts/tests/release_apple_test.rb`, the Python gate suite, `swift test
