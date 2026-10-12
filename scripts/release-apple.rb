@@ -299,6 +299,8 @@ module AppleRelease
 
     SUBMITTABLE_STATES = %w[PREPARE_FOR_SUBMISSION].freeze
     HALTED_STATES = %w[REJECTED METADATA_REJECTED DEVELOPER_REJECTED INVALID_BINARY].freeze
+    REUSABLE_VERSION_STATES = %w[PREPARE_FOR_SUBMISSION REJECTED DEVELOPER_REJECTED].freeze
+    PUBLISHED_VERSION_STATES = %w[READY_FOR_SALE READY_FOR_DISTRIBUTION DEVELOPER_REMOVED_FROM_SALE REMOVED_FROM_SALE REPLACED_WITH_NEW_VERSION].freeze
 
     # Stable iOS follows the Sparkle release asynchronously: submit once the
     # owner approved the candidate, the direct release is public and Apple has
@@ -315,15 +317,23 @@ module AppleRelease
       state = found.dig('attributes', 'processingState')
       return pending("Apple processing is #{state}") unless state == 'VALID'
       platform = @surface == 'ios' ? 'IOS' : 'MAC_OS'
-      version = @client.list("/v1/apps/#{@app}/appStoreVersions?limit=200").find do |v|
-        v.dig('attributes','platform') == platform && v.dig('attributes','versionString') == @item['version']
-      end
+      versions = @client.list("/v1/apps/#{@app}/appStoreVersions?limit=200").select { |v| v.dig('attributes','platform') == platform }
+      version = versions.find { |v| v.dig('attributes','versionString') == @item['version'] }
       app_state = version&.dig('attributes','appStoreState')
       if HALTED_STATES.include?(app_state)
         puts "::warning::#{@surface} Stable #{@item['version']} is #{app_state}; resolve it in App Store Connect"
         return false
       end
       return pending("App Store version is #{app_state}") if app_state && !SUBMITTABLE_STATES.include?(app_state)
+      unless version
+        occupied = versions.find do |v|
+          state = v.dig('attributes','appStoreState')
+          !REUSABLE_VERSION_STATES.include?(state) && !PUBLISHED_VERSION_STATES.include?(state)
+        end
+        if occupied
+          return pending("prior App Store version #{occupied.dig('attributes','versionString')} is #{occupied.dig('attributes','appStoreState')}")
+        end
+      end
       submit
       true
     end
@@ -342,7 +352,7 @@ module AppleRelease
       versions = @client.list("/v1/apps/#{@app}/appStoreVersions?limit=200").select { |v| v.dig('attributes','platform') == platform }
       version = versions.find { |v| v.dig('attributes','versionString') == @item['version'] }
       unless version
-        rejected = versions.find { |v| %w[PREPARE_FOR_SUBMISSION REJECTED DEVELOPER_REJECTED].include?(v.dig('attributes','appStoreState')) }
+        rejected = versions.find { |v| REUSABLE_VERSION_STATES.include?(v.dig('attributes','appStoreState')) }
         version = if rejected
           @client.patch("/v1/appStoreVersions/#{rejected['id']}", data: {type:'appStoreVersions',id:rejected['id'],attributes:{versionString:@item['version'],releaseType:'AFTER_APPROVAL'}})['data']
         else

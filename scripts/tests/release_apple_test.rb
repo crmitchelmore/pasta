@@ -31,7 +31,7 @@ class ReleaseAppleTest < Minitest::Test
       end
       return [app_localization].flatten.compact if path.include?('/betaAppLocalizations')
       return [] if path.end_with?('/betaBuildLocalizations')
-      return [{'id'=>'stable-version','attributes'=>{'platform'=>'IOS','versionString'=>'1.8.0','createdDate'=>'2026-09-01T00:00:00Z'}}] if path.include?('/6759037470/appStoreVersions')
+      return [{'id'=>'stable-version','attributes'=>{'platform'=>'IOS','versionString'=>'1.8.0','appStoreState'=>'READY_FOR_SALE','createdDate'=>'2026-09-01T00:00:00Z'}}] if path.include?('/6759037470/appStoreVersions')
       return [{'id'=>'public-alpha','attributes'=>{'name'=>'Public Alpha','isInternalGroup'=>false,'publicLink'=>'https://testflight.apple.com/join/example'}}] if path.include?('/apps/')
       assigned ? [build] : []
     end
@@ -245,6 +245,43 @@ class ReleaseAppleTest < Minitest::Test
       refute d.submit_if_ready, state
       refute d.submitted, state
     end
+  end
+  def test_new_stable_version_waits_for_prior_apple_review_or_release
+    %w[WAITING_FOR_REVIEW IN_REVIEW PENDING_DEVELOPER_RELEASE PENDING_APPLE_RELEASE PROCESSING_FOR_APP_STORE METADATA_REJECTED INVALID_BINARY UNKNOWN].each do |state|
+      client=FakeClient.new
+      client.define_singleton_method(:list) do |path|
+        next [{'id'=>'prior','attributes'=>{'platform'=>'IOS','versionString'=>'1.9.0','appStoreState'=>state}}] if path.include?('/appStoreVersions')
+        super(path)
+      end
+      d=gated(client)
+      out, _ = capture_io { refute d.submit_if_ready, state }
+      assert_match(/prior App Store version 1.9.0 is #{state}/, out)
+      refute d.submitted
+      assert_empty client.posts
+      assert_empty client.patches
+    end
+  end
+  def test_prior_published_or_editable_version_does_not_block_submission
+    (AppleRelease::Delivery::PUBLISHED_VERSION_STATES + AppleRelease::Delivery::REUSABLE_VERSION_STATES).each do |state|
+      client=FakeClient.new
+      client.define_singleton_method(:list) do |path|
+        next [{'id'=>'prior','attributes'=>{'platform'=>'IOS','versionString'=>'1.9.0','appStoreState'=>state}}] if path.include?('/appStoreVersions')
+        super(path)
+      end
+      d=gated(client)
+      assert d.submit_if_ready, state
+      assert d.submitted
+    end
+  end
+  def test_another_platform_review_does_not_block_ios
+    client=FakeClient.new
+    client.define_singleton_method(:list) do |path|
+      next [{'id'=>'mac','attributes'=>{'platform'=>'MAC_OS','versionString'=>'1.9.0','appStoreState'=>'IN_REVIEW'}}] if path.include?('/appStoreVersions')
+      super(path)
+    end
+    d=gated(client)
+    assert d.submit_if_ready
+    assert d.submitted
   end
   class SubmitClient < FakeClient
     attr_accessor :conflict

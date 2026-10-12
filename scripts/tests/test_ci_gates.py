@@ -156,9 +156,14 @@ sys.exit(1)
 import json, os, sys
 url = sys.argv[-1]
 if '/v1/apps?' in url:
-    print(json.dumps({'data': [{'id': 'fake-app'}]}))
+    apps = json.loads(os.environ.get('MOCK_ASC_APPS', json.dumps([
+        {'id': 'fake-app', 'attributes': {'bundleId': 'com.pasta.ios'}}
+    ])))
+    print(json.dumps({'data': apps}))
 else:
     state = os.environ.get('MOCK_ASC_STATE', 'VALID')
+    if 'filter%5Bapp%5D=fake-app' not in url:
+        state = 'NOT_FOUND'
     if state == 'HTTP_FAILURE':
         print('Service unavailable')
         sys.exit(22)
@@ -171,6 +176,27 @@ else:
     def test_asc_confirmed_valid_build_passes(self):
         self.prepare_asc()
         self.run_script('ci-asc-wait-for-build.sh', '1.2.3', '123', success=True)
+
+    def test_asc_matches_exact_bundle_when_alpha_is_returned_first(self):
+        self.prepare_asc()
+        apps = [
+            {'id': 'alpha-app', 'attributes': {'bundleId': 'com.pasta.ios.alpha'}},
+            {'id': 'fake-app', 'attributes': {'bundleId': 'com.pasta.ios'}},
+        ]
+        output = self.run_script('ci-asc-wait-for-build.sh', '1.2.3', '123',
+                                 success=True, MOCK_ASC_APPS=json.dumps(apps))
+        self.assertIn('app id: fake-app', output)
+
+    def test_asc_missing_or_ambiguous_exact_identity_fails(self):
+        self.prepare_asc()
+        exact = {'id': 'fake-app', 'attributes': {'bundleId': 'com.pasta.ios'}}
+        for apps in ([], [{'id': 'alpha-app', 'attributes': {'bundleId': 'com.pasta.ios.alpha'}}],
+                     [exact, exact], [{'id': 'missing-attributes'}]):
+            with self.subTest(apps=apps):
+                output = self.run_script('ci-asc-wait-for-build.sh', '1.2.3', '123',
+                                         success=False, MOCK_ASC_APPS=json.dumps(apps))
+                self.assertIn('refusing to poll another app', output)
+                self.assertNotIn('processed successfully', output)
 
     def test_asc_rejected_build_fails(self):
         self.prepare_asc()
