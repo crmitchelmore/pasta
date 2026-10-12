@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 // MARK: - Detection Rules Settings Tab
 
 struct DetectionRulesSettingsTab: View {
+    var readAPIKey: (() throws -> String?)? = nil
     private enum Defaults {
         static let skipAPIKeys = "pasta.skipAPIKeys"
         static let extractContent = "pasta.extractContent"
@@ -42,9 +43,57 @@ struct DetectionRulesSettingsTab: View {
     @State private var newPatternEvaluationTask: Task<Void, Never>? = nil
     @State private var advancedPatternsPerformance: RegexPerformanceResult? = nil
     @State private var advancedPatternsEvaluationTask: Task<Void, Never>? = nil
+    @State private var showLegacy = false
 
     var body: some View {
         Form {
+            DecisionModelsSettingsContent(readAPIKey: readAPIKey)
+            Section {
+                DisclosureGroup("Legacy classifiers (local rules)", isExpanded: $showLegacy) {
+                    Text("Private, offline pattern matching. These rules still protect sensitive content, provide a fallback when remote classification is unavailable, and extract items such as URLs. Existing configurations are preserved.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if showLegacy { legacyConfiguration }
+            if let saveMessage {
+                Section {
+                    Text(saveMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .alert("Detection Rules Error", isPresented: $showError) {
+            Button("OK") { }
+        } message: {
+            Text(errorMessage)
+        }
+        .confirmationDialog(
+            "Reparse clipboard history with legacy rules?",
+            isPresented: $showReparseConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Reparse Now") { reparseHistory() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This replaces saved classifications with local detector results and recreates extracted items, including items previously classified by a decision model.")
+        }
+        .sheet(item: $advancedDetector) { detector in
+            builtInAdvancedSheet(for: detector)
+        }
+        .sheet(item: $editingCustomDetector) { detector in
+            customDetectorSheet(detector: detector)
+        }
+        .onAppear {
+            configuration = DetectorConfigurationStore.load()
+        }
+        .onChange(of: newCustomPattern) { _, _ in scheduleNewPatternEvaluation() }
+        .onChange(of: newCustomCaseInsensitive) { _, _ in scheduleNewPatternEvaluation() }
+    }
+
+    @ViewBuilder
+    private var legacyConfiguration: some View {
             Section {
                 Picker("Default strictness", selection: $configuration.globalStrictness) {
                     ForEach(DetectorStrictness.allCases, id: \.self) { strictness in
@@ -151,50 +200,6 @@ struct DetectionRulesSettingsTab: View {
                 Label("Maintenance", systemImage: "wrench.and.screwdriver")
             }
 
-            RemoteClassificationSettingsSection(provider: .jev)
-            RemoteClassificationSettingsSection(provider: .microsoftDecision)
-
-            if let saveMessage {
-                Section {
-                    Text(saveMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .alert("Detection Rules Error", isPresented: $showError) {
-            Button("OK") { }
-        } message: {
-            Text(errorMessage)
-        }
-        .confirmationDialog(
-            "Reparse clipboard history?",
-            isPresented: $showReparseConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Reparse Now") {
-                reparseHistory()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This refreshes content types and metadata for all existing entries and recreates extracted child items.")
-        }
-        .sheet(item: $advancedDetector) { detector in
-            builtInAdvancedSheet(for: detector)
-        }
-        .sheet(item: $editingCustomDetector) { detector in
-            customDetectorSheet(detector: detector)
-        }
-        .onAppear {
-            configuration = DetectorConfigurationStore.load()
-        }
-        .onChange(of: newCustomPattern) { _, _ in
-            scheduleNewPatternEvaluation()
-        }
-        .onChange(of: newCustomCaseInsensitive) { _, _ in
-            scheduleNewPatternEvaluation()
-        }
     }
 
     private func detectorRow(for detector: BuiltInDetectorKind) -> DetectorRuleRow {

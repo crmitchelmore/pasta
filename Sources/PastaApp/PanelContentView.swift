@@ -404,6 +404,8 @@ struct PanelContentView: View {
         if !didCompleteOnboarding {
             PastaLogger.ui.debug("Showing onboarding (completed=\(didCompleteOnboarding), accessibilityTrusted=\(isAccessibilityTrusted))")
             presentOnboarding()
+        } else if DecisionModelSelection.shouldOfferSetup() {
+            OnboardingWindowController.shared.present(decisionModelsOnly: true) { _ in }
         }
     }
 

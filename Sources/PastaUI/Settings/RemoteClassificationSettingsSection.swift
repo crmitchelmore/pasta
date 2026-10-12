@@ -3,6 +3,8 @@ import SwiftUI
 
 struct RemoteClassificationSettingsSection: View {
     let provider: RemoteClassificationProvider
+    let showHistoryActions: Bool
+    private let readAPIKey: () throws -> String?
     @State private var configuration: JevConfiguration
     @State private var apiKey = ""
     @State private var hasKey = false
@@ -12,15 +14,20 @@ struct RemoteClassificationSettingsSection: View {
     @State private var testSucceeded = false
     @State private var validationTask: Task<Void, Never>?
     @State private var validationID: UUID?
+    @State private var showAdvanced = false
 
-    init(provider: RemoteClassificationProvider) {
+    init(provider: RemoteClassificationProvider, showHistoryActions: Bool = true, readAPIKey: (() throws -> String?)? = nil) {
         self.provider = provider
+        self.showHistoryActions = showHistoryActions
+        self.readAPIKey = readAPIKey ?? { try JevKeychain.read(provider: provider) }
         _configuration = State(initialValue: .load(provider: provider))
     }
 
     var body: some View {
         Section {
-            Toggle(provider == .jev ? "Enable Jev" : "Include Microsoft Decision-1 in comparisons", isOn: Binding(
+            if provider == .microsoftDecision { connectionFields }
+            credentialFields
+            Toggle("Allow eligible clipboard text to be sent to \(provider.title)", isOn: Binding(
                 get: { configuration.isEnabled },
                 set: {
                     configuration.isEnabled = $0 && isValidated
@@ -29,7 +36,7 @@ struct RemoteClassificationSettingsSection: View {
             ))
             .disabled(!isValidated && !configuration.isEnabled)
 
-            if provider == .jev {
+            if showHistoryActions || configuration.isEnabled {
                 Picker("New clipboard entries", selection: $configuration.mode) {
                     ForEach(JevClassificationMode.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
@@ -37,21 +44,75 @@ struct RemoteClassificationSettingsSection: View {
                 .disabled(!configuration.isEnabled)
                 if configuration.mode == .fallback {
                     HStack {
-                        Text("Local confidence below \(Int((configuration.fallbackThreshold * 100).rounded()))%")
+                        Text("Legacy confidence below \(Int((configuration.fallbackThreshold * 100).rounded()))%")
                         Slider(value: $configuration.fallbackThreshold, in: 0...1, step: 0.01)
                             .accessibilityLabel("Low confidence threshold")
                             .accessibilityValue("\(Int((configuration.fallbackThreshold * 100).rounded())) percent")
                     }
                     .onChange(of: configuration.fallbackThreshold) { _, _ in configuration.save() }
-                    Text("Local confidence is a detector score, not a calibrated probability. Exactly the threshold keeps the local result.")
+                    Text("Legacy confidence is a detector score, not a calibrated probability. Exactly the threshold keeps the local result.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
 
+            if provider == .microsoftDecision {
+                Link("Set up Microsoft Decision-1 in Foundry", destination: URL(string: "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/use-foundry-models-microsoft-decision")!)
+                Text("Use the full resource endpoint followed by /providers/microsoft/v1/systemone and your deployment name. Requires key authentication; Microsoft Entra sign-in is not supported.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Link("Get a Jev API key", destination: URL(string: "https://console.typesafe.ai/keys")!)
+                DisclosureGroup("Advanced connection", isExpanded: $showAdvanced) {
+                    connectionFields
+                }
+            }
+            Toggle("Include sensitive entries (API keys, tokens, env vars, cards, IBANs)", isOn: $configuration.includeSensitiveContent)
+                .onChange(of: configuration.includeSensitiveContent) { _, _ in configuration.save() }
+
+            Text("Compare-only mode sends history after confirmation. Default and fallback modes send eligible new clipboard text to \(configuration.endpointHost ?? "the configured endpoint") only when this is the preferred model. Clips are saved locally first; errors and Unknown keep the legacy result. Images and file pastes are never sent.")
+                .font(.caption).foregroundStyle(.secondary)
+            if showHistoryActions {
+                HStack {
+                    Button("Compare Classifiers…") {
+                        NotificationCenter.default.post(name: .compareRemoteClassifiers, object: nil)
+                    }
+                    Button("Reclassify History with \(provider.title)…") {
+                        NotificationCenter.default.post(name: .reclassifyHistoryWithDecisionModel, object: provider.rawValue)
+                    }
+                }
+                .disabled(!configuration.isEnabled || !isValidated)
+            }
+            Text("Text is truncated to \(JevSystemOneRequest.maxContentCharacters) characters. Sensitive entries are excluded unless opted in separately for this provider. Keys are stored only in Keychain. Test before enabling; changing the key, endpoint, model or shared classifiers disables the provider.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let message {
+                Label(message, systemImage: testSucceeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(testSucceeded ? Color.green : Color.red)
+                    .textSelection(.enabled)
+            }
+        } header: {
+            Label(provider.title, systemImage: "sparkles")
+        }
+        .onAppear {
+            reloadConfiguration()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .decisionClassifierRulesChanged)) { _ in
+            invalidateValidation()
+            reloadConfiguration()
+        }
+        .onDisappear {
+            validationTask?.cancel()
+            validationID = nil
+            isTesting = false
+            apiKey = ""
+        }
+    }
+
+    private var credentialFields: some View {
+        Group {
             SecureField(hasKey ? "Replace API key" : "API key", text: $apiKey)
                 .textFieldStyle(.roundedBorder)
             HStack {
-                Button("Save API Key") {
+                Button("Save and Test Key") {
                     do {
                         try JevKeychain.save(apiKey.trimmingCharacters(in: .whitespacesAndNewlines), provider: provider)
                         apiKey = ""
@@ -59,22 +120,28 @@ struct RemoteClassificationSettingsSection: View {
                         testConnection()
                     } catch { showFailure(error) }
                 }
-                .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isTesting || configuration.endpointURL == nil)
                 Button("Test Connection") { testConnection() }
                     .disabled(!hasKey || isTesting || configuration.endpointURL == nil)
-                Button("Remove Key", role: .destructive) {
-                    do {
-                        try JevKeychain.remove(provider: provider)
-                        invalidateValidation()
-                        hasKey = false
-                        testSucceeded = true
-                        message = "API key removed; \(provider.title) disabled."
-                    } catch { showFailure(error) }
+                if showHistoryActions {
+                    Button("Remove Key", role: .destructive) {
+                        do {
+                            try JevKeychain.remove(provider: provider)
+                            invalidateValidation()
+                            hasKey = false
+                            testSucceeded = true
+                            message = "API key removed; \(provider.title) disabled."
+                        } catch { showFailure(error) }
+                    }
+                    .disabled(!hasKey)
                 }
-                .disabled(!hasKey)
                 if isTesting { ProgressView().controlSize(.small) }
             }
+        }
+    }
 
+    private var connectionFields: some View {
+        Group {
             TextField("Full HTTPS endpoint", text: Binding(
                 get: { configuration.endpoint },
                 set: {
@@ -99,57 +166,24 @@ struct RemoteClassificationSettingsSection: View {
                     configuration.save()
                 }
             }
-            Toggle("Include sensitive entries (API keys, tokens, env vars, cards, IBANs)", isOn: $configuration.includeSensitiveContent)
-                .onChange(of: configuration.includeSensitiveContent) { _, _ in configuration.save() }
+        }
+    }
 
-            if provider == .jev {
-                Text("Compare only sends history only after you confirm a comparison. Default and fallback modes send eligible new clipboard text to \(configuration.endpointHost ?? "the configured endpoint"): they save locally first, then update the classification. Errors and Unknown keep the local result. Images and file pastes are never sent.")
-                    .font(.caption).foregroundStyle(.secondary)
-                HStack {
-                    Button("Compare Classifiers…") {
-                        NotificationCenter.default.post(name: .compareRemoteClassifiers, object: nil)
-                    }
-                    Button("Reclassify History with Jev…") {
-                        NotificationCenter.default.post(name: .reclassifyHistoryWithJev, object: nil)
-                    }
-                }
-                .disabled(!configuration.isEnabled || !isValidated)
-            } else {
-                Text("Comparison only: clipboard text is sent only after confirming a history comparison. Use your Foundry resource endpoint followed by /providers/microsoft/v1/systemone, its deployment name and a separate API key. The resource must allow key authentication. No endpoint is guessed or TypeSafe key reused. The served model must identify itself as Microsoft-Decision-1.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Link("Microsoft Decision-1 in Foundry", destination: URL(string: "https://ai.azure.com/catalog/models/Microsoft-Decision-1")!)
-                Button("Compare Classifiers…") {
-                    NotificationCenter.default.post(name: .compareRemoteClassifiers, object: nil)
-                }
-                .disabled(!configuration.isEnabled || !isValidated)
-            }
-            Text("Text is truncated to \(JevSystemOneRequest.maxContentCharacters) characters. Sensitive entries are excluded unless opted in separately for this provider. Keys are stored only in Keychain. Test the connection before enabling; changing the key, endpoint or model disables it.")
-                .font(.caption).foregroundStyle(.secondary)
-            if let message {
-                Label(message, systemImage: testSucceeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(testSucceeded ? Color.green : Color.red)
-                    .textSelection(.enabled)
-            }
-        } header: {
-            Label(provider == .jev ? "Jev Classification" : "Microsoft Decision-1 Comparison", systemImage: "sparkles")
+    private func reloadConfiguration() {
+        configuration = .load(provider: provider)
+        if !configuration.isEnabled,
+           UserDefaults.standard.object(forKey: "\(provider == .jev ? "pasta.jev" : "pasta.microsoftDecision").mode") == nil {
+            configuration.mode = .primary
         }
-        .onAppear {
-            configuration = .load(provider: provider)
-            do {
-                let key = try JevKeychain.read(provider: provider) ?? ""
-                hasKey = !key.isEmpty
-                isValidated = configuration.isValidated(apiKey: key)
-                if !isValidated {
-                    configuration.isEnabled = false
-                    configuration.save()
-                }
-            } catch { showFailure(error) }
-        }
-        .onDisappear {
-            validationTask?.cancel()
-            validationID = nil
-            isTesting = false
+        do {
+            let key = try readAPIKey() ?? ""
+            hasKey = !key.isEmpty
+            isValidated = configuration.isValidated(apiKey: key)
+            if !isValidated { configuration.isEnabled = false }
+        } catch {
+            isValidated = false
+            configuration.isEnabled = false
+            showFailure(error)
         }
     }
 
@@ -162,14 +196,15 @@ struct RemoteClassificationSettingsSection: View {
         validationTask = Task { @MainActor in
             defer { if validationID == id { isTesting = false } }
             do {
-                guard let key = try JevKeychain.read(provider: provider), !key.isEmpty else {
+                guard let key = try readAPIKey(), !key.isEmpty else {
                     throw JevConfigurationError.missingAPIKey
                 }
                 let result = try await JevClassifier().validate(configuration: snapshot, apiKey: key)
                 guard !Task.isCancelled, validationID == id,
                       JevConfiguration.load(provider: provider).endpoint == snapshot.endpoint,
                       JevConfiguration.load(provider: provider).effectiveModel == snapshot.effectiveModel,
-                      try JevKeychain.read(provider: provider) == key else { return }
+                      JevConfiguration.load(provider: provider).rules == snapshot.rules,
+                      try readAPIKey() == key else { return }
                 snapshot.recordSuccessfulValidation(apiKey: key)
                 isValidated = true
                 testSucceeded = true
@@ -201,4 +236,6 @@ struct RemoteClassificationSettingsSection: View {
 public extension Notification.Name {
     static let compareRemoteClassifiers = Notification.Name("pasta.compareRemoteClassifiers")
     static let reclassifyHistoryWithJev = Notification.Name("pasta.reclassifyHistoryWithJev")
+    static let reclassifyHistoryWithDecisionModel = Notification.Name("pasta.reclassifyHistoryWithDecisionModel")
+    static let decisionClassifierRulesChanged = Notification.Name("pasta.decisionClassifierRulesChanged")
 }

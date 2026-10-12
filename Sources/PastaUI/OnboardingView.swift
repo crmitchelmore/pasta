@@ -12,6 +12,7 @@ public struct OnboardingView: View {
 
     private enum Step: Int, CaseIterable {
         case welcome = 0
+        case classification
         case features
         case permissions
         case ready
@@ -26,6 +27,7 @@ public struct OnboardingView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let onComplete: (Completion) -> Void
+    private let decisionModelsOnly: Bool
     
     /// Accessibility is the only permission pasting depends on; Input
     /// Monitoring is configured separately with optional snippet expansion.
@@ -72,8 +74,10 @@ public struct OnboardingView: View {
         )
     ]
 
-    public init(onComplete: @escaping (Completion) -> Void) {
+    public init(decisionModelsOnly: Bool = false, onComplete: @escaping (Completion) -> Void) {
+        self.decisionModelsOnly = decisionModelsOnly
         self.onComplete = onComplete
+        _step = State(initialValue: decisionModelsOnly ? .classification : .welcome)
     }
 
     public var body: some View {
@@ -83,15 +87,19 @@ public struct OnboardingView: View {
             
             VStack(spacing: 0) {
                 // Progress indicator
-                progressBar
-                    .padding(.top, 20)
-                    .padding(.horizontal, 32)
+                if !decisionModelsOnly {
+                    progressBar
+                        .padding(.top, 20)
+                        .padding(.horizontal, 32)
+                }
                 
                 // Main content
                 Group {
                     switch step {
                     case .welcome:
                         welcomeStep
+                    case .classification:
+                        classificationStep
                     case .features:
                         featuresStep
                     case .permissions:
@@ -169,10 +177,25 @@ public struct OnboardingView: View {
     private var currentAccentColor: Color {
         switch step {
         case .welcome: return PastaTheme.accent
+        case .classification: return PastaTheme.accent
         case .features: return featureTips[featureTipIndex].accent
         case .permissions: return Color.orange
         case .ready: return PastaTheme.success
         }
+    }
+
+    private var classificationStep: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Better classification with decision models")
+                .font(.title2.weight(.semibold))
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+            Text("Add a Jev key, or connect Microsoft Decision-1. You can continue without a key and use private, offline legacy classification.")
+                .font(.callout).foregroundStyle(.secondary)
+                .padding(.horizontal, 24)
+            DecisionModelSetupView()
+        }
+        .onAppear { UserDefaults.standard.set(true, forKey: DecisionModelSelection.setupOfferedKey) }
     }
     
     // MARK: - Progress Bar
@@ -466,7 +489,7 @@ public struct OnboardingView: View {
     private var navigationFooter: some View {
         HStack {
             // Back button (except on first step)
-            if step != .welcome {
+            if step != .welcome && !decisionModelsOnly {
                 Button {
                     withAnimation(.spring(response: 0.35)) {
                         if let prev = Step(rawValue: step.rawValue - 1) {
@@ -519,6 +542,7 @@ public struct OnboardingView: View {
     private var primaryButtonTitle: String {
         switch step {
         case .welcome: return "Get Started"
+        case .classification: return decisionModelsOnly ? "Done" : "Continue"
         case .features: return "Continue"
         case .permissions: return hasRequiredPermissions ? "Continue" : "Skip for now"
         case .ready: return "Start Using \(PermissionAppIdentity.current.name)"
@@ -529,7 +553,13 @@ public struct OnboardingView: View {
         withAnimation(.spring(response: 0.35)) {
             switch step {
             case .welcome:
-                step = .features
+                step = .classification
+            case .classification:
+                if decisionModelsOnly {
+                    onComplete(.completed)
+                } else {
+                    step = .features
+                }
             case .features:
                 step = .permissions
             case .permissions:

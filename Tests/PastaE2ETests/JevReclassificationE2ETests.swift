@@ -22,6 +22,48 @@ final class JevReclassificationE2ETests: XCTestCase {
         environment = nil
     }
 
+    func testBothProvidersApplyCustomChoicesAndPersistPreviewLabelWithoutChangingSyncPolicy() throws {
+        let custom = DecisionClassifierDefinition(name: "Customer ID", description: "A customer reference", contentType: .text)
+        for provider in RemoteClassificationProvider.allCases {
+            let snapshot = try database.insert(ClipboardEntry(content: "CUST-\(UUID())", contentType: .prose,
+                                                               cloudSyncAllowed: false, receivedViaTailnet: true), deduplicate: false).entry
+            let configuration = JevConfiguration(isEnabled: true, provider: provider, mode: .primary,
+                                                 rules: .init(customClassifiers: [custom]))
+            let outcome = try JevReclassificationService().apply(.init(category: .text, rawChoice: custom.choiceID),
+                to: snapshot, database: database, configuration: configuration, detectorConfiguration: .default,
+                extractContent: true, skipAPIKeys: true)
+            XCTAssertEqual(outcome, .applied)
+            let stored = try XCTUnwrap(database.fetch(id: snapshot.id))
+            XCTAssertEqual(stored.contentType, .text)
+            XCTAssertEqual(stored.content, snapshot.content)
+            XCTAssertFalse(stored.cloudSyncAllowed)
+            XCTAssertTrue(stored.receivedViaTailnet)
+            let metadata = try XCTUnwrap(e2eJSONDictionary(stored.metadata)?["decisionClassification"] as? [String: String])
+            XCTAssertEqual(metadata["label"], "Customer ID")
+            XCTAssertEqual(metadata["provider"], provider.rawValue)
+            let reopened = try environment.openDatabase()
+            XCTAssertEqual(try reopened.fetch(id: snapshot.id)?.metadata, stored.metadata)
+            let normalResult = try JevReclassificationService().apply(.init(category: .prose), to: stored,
+                database: database, configuration: configuration, detectorConfiguration: .default,
+                extractContent: false, skipAPIKeys: true)
+            XCTAssertEqual(normalResult, .applied)
+            XCTAssertNil(e2eJSONDictionary(try database.fetch(id: snapshot.id)?.metadata)?["decisionClassification"])
+        }
+    }
+
+    func testMicrosoftHistoryReclassificationKeepsSensitiveAndBinaryItemsLocal() throws {
+        let configuration = JevConfiguration(isEnabled: true, provider: .microsoftDecision, mode: .primary)
+        for type in [ContentType.apiKey, .jwt, .creditCard, .iban, .envVar, .image, .screenshot, .filePath] {
+            let entry = try database.insert(ClipboardEntry(content: "Private \(type.rawValue)", contentType: type), deduplicate: false).entry
+            let snapshot = try XCTUnwrap(database.fetch(id: entry.id))
+            let outcome = try JevReclassificationService().apply(.init(category: .prose), to: snapshot,
+                database: database, configuration: configuration, detectorConfiguration: .default,
+                extractContent: true, skipAPIKeys: true)
+            XCTAssertEqual(outcome, .retained)
+            XCTAssertEqual(try database.fetch(id: snapshot.id), snapshot)
+        }
+    }
+
     func testPersistedDedupIdentityIsReclassifiedWithoutLosingContentPinsOrCounts() throws {
         let capture = ClipboardEntry(content: "A short title", contentType: .text, isPinned: true)
         let first = try pipeline.ingest(capture)

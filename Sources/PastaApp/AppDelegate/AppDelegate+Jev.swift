@@ -8,15 +8,23 @@ import UniformTypeIdentifiers
 extension AppDelegate {
     @objc func compareClassificationWithJev() { startRemoteClassification(reclassify: false) }
     @objc func reclassifyHistoryWithJev() { startRemoteClassification(reclassify: true) }
+    @objc func reclassifyHistoryWithDecisionModel(_ notification: Notification) {
+        guard let name = notification.object as? String,
+              let provider = RemoteClassificationProvider(rawValue: name) else {
+            showJevMessage(title: "Unknown classification provider", message: "Choose a supported decision model in Settings → Detection.")
+            return
+        }
+        startRemoteClassification(reclassify: true, provider: provider)
+    }
 
-    private func startRemoteClassification(reclassify: Bool) {
+    private func startRemoteClassification(reclassify: Bool, provider: RemoteClassificationProvider = .jev) {
         if jevComparisonTask != nil {
             jevComparisonWindow?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
         var connections: [(configuration: JevConfiguration, apiKey: String)] = []
-        let providers: [RemoteClassificationProvider] = reclassify ? [.jev] : RemoteClassificationProvider.allCases
+        let providers: [RemoteClassificationProvider] = reclassify ? [provider] : RemoteClassificationProvider.allCases
         do {
             for provider in providers {
                 let configuration = JevConfiguration.load(provider: provider)
@@ -31,7 +39,7 @@ extension AppDelegate {
             return
         }
         guard !connections.isEmpty else {
-            showJevMessage(title: "No classifier enabled", message: "Configure, test and enable \(reclassify ? "Jev" : "Jev or Microsoft Decision-1") in Settings → Detection first.")
+            showJevMessage(title: "No classifier enabled", message: "Configure, test and enable \(reclassify ? provider.title : "Jev or Microsoft Decision-1") in Settings → Detection first.")
             return
         }
 
@@ -105,16 +113,16 @@ extension AppDelegate {
                 return "\(config.provider.title): \(totals[index]) entries to \(config.endpointHost ?? config.endpoint), model \(config.effectiveModel). \(privacy)"
             }
             let alert = NSAlert()
-            alert.messageText = reclassify ? "Reclassify history with Jev?" : "Compare clipboard classifiers?"
+            alert.messageText = reclassify ? "Reclassify history with \(provider.title)?" : "Compare clipboard classifiers?"
             let mutation = reclassify
-                ? "Successful, known Jev results will update saved content types and rebuild extracted items. Original content, pins and copy counts are preserved. Failures, Unknown and changed/deleted entries are not overwritten."
+                ? "Successful, known decisions will update saved content types and rebuild extracted items. Original content, pins and copy counts are preserved. Failures, Unknown and changed/deleted entries are not overwritten."
                 : "Fresh local detector results are compared with each enabled model. Saved classifications remain unchanged."
             alert.informativeText = destinations.joined(separator: "\n") + "\n\nText is truncated to the first \(JevSystemOneRequest.maxContentCharacters) characters.\n\n" + mutation
             alert.addButton(withTitle: reclassify ? "Reclassify" : "Compare")
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-            state.title = reclassify ? "Reclassifying with Jev" : "Comparing classifiers"
+            state.title = reclassify ? "Reclassifying with \(provider.title)" : "Comparing classifiers"
             window.title = state.title
             state.progress = JevComparisonProgress(total: total, completed: 0, agreements: 0, failed: 0)
             state.detail = "Sending confirmed entries to \(state.destination). "
@@ -167,7 +175,7 @@ extension AppDelegate {
                         guard row.error == nil, row.skipReason == nil, let category = row.jevCategory,
                               let snapshot = byID[row.id] else { continue }
                         do {
-                            let classification = JevClassification(category: category, modelVersion: row.jevModel)
+                            let classification = JevClassification(category: category, rawChoice: row.jevChoice, confidence: row.confidence, modelVersion: row.jevModel)
                             let outcome = try await BackgroundService.shared.applyJevClassification(
                                 classification, to: snapshot, configuration: connection.configuration, apiKey: connection.apiKey,
                                 detectorConfiguration: detectorConfiguration, extractContent: extractContent, skipAPIKeys: skipAPIKeys

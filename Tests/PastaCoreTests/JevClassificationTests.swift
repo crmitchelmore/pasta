@@ -107,6 +107,48 @@ final class JevClassificationTests: XCTestCase {
 
     // MARK: Request
 
+    func testCustomChoicesShareDescriptionsAndDecodeToMappedTypesForBothProviders() async throws {
+        let custom = DecisionClassifierDefinition(name: "Customer ID", description: "A customer reference beginning CUST-", contentType: .text)
+        let rules = DecisionClassificationRules(descriptions: ["prose": "A complete customer message."], customClassifiers: [custom])
+        for provider in RemoteClassificationProvider.allCases {
+            JevMockURLProtocol.reset()
+            let servedModel = provider == .jev ? "jev-1.13.0" : "Microsoft-Decision-1"
+            JevMockURLProtocol.enqueue(status: 200, body: Self.successBody(choice: custom.choiceID).replacingOccurrences(of: "jev-1.13.0", with: servedModel))
+            let configuration = JevConfiguration(endpoint: "https://example.com/systemone", provider: provider, rules: rules)
+            let result = try await makeClassifier().classify(content: "CUST-123", configuration: configuration, apiKey: "key")
+            XCTAssertEqual(result.category, .text)
+            XCTAssertEqual(result.rawChoice, custom.choiceID)
+            let body = try XCTUnwrap(JevMockURLProtocol.bodies.first)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            let questions = try XCTUnwrap(object["questions"] as? [String: [String: Any]])
+            let criteria = try XCTUnwrap(questions["content_type"]?["criteria"] as? [String: String])
+            XCTAssertEqual(criteria[custom.choiceID], "Customer ID: A customer reference beginning CUST-")
+            XCTAssertEqual(criteria["prose"], "A complete customer message.")
+            XCTAssertEqual(criteria.count, JevSystemOneRequest.options.count + 1)
+            let text = String(decoding: body, as: UTF8.self)
+            XCTAssertLessThan(try XCTUnwrap(text.range(of: "\"\(custom.choiceID)\":")?.lowerBound),
+                              try XCTUnwrap(text.range(of: "\"unknown\":")?.lowerBound))
+        }
+    }
+
+    func testCustomLabelSurvivesComparisonAndExportsWithoutClipboardText() async throws {
+        let custom = DecisionClassifierDefinition(name: "Customer ID", description: "A customer reference", contentType: .text)
+        let rules = DecisionClassificationRules(customClassifiers: [custom])
+        JevMockURLProtocol.enqueue(status: 200, body: Self.successBody(choice: custom.choiceID))
+        let report = await JevComparisonService(classifier: makeClassifier()).compare(
+            entries: [entry(.text, content: "PRIVATE_CUST_123")], configuration: .init(rules: rules), apiKey: "key"
+        )
+        XCTAssertEqual(report.rows.first?.decisionLabel, "Customer ID")
+        XCTAssertEqual(report.rows.first?.jevCategory, .text)
+        XCTAssertTrue(report.csv().contains("jev_custom_label"))
+        XCTAssertTrue(report.csv().contains("Customer ID"))
+        let json = String(decoding: try report.jsonData(), as: UTF8.self)
+        XCTAssertTrue(json.contains("Customer ID"))
+        XCTAssertFalse(json.contains("PRIVATE_CUST_123"))
+        XCTAssertFalse(report.csv().contains("PRIVATE_CUST_123"))
+        XCTAssertEqual(try JSONDecoder().decode(JevComparisonReport.self, from: JSONEncoder().encode(report)), report)
+    }
+
     func testRequestUsesSystemOneChoiceSchema() async throws {
         JevMockURLProtocol.enqueue(status: 200, body: Self.successBody(choice: "url"))
 
@@ -440,6 +482,113 @@ final class JevClassificationTests: XCTestCase {
         XCTAssertEqual(JevConfiguration.load(defaults: defaults).mode, .primary)
     }
 
+    func testMicrosoftCanBePreferredForPrimaryFallbackAndHistoryWithoutEnablingItBySelection() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        XCTAssertEqual(DecisionModelSelection.provider(defaults: defaults), .jev)
+        DecisionModelSelection.select(.microsoftDecision, defaults: defaults)
+        XCTAssertFalse(DecisionModelSelection.configuration(defaults: defaults).isEnabled)
+        var configuration = JevConfiguration(isEnabled: true, endpoint: "https://foundry.example/providers/microsoft/v1/systemone",
+                                             provider: .microsoftDecision, mode: .primary)
+        configuration.save(defaults: defaults)
+        XCTAssertEqual(DecisionModelSelection.configuration(defaults: defaults).mode, .primary)
+        XCTAssertTrue(DecisionModelSelection.configuration(defaults: defaults).shouldClassify(localConfidence: 1))
+        configuration.mode = .fallback
+        configuration.fallbackThreshold = 0.6
+        configuration.save(defaults: defaults)
+        let loaded = DecisionModelSelection.configuration(defaults: defaults)
+        XCTAssertTrue(loaded.shouldClassify(localConfidence: 0.59))
+        XCTAssertFalse(loaded.shouldClassify(localConfidence: 0.6))
+        XCTAssertFalse(JevConfiguration.load(defaults: defaults).isEnabled)
+    }
+
+    func testSavingSharedRulesPersistsAndInvalidatesBothProviderConsents() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        for provider in RemoteClassificationProvider.allCases {
+            let configuration = JevConfiguration(isEnabled: true, endpoint: "https://example.com/systemone", provider: provider, mode: .primary)
+            configuration.save(defaults: defaults)
+            configuration.recordSuccessfulValidation(apiKey: "key", defaults: defaults)
+            XCTAssertTrue(configuration.isValidated(apiKey: "key", defaults: defaults))
+        }
+        let rules = DecisionClassificationRules(customClassifiers: [
+            .init(name: "Ticket", description: "A support ticket identifier", contentType: .text)
+        ])
+        try rules.save(defaults: defaults)
+        XCTAssertEqual(DecisionClassificationRules.load(defaults: defaults), rules)
+        for provider in RemoteClassificationProvider.allCases {
+            let loaded = JevConfiguration.load(provider: provider, defaults: defaults)
+            XCTAssertEqual(loaded.rules, rules)
+            XCTAssertFalse(loaded.isEnabled)
+            XCTAssertFalse(loaded.isValidated(apiKey: "key", defaults: defaults))
+            loaded.recordSuccessfulValidation(apiKey: "key", defaults: defaults)
+            XCTAssertTrue(loaded.isValidated(apiKey: "key", defaults: defaults))
+            XCTAssertFalse(loaded.isComparisonAllowed(apiKey: "key", defaults: defaults))
+            var changed = loaded
+            changed.rules.descriptions["text"] = "A short identifier."
+            XCTAssertFalse(changed.isValidated(apiKey: "key", defaults: defaults))
+        }
+    }
+
+    func testUnchangedSharedRulesDoNotDisableExistingProvider() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        let configuration = JevConfiguration(isEnabled: true)
+        configuration.save(defaults: defaults)
+        configuration.recordSuccessfulValidation(apiKey: "key", defaults: defaults)
+        try DecisionClassificationRules.default.save(defaults: defaults)
+        XCTAssertTrue(JevConfiguration.load(defaults: defaults).isComparisonAllowed(apiKey: "key", defaults: defaults))
+    }
+
+    func testInvalidCustomRulesFailExplicitlyAndCannotOverwriteStoredRules() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        let custom = DecisionClassifierDefinition(name: "Ticket", description: "A support ticket")
+        let valid = DecisionClassificationRules(customClassifiers: [custom])
+        try valid.save(defaults: defaults)
+        let invalidRules: [DecisionClassificationRules] = [
+            .init(customClassifiers: [.init(name: "", description: "x")]),
+            .init(customClassifiers: [.init(name: "x", description: "")]),
+            .init(customClassifiers: [.init(name: "x", description: String(repeating: "x", count: 1_001))]),
+            .init(customClassifiers: [.init(name: "x", description: "x", contentType: .image)]),
+            .init(customClassifiers: [.init(name: "x", description: "x", contentType: .unknown)]),
+            .init(customClassifiers: [.init(name: "x", description: "x", contentType: .filePath)]),
+            .init(customClassifiers: [custom, custom]),
+            .init(customClassifiers: [custom, .init(name: "TICKET", description: "x")]),
+            .init(descriptions: ["image": "x"]),
+            .init(descriptions: ["text": " "]),
+            .init(customClassifiers: (0...DecisionClassificationRules.maxCustomClassifiers).map { .init(name: "\($0)", description: "x") })
+        ]
+        for rules in invalidRules {
+            XCTAssertThrowsError(try rules.save(defaults: defaults))
+            XCTAssertThrowsError(try JevSystemOneRequest.body(content: "x", model: "jev-latest", rules: rules))
+            XCTAssertEqual(DecisionClassificationRules.load(defaults: defaults), valid)
+        }
+    }
+
+    func testCorruptStoredRulesDisableRemoteProvidersAndCanBeRepaired() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        JevConfiguration(isEnabled: true, mode: .primary).save(defaults: defaults)
+        defaults.set(Data("invalid".utf8), forKey: DecisionClassificationRules.defaultsKey)
+        XCTAssertFalse(JevConfiguration.load(defaults: defaults).isEnabled)
+        XCTAssertEqual(DecisionClassificationRules.load(defaults: defaults), .default)
+        try DecisionClassificationRules.default.save(defaults: defaults)
+        XCTAssertNoThrow(try JSONDecoder().decode(DecisionClassificationRules.self, from: XCTUnwrap(defaults.data(forKey: DecisionClassificationRules.defaultsKey))))
+    }
+
+    func testSetupOfferIsOptionalOnceAndDoesNotChangeProviderConsent() throws {
+        let (defaults, cleanup) = try makeDefaults()
+        defer { cleanup() }
+        XCTAssertTrue(DecisionModelSelection.shouldOfferSetup(defaults: defaults))
+        defaults.set(true, forKey: DecisionModelSelection.setupOfferedKey)
+        XCTAssertFalse(DecisionModelSelection.shouldOfferSetup(defaults: defaults))
+        XCTAssertFalse(DecisionModelSelection.configuration(defaults: defaults).isEnabled)
+        defaults.removeObject(forKey: DecisionModelSelection.setupOfferedKey)
+        JevConfiguration(isEnabled: true).save(defaults: defaults)
+        XCTAssertFalse(DecisionModelSelection.shouldOfferSetup(defaults: defaults))
+    }
+
     func testMicrosoftUsesSameChoiceContractWithItsOwnEndpointAndModel() async throws {
         let body = Self.successBody(choice: "url").replacingOccurrences(of: "jev-1.13.0", with: "Microsoft-Decision-1")
         JevMockURLProtocol.enqueue(status: 200, body: body)
@@ -492,6 +641,22 @@ final class JevClassificationTests: XCTestCase {
         XCTAssertNotNil(report.abortReason)
         XCTAssertEqual(report.failed, 1)
         XCTAssertEqual(JevMockURLProtocol.requests.count, 1)
+    }
+
+    func testRevokedAuthorizationRejectsSuccessfulInFlightResponsesForBothProviders() async {
+        for provider in RemoteClassificationProvider.allCases {
+            JevMockURLProtocol.reset()
+            let servedModel = provider == .jev ? "jev-1.13.0" : "Microsoft-Decision-1"
+            JevMockURLProtocol.enqueue(status: 200, body: Self.successBody(choice: "prose").replacingOccurrences(of: "jev-1.13.0", with: servedModel))
+            let report = await JevComparisonService(classifier: makeClassifier(), maxConcurrentRequests: 1).compare(
+                entries: [entry(.text)], configuration: .init(endpoint: "https://example.com/systemone", provider: provider), apiKey: "key",
+                authorizationCheck: { JevMockURLProtocol.requests.isEmpty }
+            )
+            XCTAssertNotNil(report.abortReason)
+            XCTAssertEqual(report.failed, 1)
+            XCTAssertNil(report.rows.first?.jevCategory)
+            XCTAssertEqual(JevMockURLProtocol.requests.count, 1)
+        }
     }
 
     func testMultiProviderExportsKeepResultsSeparateWithoutOriginalContent() throws {
