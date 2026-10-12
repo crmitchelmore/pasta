@@ -49,13 +49,16 @@ Known completed decisions rebuild metadata/extracted children transactionally,
 preserving original content, identity, timestamps, copy counts, pins and sharing
 consent. Changed/deleted snapshots are not overwritten or resurrected. Cancellation
 stops remaining work; already applied updates are retained. The final report
-shows updated, retained, changed/deleted and failed counts. Changing provider,
-detector or extraction settings stops application of stale decisions. Changed
-rows remain pending sync; an older upload cannot mark a newer classification synced.
+shows disjoint updated, retained, changed/deleted and failed counts. Changing provider,
+detector, extraction or API-key exclusion settings stops application of stale decisions.
+Rebuilt children obey API-key exclusion. Changed rows remain pending sync;
+an older upload cannot mark a newer classification synced.
 Classification writes share the macOS sync gate, so an in-flight downloaded
 payload finishes before a delayed provider result can update its saved snapshot.
 Retired extracted children have durable CloudKit deletion records, drained before
 upload/pull and protected from delayed cloud replay, including after a restart.
+Deletion acknowledgements retain retirement markers; a stale writer recreating a
+retired ID queues another deletion without resurrecting the child locally.
 
 ### Microsoft Decision-1
 
@@ -63,16 +66,17 @@ The separate **Microsoft Decision-1 Comparison** section is opt-in and
 comparison-only. The [official announcement](https://commandline.microsoft.com/microsoft-decision-1-model-foundry/)
 and [Foundry model card](https://ai.azure.com/catalog/models/Microsoft-Decision-1)
 identify the text-only fixed-choice decision model, not MAI-Thinking-1.
-Configure your deployment's **full System One-compatible HTTPS endpoint** and its
-own API key; the model defaults to `microsoft-decision-1`. This implements the
-`state`/`questions`/`criteria` contract used by the
-[published Decision-1 example](https://github.com/jennifermarsman/GitHubIssueClassifier/blob/2ce498b07d1ed99c119cde4090f5245dd436e0dc/server/classifier.ts).
-There is no invented shared Foundry endpoint, no assumption that chat completions
-accept this contract, and no reuse of the TypeSafe credential. A successful
-connection test must return a served model identifying itself as Microsoft-Decision-1
-before it can be enabled. Native Foundry endpoints with a different wire contract
-are not supported by this adapter; use the deployment's System One-compatible
-endpoint rather than guessing a path.
+Configure the **full HTTPS endpoint** as your Foundry resource endpoint followed
+by `/providers/microsoft/v1/systemone`, then enter the actual **deployment name**
+and its own API key. The deployment name defaults to `microsoft-decision-1`, but
+must match your deployed resource. The adapter uses the `api-key` header and the
+`state`/`questions`/`criteria` contract documented in
+[Microsoft's Decision-1 quickstart](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/use-foundry-models-microsoft-decision).
+Resources with local/key authentication disabled cannot use this API-key adapter;
+Microsoft Entra sign-in is not implemented. No shared endpoint is invented,
+chat completions are not used, and the TypeSafe credential is not reused.
+A successful connection test must return a served model identifying itself as
+Microsoft-Decision-1 before it can be enabled.
 
 With both providers enabled, comparison displays **local detectors, Jev and
 Microsoft Decision-1 side by side**, with separate confidence, latency, model,

@@ -31,6 +31,7 @@ final class SyncReceiveSchedulerTests: XCTestCase {
         let manualGate = ReceiveTestClock()
         let manualStarted = expectation(description: "manual sync started")
         let intervalStarted = expectation(description: "busy background attempt skipped")
+        intervalStarted.assertForOverFulfill = false
         let received = expectation(description: "receiving resumes after manual sync")
         let scheduler = SyncReceiveScheduler {
             intervalStarted.fulfill()

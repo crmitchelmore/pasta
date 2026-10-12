@@ -16,7 +16,8 @@ public struct JevReclassificationService {
         database: DatabaseManager,
         configuration: JevConfiguration,
         detectorConfiguration: DetectorConfiguration,
-        extractContent: Bool
+        extractContent: Bool,
+        skipAPIKeys: Bool
     ) throws -> Outcome {
         guard configuration.provider == .jev,
               classification.category != .unknown,
@@ -27,7 +28,10 @@ public struct JevReclassificationService {
             return .retained
         }
         let output = detector.detect(in: snapshot.content, configuration: detectorConfiguration, primaryTypeOverride: classification.category)
-        let children: [ClipboardEntry] = extractContent ? output.extractedItems.map {
+        guard !(skipAPIKeys && output.primaryType == .apiKey) else { return .retained }
+        let children: [ClipboardEntry] = extractContent ? output.extractedItems.filter {
+            !(skipAPIKeys && $0.contentType == .apiKey)
+        }.map {
             ClipboardEntry(content: $0.content, contentType: $0.contentType, timestamp: snapshot.timestamp,
                            sourceApp: snapshot.sourceApp, metadata: $0.metadataJSON, parentEntryId: snapshot.id,
                            cloudSyncAllowed: snapshot.cloudSyncAllowed, receivedViaTailnet: snapshot.receivedViaTailnet)
@@ -35,6 +39,11 @@ public struct JevReclassificationService {
         let applied = try database.applyClassification(matching: snapshot, contentType: output.primaryType,
                                                       metadata: output.metadataJSON, extractedEntries: children)
         return applied ? .applied : .changedSinceRequest
+    }
+
+    public static func applicationSummary(total: Int, updated: Int, changedDeleted: Int, providerFailures: Int) -> String {
+        let retained = max(0, total - updated - changedDeleted - providerFailures)
+        return "\(updated) updated · \(retained) retained · \(changedDeleted) changed/deleted · \(providerFailures) provider failures."
     }
 }
 

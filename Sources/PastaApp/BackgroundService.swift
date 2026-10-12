@@ -203,7 +203,8 @@ final class BackgroundService: ObservableObject {
         configuration: JevConfiguration,
         apiKey: String,
         detectorConfiguration: DetectorConfiguration,
-        extractContent: Bool
+        extractContent: Bool,
+        skipAPIKeys: Bool
     ) async throws -> JevReclassificationService.Outcome {
         try await syncReceiver.runWhenAvailable {
             let db = self.database
@@ -212,12 +213,13 @@ final class BackgroundService: ObservableObject {
                     try Task.checkCancellation()
                     guard Self.isCurrentJevConfiguration(configuration, apiKey: apiKey),
                           DetectorConfigurationStore.load() == detectorConfiguration,
-                          UserDefaults.standard.bool(forKey: Defaults.extractContent) == extractContent else {
+                          UserDefaults.standard.bool(forKey: Defaults.extractContent) == extractContent,
+                          UserDefaults.standard.bool(forKey: Defaults.skipAPIKeys) == skipAPIKeys else {
                         throw JevConfigurationError.validationRequired
                     }
                     return try JevReclassificationService().apply(
                         classification, to: snapshot, database: db, configuration: configuration,
-                        detectorConfiguration: detectorConfiguration, extractContent: extractContent
+                        detectorConfiguration: detectorConfiguration, extractContent: extractContent, skipAPIKeys: skipAPIKeys
                     )
                 }
             }
@@ -592,7 +594,7 @@ final class BackgroundService: ObservableObject {
                                             if jev.configuration.mode != .comparison {
                                                 let outcome = try await self.applyJevClassification(
                                                     classification, to: snapshot, configuration: jev.configuration, apiKey: jev.apiKey,
-                                                    detectorConfiguration: detectorConfiguration, extractContent: extractContent
+                                                    detectorConfiguration: detectorConfiguration, extractContent: extractContent, skipAPIKeys: skipAPIKeys
                                                 )
                                                 if outcome == .applied {
                                                     await MainActor.run { NotificationCenter.default.post(name: Notification.Name("pasta.entriesDidChange"), object: nil) }

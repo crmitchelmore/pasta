@@ -37,7 +37,11 @@ extension DatabaseManager {
             for entry in modified where !deletedIDs.contains(entry.id) {
                 let retired = try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM classification_cloud_deletions WHERE id = ?)",
                                                arguments: [entry.id.uuidString]) ?? false
-                guard !retired else { continue }
+                if retired {
+                    try db.execute(sql: "UPDATE classification_cloud_deletions SET needsUpload = 1 WHERE id = ?",
+                                   arguments: [entry.id.uuidString])
+                    continue
+                }
                 try db.execute(
                     sql: """
                     INSERT INTO \(ClipboardEntry.databaseTableName)
@@ -94,7 +98,7 @@ extension DatabaseManager {
                     sql: "DELETE FROM \(ClipboardEntry.databaseTableName) WHERE id IN (\(placeholders))",
                     arguments: StatementArguments(chunk.map { $0.uuidString })
                 )
-                try db.execute(sql: "DELETE FROM classification_cloud_deletions WHERE id IN (\(placeholders))",
+                try db.execute(sql: "UPDATE classification_cloud_deletions SET needsUpload = 0 WHERE id IN (\(placeholders))",
                                arguments: StatementArguments(chunk.map { $0.uuidString }))
             }
 

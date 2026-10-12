@@ -182,7 +182,8 @@ public struct JevConfiguration: Sendable, Equatable {
     }
 
     private func validationFingerprint(apiKey: String) -> String {
-        let values = [endpoint.trimmingCharacters(in: .whitespacesAndNewlines), effectiveModel, apiKey.trimmingCharacters(in: .whitespacesAndNewlines)]
+        var values = [endpoint.trimmingCharacters(in: .whitespacesAndNewlines), effectiveModel, apiKey.trimmingCharacters(in: .whitespacesAndNewlines)]
+        if provider == .microsoftDecision { values.append("api-key") }
         return ClipboardEntry.sha256Hex(values.map { "\($0.utf8.count):\($0)" }.joined())
     }
 }
@@ -573,7 +574,11 @@ public struct JevClassifier: Sendable {
         request.timeoutInterval = requestTimeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        if configuration.provider == .microsoftDecision {
+            request.setValue(key, forHTTPHeaderField: "api-key")
+        } else {
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = try JevSystemOneRequest.body(content: content, model: configuration.effectiveModel)
 
         let started = Date()
@@ -939,6 +944,14 @@ public struct JevComparisonReport: Codable, Sendable, Equatable {
     }
 
     public func csv() -> String {
+        func confidenceField(_ value: Double?) -> String {
+            guard let value else { return "" }
+            return String(format: "%.4f", value)
+        }
+        func latencyField(_ value: TimeInterval?) -> String {
+            guard let value else { return "" }
+            return String(Int((value * 1000).rounded()))
+        }
         let formatter = ISO8601DateFormatter()
         let extras = additionalReports ?? []
         let lookups = extras.map { Dictionary(uniqueKeysWithValues: $0.rows.map { ($0.id, $0) }) }
@@ -948,9 +961,9 @@ public struct JevComparisonReport: Codable, Sendable, Equatable {
         }
         let prefix = (provider ?? .jev).rawValue
         let header = (["id,timestamp,source_app,outcome,pasta_category,\(prefix)_category,\(prefix)_choice,confidence,latency_ms,\(prefix)_model,attempts,error,skip_reason"] + extraHeaders).joined(separator: ",")
-        let lines = rows.map { row -> String in
-            let confidence = row.confidence.map { String(format: "%.4f", $0) } ?? ""
-            let latency = row.latency.map { String(Int(($0 * 1000).rounded())) } ?? ""
+        let lines: [String] = rows.map { row -> String in
+            let confidence = confidenceField(row.confidence)
+            let latency = latencyField(row.latency)
             let attempts = row.attempts.map { String($0) } ?? ""
             var fields: [String] = [
                 row.id.uuidString,
@@ -969,12 +982,12 @@ public struct JevComparisonReport: Codable, Sendable, Equatable {
             ]
             for lookup in lookups {
                 let extra = lookup[row.id]
-                fields += [
-                    extra?.jevCategory?.rawValue ?? "",
-                    extra?.confidence.map { String(format: "%.4f", $0) } ?? "",
-                    extra?.latency.map { String(Int(($0 * 1000).rounded())) } ?? "",
-                    extra?.jevModel ?? "", extra?.error ?? "", extra?.skipReason?.rawValue ?? ""
-                ]
+                fields.append(extra?.jevCategory?.rawValue ?? "")
+                fields.append(confidenceField(extra?.confidence))
+                fields.append(latencyField(extra?.latency))
+                fields.append(extra?.jevModel ?? "")
+                fields.append(extra?.error ?? "")
+                fields.append(extra?.skipReason?.rawValue ?? "")
             }
             return fields.map(Self.csvField).joined(separator: ",")
         }

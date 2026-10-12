@@ -38,6 +38,7 @@ extension AppDelegate {
         let database = BackgroundService.shared.database
         let detectorConfiguration = DetectorConfigurationStore.load()
         let extractContent = UserDefaults.standard.bool(forKey: "pasta.extractContent")
+        let skipAPIKeys = UserDefaults.standard.bool(forKey: "pasta.skipAPIKeys")
         let selectedConnections = connections
         let state = JevComparisonRunState(total: 0, destination: connections.compactMap { $0.configuration.endpointHost }.joined(separator: ", "),
                                           title: "Preparing classification", changesHistory: reclassify)
@@ -148,31 +149,32 @@ extension AppDelegate {
             if reclassify, let connection = selectedConnections.first {
                 state.detail = "Applying completed decisions to unchanged saved entries."
                 let rows = report.rows
+                let providerFailures = report.failed
                 let summary = await withCancellableDetachedTask(priority: .utility) {
                     let byID = Dictionary(uniqueKeysWithValues: originals.map { ($0.id, $0) })
                     var applied = 0
-                    var retained = 0
                     var conflicts = 0
                     var stopped: String?
                     for row in rows {
                         if Task.isCancelled { stopped = "Cancelled; unapplied entries retained."; break }
                         guard Self.isCurrentConnection(connection.configuration, apiKey: connection.apiKey),
                               DetectorConfigurationStore.load() == detectorConfiguration,
-                              UserDefaults.standard.bool(forKey: "pasta.extractContent") == extractContent else {
+                              UserDefaults.standard.bool(forKey: "pasta.extractContent") == extractContent,
+                              UserDefaults.standard.bool(forKey: "pasta.skipAPIKeys") == skipAPIKeys else {
                             stopped = "Configuration changed; remaining entries retained."
                             break
                         }
                         guard row.error == nil, row.skipReason == nil, let category = row.jevCategory,
-                              let snapshot = byID[row.id] else { retained += 1; continue }
+                              let snapshot = byID[row.id] else { continue }
                         do {
                             let classification = JevClassification(category: category, modelVersion: row.jevModel)
                             let outcome = try await BackgroundService.shared.applyJevClassification(
                                 classification, to: snapshot, configuration: connection.configuration, apiKey: connection.apiKey,
-                                detectorConfiguration: detectorConfiguration, extractContent: extractContent
+                                detectorConfiguration: detectorConfiguration, extractContent: extractContent, skipAPIKeys: skipAPIKeys
                             )
                             switch outcome {
                             case .applied: applied += 1
-                            case .retained: retained += 1
+                            case .retained: break
                             case .changedSinceRequest: conflicts += 1
                             }
                         } catch {
@@ -181,8 +183,8 @@ extension AppDelegate {
                             break
                         }
                     }
-                    let remaining = max(0, originals.count - applied - retained - conflicts)
-                    return "\(applied) updated · \(retained + remaining) retained · \(conflicts) changed/deleted · \(rows.filter { $0.error != nil }.count) provider failures."
+                    return JevReclassificationService.applicationSummary(total: originals.count, updated: applied,
+                                                                          changedDeleted: conflicts, providerFailures: providerFailures)
                         + (stopped.map { " \($0)" } ?? "")
                 }
                 report = report.withApplicationSummary(summary)

@@ -147,6 +147,38 @@ final class JevReclassificationE2ETests: XCTestCase {
         XCTAssertEqual(result.persisted.first?.content, capture.content)
     }
 
+    func testReclassificationRespectsAPIKeyExclusionEvenWithSensitiveUploadConsent() throws {
+        let syntheticKey = "ghp_" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"
+        let entry = ClipboardEntry(content: "Read https://example.com and use \(syntheticKey) for this demonstration.", contentType: .text)
+        var snapshot = try database.insert(entry, deduplicate: false).entry
+        var optedIn = configuration
+        optedIn.includeSensitiveContent = true
+        let service = JevReclassificationService()
+        XCTAssertEqual(try service.apply(.init(category: .prose), to: snapshot, database: database,
+                                         configuration: optedIn, detectorConfiguration: .default,
+                                         extractContent: true, skipAPIKeys: false), .applied)
+        XCTAssertTrue(try database.fetchExtractedEntries(parentId: snapshot.id).contains { $0.contentType == .apiKey })
+        snapshot = try XCTUnwrap(database.fetch(id: snapshot.id))
+        XCTAssertEqual(try service.apply(.init(category: .prose), to: snapshot, database: database,
+                                         configuration: optedIn, detectorConfiguration: .default,
+                                         extractContent: true, skipAPIKeys: true), .applied)
+        let children = try database.fetchExtractedEntries(parentId: snapshot.id)
+        XCTAssertFalse(children.contains { $0.contentType == .apiKey })
+        XCTAssertTrue(children.contains { $0.contentType == .url })
+        snapshot = try XCTUnwrap(database.fetch(id: snapshot.id))
+        XCTAssertEqual(try service.apply(.init(category: .apiKey), to: snapshot, database: database,
+                                         configuration: optedIn, detectorConfiguration: .default,
+                                         extractContent: true, skipAPIKeys: true), .retained)
+        XCTAssertEqual(try database.fetch(id: snapshot.id), snapshot)
+    }
+
+    func testApplicationSummarySeparatesRetainedEntriesFromProviderFailures() {
+        XCTAssertEqual(JevReclassificationService.applicationSummary(total: 5, updated: 1, changedDeleted: 1, providerFailures: 2),
+                       "1 updated · 1 retained · 1 changed/deleted · 2 provider failures.")
+        XCTAssertEqual(JevReclassificationService.applicationSummary(total: 5, updated: 0, changedDeleted: 0, providerFailures: 1),
+                       "0 updated · 4 retained · 0 changed/deleted · 1 provider failures.")
+    }
+
     func testNetworkFailureKeepsDurableCaptureAndSuccessAppliesAfterProviderReturns() async throws {
         let result = try pipeline.ingest(ClipboardEntry(content: "Network-independent title", contentType: .text))
         let snapshot = try primarySnapshot(result)
@@ -166,7 +198,7 @@ final class JevReclassificationE2ETests: XCTestCase {
         XCTAssertEqual(decision.category, .prose)
         XCTAssertEqual(try JevReclassificationService().apply(decision, to: snapshot, database: database,
                                                              configuration: remoteConfiguration, detectorConfiguration: .default,
-                                                             extractContent: true), .applied)
+                                                             extractContent: true, skipAPIKeys: false), .applied)
         XCTAssertEqual(try database.fetch(id: snapshot.id)?.content, snapshot.content)
         XCTAssertEqual(try database.fetch(id: snapshot.id)?.contentType, .prose)
     }
@@ -193,6 +225,12 @@ final class JevReclassificationE2ETests: XCTestCase {
         try database.applySyncChanges(modified: oldChildren, deleted: [])
         XCTAssertTrue(try database.fetchExtractedEntries(parentId: snapshot.id).isEmpty)
         try database.applySyncChanges(modified: [], deleted: oldChildren.map(\.id))
+        XCTAssertTrue(try database.pendingClassificationDeletions().isEmpty)
+        let reopened = try environment.openDatabase()
+        // A stale writer can recreate the record even after its deletion was acknowledged.
+        try reopened.applySyncChanges(modified: oldChildren, deleted: [])
+        XCTAssertTrue(try reopened.fetchExtractedEntries(parentId: snapshot.id).isEmpty)
+        XCTAssertEqual(Set(try reopened.pendingClassificationDeletions()), Set(oldChildren.map(\.id)))
     }
 
     func testFailedChildDeletionRemainsDurableAndBlocksPullBackfill() async throws {
@@ -250,7 +288,7 @@ final class JevReclassificationE2ETests: XCTestCase {
 
     private func apply(_ category: ContentType, to snapshot: ClipboardEntry) throws -> JevReclassificationService.Outcome {
         try JevReclassificationService().apply(.init(category: category), to: snapshot, database: database,
-                                              configuration: configuration, detectorConfiguration: .default, extractContent: true)
+                                              configuration: configuration, detectorConfiguration: .default, extractContent: true, skipAPIKeys: false)
     }
 }
 

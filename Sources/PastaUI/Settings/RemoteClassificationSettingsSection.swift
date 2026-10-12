@@ -83,7 +83,7 @@ struct RemoteClassificationSettingsSection: View {
                     configuration.save()
                 }
             ))
-            TextField("Model", text: Binding(
+            TextField(provider == .jev ? "Model" : "Deployment name", text: Binding(
                 get: { configuration.model },
                 set: {
                     invalidateValidation()
@@ -115,7 +115,7 @@ struct RemoteClassificationSettingsSection: View {
                 }
                 .disabled(!configuration.isEnabled || !isValidated)
             } else {
-                Text("Comparison only: clipboard text is sent to your deployment only after confirming a history comparison. Configure its full System One-compatible HTTPS endpoint and a separate key. No endpoint is guessed, and your TypeSafe key is never reused. The served model must identify itself as Microsoft-Decision-1.")
+                Text("Comparison only: clipboard text is sent only after confirming a history comparison. Use your Foundry resource endpoint followed by /providers/microsoft/v1/systemone, its deployment name and a separate API key. The resource must allow key authentication. No endpoint is guessed or TypeSafe key reused. The served model must identify itself as Microsoft-Decision-1.")
                     .font(.caption).foregroundStyle(.secondary)
                 Link("Microsoft Decision-1 in Foundry", destination: URL(string: "https://ai.azure.com/catalog/models/Microsoft-Decision-1")!)
                 Button("Compare Classifiers…") {
