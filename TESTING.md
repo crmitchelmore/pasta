@@ -112,7 +112,7 @@ real compatible deployment and key; mock transport tests do not establish it.
 **Shared configuration → Shared classifier types** configures both models.
 Built-in type descriptions can be edited, and up to 32 named classifiers can be
 added with natural-language descriptions (no regex). Each custom label maps to
-an existing nonbinary Pasta type; its name appears in the item preview and
+an existing supported text type (not Unknown or File Path); its name appears in the item preview and
 comparison, while its mapped type controls existing filters, previews and sync.
 These are not new sidebar categories and are separate from legacy regex detectors.
 Definitions persist locally, use stable choice IDs, and are sent as System One

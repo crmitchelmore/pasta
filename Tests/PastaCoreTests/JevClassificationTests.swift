@@ -552,6 +552,7 @@ final class JevClassificationTests: XCTestCase {
             .init(customClassifiers: [.init(name: "x", description: String(repeating: "x", count: 1_001))]),
             .init(customClassifiers: [.init(name: "x", description: "x", contentType: .image)]),
             .init(customClassifiers: [.init(name: "x", description: "x", contentType: .unknown)]),
+            .init(customClassifiers: [.init(name: "x", description: "x", contentType: .filePath)]),
             .init(customClassifiers: [custom, custom]),
             .init(customClassifiers: [custom, .init(name: "TICKET", description: "x")]),
             .init(descriptions: ["image": "x"]),
@@ -640,6 +641,22 @@ final class JevClassificationTests: XCTestCase {
         XCTAssertNotNil(report.abortReason)
         XCTAssertEqual(report.failed, 1)
         XCTAssertEqual(JevMockURLProtocol.requests.count, 1)
+    }
+
+    func testRevokedAuthorizationRejectsSuccessfulInFlightResponsesForBothProviders() async {
+        for provider in RemoteClassificationProvider.allCases {
+            JevMockURLProtocol.reset()
+            let servedModel = provider == .jev ? "jev-1.13.0" : "Microsoft-Decision-1"
+            JevMockURLProtocol.enqueue(status: 200, body: Self.successBody(choice: "prose").replacingOccurrences(of: "jev-1.13.0", with: servedModel))
+            let report = await JevComparisonService(classifier: makeClassifier(), maxConcurrentRequests: 1).compare(
+                entries: [entry(.text)], configuration: .init(endpoint: "https://example.com/systemone", provider: provider), apiKey: "key",
+                authorizationCheck: { JevMockURLProtocol.requests.isEmpty }
+            )
+            XCTAssertNotNil(report.abortReason)
+            XCTAssertEqual(report.failed, 1)
+            XCTAssertNil(report.rows.first?.jevCategory)
+            XCTAssertEqual(JevMockURLProtocol.requests.count, 1)
+        }
     }
 
     func testMultiProviderExportsKeepResultsSeparateWithoutOriginalContent() throws {

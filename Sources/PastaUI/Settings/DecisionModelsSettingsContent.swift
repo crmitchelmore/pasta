@@ -178,8 +178,8 @@ private struct DecisionClassifierEditor: View {
                 TextField("When to choose this type", text: $classifier.description, axis: .vertical)
                     .lineLimit(3...6)
                 Picker("Pasta type", selection: $classifier.contentType) {
-                    ForEach(JevSystemOneRequest.options.filter { $0.category != .unknown }, id: \.category) {
-                        Text($0.category.displayTitle).tag($0.category)
+                    ForEach(DecisionClassificationRules.customContentTypes, id: \.self) {
+                        Text($0.displayTitle).tag($0)
                     }
                 }
                 if let errorMessage {

@@ -654,6 +654,8 @@ public struct JevClassifier: Sendable {
             var retryAfter: TimeInterval?
             do {
                 let (data, response) = try await session.data(for: request)
+                try Task.checkCancellation()
+                guard authorizationCheck?() != false else { throw JevConfigurationError.validationRequired }
                 guard let http = response as? HTTPURLResponse else {
                     throw JevAPIError.invalidResponse("no HTTP response.")
                 }

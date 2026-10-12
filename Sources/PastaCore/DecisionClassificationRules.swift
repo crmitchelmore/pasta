@@ -20,6 +20,9 @@ public struct DecisionClassificationRules: Codable, Equatable, Sendable {
     public static let defaultsKey = "pasta.decisionClassification.rules.v1"
     public static let maxCustomClassifiers = 32
     public static let `default` = DecisionClassificationRules()
+    public static var customContentTypes: [ContentType] {
+        JevSystemOneRequest.options.map(\.category).filter { $0 != .unknown && $0 != .filePath }
+    }
 
     public var descriptions: [String: String]
     public var customClassifiers: [DecisionClassifierDefinition]
@@ -32,6 +35,7 @@ public struct DecisionClassificationRules: Codable, Equatable, Sendable {
     public func validated() throws -> Self {
         var result = self
         let builtInNames = Set(JevSystemOneRequest.options.map { $0.category.rawValue })
+        let customTypes = Set(Self.customContentTypes)
         guard Set(descriptions.keys).isSubset(of: builtInNames),
               customClassifiers.count <= Self.maxCustomClassifiers else {
             throw DecisionRulesError.invalid("Use supported types and at most \(Self.maxCustomClassifiers) custom classifiers.")
@@ -51,9 +55,9 @@ public struct DecisionClassificationRules: Codable, Equatable, Sendable {
             let classifier = result.customClassifiers[index]
             guard !classifier.name.isEmpty, classifier.name.count <= 80,
                   !classifier.description.isEmpty, classifier.description.count <= 1_000,
-                  builtInNames.contains(classifier.contentType.rawValue), classifier.contentType != .unknown,
+                  customTypes.contains(classifier.contentType),
                   names.insert(classifier.name.lowercased()).inserted, ids.insert(classifier.id).inserted else {
-                throw DecisionRulesError.invalid("Custom classifiers need unique names (up to 80 characters), a description (up to 1,000 characters), and a supported text type other than Unknown.")
+                throw DecisionRulesError.invalid("Custom classifiers need unique names (up to 80 characters), a description (up to 1,000 characters), and a supported text type other than Unknown or File Path.")
             }
         }
         return result

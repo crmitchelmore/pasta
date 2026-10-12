@@ -68,7 +68,7 @@ struct RemoteClassificationSettingsSection: View {
             Toggle("Include sensitive entries (API keys, tokens, env vars, cards, IBANs)", isOn: $configuration.includeSensitiveContent)
                 .onChange(of: configuration.includeSensitiveContent) { _, _ in configuration.save() }
 
-            Text("Compare only sends history only after confirmation. Default and fallback modes send eligible new clipboard text to \(configuration.endpointHost ?? "the configured endpoint") only when this is the preferred model. Clips are saved locally first; errors and Unknown keep the legacy result. Images and file pastes are never sent.")
+            Text("Compare-only mode sends history after confirmation. Default and fallback modes send eligible new clipboard text to \(configuration.endpointHost ?? "the configured endpoint") only when this is the preferred model. Clips are saved locally first; errors and Unknown keep the legacy result. Images and file pastes are never sent.")
                 .font(.caption).foregroundStyle(.secondary)
             if showHistoryActions {
                 HStack {
