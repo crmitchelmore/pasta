@@ -307,6 +307,20 @@ extension DatabaseManager {
         }
     }
 
+    /// SQLite's `PRAGMA data_version` on this manager's writer connection.
+    ///
+    /// The value changes only when ANOTHER connection (e.g. a Settings import
+    /// or clear that opens its own `DatabaseManager`) commits to the file;
+    /// writes made through this manager leave it unchanged. Callers that keep
+    /// their in-memory view current for their own writes can compare two
+    /// readings to skip reloads when nothing external happened. It must be
+    /// read from the writer: each pool reader keeps its own counter.
+    public func dataVersion() throws -> Int {
+        try dbWriter.writeWithoutTransaction { db in
+            try Int.fetchOne(db, sql: "PRAGMA data_version") ?? 0
+        }
+    }
+
     public func fetchAll() throws -> [ClipboardEntry] {
         try dbWriter.read { db in
             try ClipboardEntry

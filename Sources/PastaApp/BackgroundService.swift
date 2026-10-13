@@ -47,6 +47,14 @@ final class BackgroundService: ObservableObject {
     /// replacement), so `entries.count >= total` must not be read as "fully
     /// loaded" or a cancelled reload would never be resumed.
     private var isHistoryPagingComplete = false
+    /// `displayLimit` and writer `PRAGMA data_version` captured by the last
+    /// refresh that ran to completion. Reopening the panel only reloads when
+    /// either moved: this service already patches `entries` for every write
+    /// it makes, other in-app writers post `pasta.entriesDidChange`, and
+    /// writes through any other connection change `data_version`.
+    private var loadedDisplayLimit: Int?
+    private var loadedDataVersion: Int?
+    private var staleCheckTask: Task<Void, Never>?
     /// Bumped whenever a pin or delete is applied to `entries` in place, so a
     /// head merge that snapshotted `entries` earlier can tell its snapshot is
     /// stale and reload instead of publishing the old rows back.
@@ -353,8 +361,12 @@ final class BackgroundService: ObservableObject {
                 // Keyset paging: each page seeks the timestamp index at the
                 // previous page's last (timestamp, rowid) instead of OFFSET,
                 // which re-walked every skipped row on every page.
-                let firstHistoryPage = try await Task.detached(priority: .userInitiated) {
-                    try db.fetchHistoryPage(after: nil, limit: initialLimit)
+                let (startDataVersion, firstHistoryPage) = try await Task.detached(priority: .userInitiated) {
+                    // Read before any page so a foreign write that lands
+                    // mid-refresh registers as a newer version on the next
+                    // reopen instead of being recorded as already loaded.
+                    let version = try? db.dataVersion()
+                    return (version, try db.fetchHistoryPage(after: nil, limit: initialLimit))
                 }.value
                 guard !Task.isCancelled else { return }
                 let firstPage = firstHistoryPage.entries
@@ -382,6 +394,7 @@ final class BackgroundService: ObservableObject {
                     isHistoryPagingComplete = true
                     isLoadingEntries = false
                     refreshTask = nil
+                    recordLoadedState(dataVersion: startDataVersion, displayLimit: limit)
                     signalCIReadinessIfReady()
                     return
                 }
@@ -406,6 +419,7 @@ final class BackgroundService: ObservableObject {
                 isHistoryPagingComplete = true
                 isLoadingEntries = false
                 refreshTask = nil
+                recordLoadedState(dataVersion: startDataVersion, displayLimit: limit)
                 PastaLogger.ui.debug("Refreshed entries incrementally: \(allEntries.count) items")
                 signalCIReadinessIfReady()
             } catch {
@@ -422,6 +436,44 @@ final class BackgroundService: ObservableObject {
     private var displayLimit: Int {
         let configuredLimit = UserDefaults.standard.integer(forKey: Defaults.maxEntries)
         return configuredLimit > 0 ? configuredLimit : .max
+    }
+
+    private func recordLoadedState(dataVersion: Int?, displayLimit: Int) {
+        loadedDataVersion = dataVersion
+        loadedDisplayLimit = displayLimit
+    }
+
+    /// Reopening the main window used to re-page the entire history (and
+    /// republish `entries` twice, re-running every downstream derivation)
+    /// even when nothing had changed. Reload only when the last load was
+    /// interrupted, the configured window size changed, or another database
+    /// connection committed since the last completed load.
+    func refreshIfStale() {
+        guard !isLoadingEntries else { return }
+        guard isHistoryPagingComplete,
+              loadedDisplayLimit == displayLimit,
+              loadedDataVersion != nil else {
+            refresh()
+            return
+        }
+
+        let db = database
+        staleCheckTask?.cancel()
+        staleCheckTask = Task {
+            let currentVersion = await Task.detached(priority: .userInitiated) {
+                try? db.dataVersion()
+            }.value
+            guard !Task.isCancelled else { return }
+            staleCheckTask = nil
+            // A refresh may have started (or finished and re-recorded the
+            // version) while the check was off-main; compare against the
+            // state as it is now.
+            guard !isLoadingEntries else { return }
+            if currentVersion == nil || currentVersion != loadedDataVersion || !isHistoryPagingComplete {
+                PastaLogger.ui.debug("History changed outside this connection; reloading")
+                refresh()
+            }
+        }
     }
 
     private func refreshAfterInsert(insertedCount: Int) async {
