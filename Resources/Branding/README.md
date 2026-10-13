@@ -10,6 +10,8 @@ bash Resources/DMG/create-icns.sh
 swift test --filter BrandAssetTests
 ```
 
+The macOS SwiftPM fallback PNGs ship inside the app, so after exporting, recompress them losslessly: `oxipng -o 6 --strip none` on `Sources/PastaApp/Resources/AppIcon.png`, `AppIconAlpha.png` and the matching `icon_512x512@2x.png` slots, which `BrandAssetTests` keeps byte-identical. The pixels are unchanged and each file is about 300 KB (31%) smaller. `iconutil` re-encodes its inputs, so this does not shrink the ICNS.
+
 The exporter reads both asset catalogues to produce exact pixel sizes. iOS icons are opaque and unmasked; macOS exports include transparent margins and rounded corners. The installed ICNS, SwiftPM fallback, onboarding/About artwork and web icons derive from the same source. Menu-bar controls use Apple's adaptive monochrome SF Symbol, rather than shrinking the full-colour icon.
 
 Web filenames are versioned because `/images/*` is cached immutably for one year. Change the filename and its references on future updates.
