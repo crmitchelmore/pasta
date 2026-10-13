@@ -175,6 +175,38 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
             ?? MetadataParser.typeMask(for: metadata)
     }
 
+    /// Hand-written row decoding with the same column conversions and legacy
+    /// defaults as `init(from:)`. GRDB's synthesized `Decodable` path goes
+    /// through a keyed container and dynamic casts per column, which made a
+    /// full-history walk an order of magnitude slower than SQLite reading the
+    /// rows.
+    public init(row: Row) throws {
+        cloudSyncAllowed = try row.decode(Bool?.self, forColumn: "cloudSyncAllowed") ?? true
+        receivedViaTailnet = try row.decode(Bool?.self, forColumn: "receivedViaTailnet") ?? false
+        id = try row.decode(UUID.self, forColumn: "id")
+        content = try row.decode(String.self, forColumn: "content")
+        let rawType = try row.decode(String.self, forColumn: "contentType")
+        guard let contentType = ContentType(rawValue: rawType) else {
+            throw DecodingError.dataCorrupted(DecodingError.Context(
+                codingPath: [CodingKeys.contentType],
+                debugDescription: "Cannot initialize ContentType from invalid String value \(rawType)"
+            ))
+        }
+        self.contentType = contentType
+        rawData = try row.decode(Data?.self, forColumn: "rawData")
+        imagePath = try row.decode(String?.self, forColumn: "imagePath")
+        timestamp = try row.decode(Date.self, forColumn: "timestamp")
+        copyCount = try row.decode(Int.self, forColumn: "copyCount")
+        sourceApp = try row.decode(String?.self, forColumn: "sourceApp")
+        let metadata = try row.decode(String?.self, forColumn: "metadata")
+        self.metadata = metadata
+        parentEntryId = try row.decode(UUID?.self, forColumn: "parentEntryId")
+        isSynced = try row.decode(Bool?.self, forColumn: "isSynced") ?? false
+        isPinned = try row.decode(Bool?.self, forColumn: "isPinned") ?? false
+        contentTypeMask = try row.decode(ContentTypeMask?.self, forColumn: "contentTypeMask")
+            ?? MetadataParser.typeMask(for: metadata)
+    }
+
     public func encode(to container: inout PersistenceContainer) {
         container["cloudSyncAllowed"] = cloudSyncAllowed
         container["receivedViaTailnet"] = receivedViaTailnet
