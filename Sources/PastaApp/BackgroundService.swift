@@ -47,6 +47,10 @@ final class BackgroundService: ObservableObject {
     /// replacement), so `entries.count >= total` must not be read as "fully
     /// loaded" or a cancelled reload would never be resumed.
     private var isHistoryPagingComplete = false
+    /// Bumped whenever a pin or delete is applied to `entries` in place, so a
+    /// head merge that snapshotted `entries` earlier can tell its snapshot is
+    /// stale and reload instead of publishing the old rows back.
+    private var localMutationGeneration = 0
     /// Set by `start()` once the clipboard monitor is polling. Together with
     /// `isHistoryPagingComplete` this gates the `PASTA_CI` readiness marker.
     private var isMonitoringStarted = false
@@ -57,6 +61,9 @@ final class BackgroundService: ObservableObject {
         static let backgroundPageSize = 1_000
         static let minHeadFetchLimit = 100
         static let insertedCountMultiplier = 4
+        /// Beyond this many pulled records (e.g. a first full download) a
+        /// paged reload is cheaper than re-reading each row by ID.
+        static let maxInPlacePulledRows = 200
     }
 
     private nonisolated static func jevLiveConfiguration() -> (configuration: JevConfiguration, apiKey: String)? {
@@ -238,13 +245,61 @@ final class BackgroundService: ObservableObject {
         try await syncManager.setupZone()
         let database = database
         let syncManager = syncManager
-        _ = try await database.backfillUnsynced(deleting: { id in try await syncManager.deleteEntry(id: id) }) { entries, onBatchSynced in
+        let uploaded = try await database.backfillUnsynced(deleting: { id in try await syncManager.deleteEntry(id: id) }) { entries, onBatchSynced in
             try await syncManager.pushEntries(entries, onBatchSynced: onBatchSynced)
         }
         try Task.checkCancellation()
-        try await syncManager.pullChanges(into: database)
+        let pulled = try await syncManager.pullChanges(into: database)
         try Task.checkCancellation()
-        refresh()
+        // The receive loop runs every minute, and CloudKit echoes this Mac's
+        // own uploads back. Re-paging the whole history (and re-running the
+        // panel's preload/search) on every pass made each active minute cost
+        // a full reload; now only rows the pass actually changed are patched.
+        if uploaded > 0 {
+            refresh()
+        } else if !pulled.isEmpty {
+            await applyPulledChanges(pulled)
+        }
+    }
+
+    /// Mirrors an applied pull in `entries`, reloading only when the change
+    /// cannot be placed locally (new rows, moved rows, capped-window removals).
+    private func applyPulledChanges(_ pulled: SyncPullResult) async {
+        guard pulled.count <= RefreshTuning.maxInPlacePulledRows else {
+            refresh()
+            return
+        }
+        let db = database
+        let ids = pulled.modifiedIDs
+        let fetched = await Task.detached(priority: .utility) {
+            Result { try ids.compactMap { try db.fetch(id: $0) } }
+        }.value
+        guard case .success(let rows) = fetched, refreshTask == nil else {
+            refresh()
+            return
+        }
+        let present = Set(rows.map(\.id))
+        let removed = Set(pulled.deletedIDs).union(ids.filter { !present.contains($0) })
+        let change = HistoryWindow.applying(
+            changedRows: rows,
+            removedIDs: removed,
+            to: entries,
+            canRemoveLocally: HistoryWindow.canApplyLocalRemoval(
+                loadedCount: entries.count,
+                limit: displayLimit,
+                isPagingComplete: isHistoryPagingComplete,
+                isRefreshing: false
+            )
+        )
+        switch change {
+        case .unchanged:
+            break
+        case .updated(let updated):
+            localMutationGeneration += 1
+            entries = updated
+        case .needsReload:
+            refresh()
+        }
     }
 
     private func setupSync() {
@@ -382,6 +437,7 @@ final class BackgroundService: ObservableObject {
         )
         let db = self.database
         let currentEntries = entries
+        let generation = localMutationGeneration
 
         let latestHead = await Task.detached(priority: .userInitiated) {
             (try? db.fetchRecent(limit: headLimit)) ?? []
@@ -395,6 +451,13 @@ final class BackgroundService: ObservableObject {
         let merged = await Task.detached(priority: .userInitiated) {
             HistoryWindow.merge(head: latestHead, into: currentEntries, limit: displayLimit)
         }.value
+
+        // A pin/delete landed while we were off the main actor: both the
+        // snapshot and possibly the head predate it, so reload instead.
+        guard generation == localMutationGeneration else {
+            refresh()
+            return
+        }
 
         entries = merged
         PastaLogger.ui.debug("Incrementally refreshed entries: \(entries.count) items")
@@ -575,6 +638,7 @@ final class BackgroundService: ObservableObject {
                             } catch {
                                 PastaLogger.logError(error, logger: PastaLogger.database, context: "Failed to acknowledge clipboard upload")
                             }
+                            await self.reloadRowsInPlace(ids: syncedEntries.map(\.id))
                             if let jev = Self.jevLiveConfiguration(), jev.configuration == jevConfiguration {
                                 for snapshot in entriesToPush where snapshot.parentEntryId == nil {
                                     let local = detector.detect(in: snapshot.content, configuration: detectorConfiguration)
@@ -713,6 +777,7 @@ final class BackgroundService: ObservableObject {
                             }
                             if !syncedIDs.isEmpty {
                                 try? db.markSynced(ids: syncedIDs)
+                                await self.reloadRowsInPlace(ids: syncedIDs)
                             }
                         }
                     }
@@ -920,7 +985,11 @@ final class BackgroundService: ObservableObject {
     }
 
     /// Deletes many entries in one transaction, off the main actor, then
-    /// refreshes.
+    /// updates the visible history.
+    ///
+    /// When the whole library is already in memory the deleted rows are just
+    /// dropped from `entries`; re-paging every row (and re-running the panel's
+    /// preload scan) for a single delete was the slow path on large histories.
     @discardableResult
     func delete(ids: [UUID]) async throws -> Int {
         guard !ids.isEmpty else { return 0 }
@@ -928,17 +997,59 @@ final class BackgroundService: ObservableObject {
         let count = try await Task.detached(priority: .userInitiated) {
             try deleteService.delete(ids: ids)
         }.value
-        refresh()
+        if HistoryWindow.canApplyLocalRemoval(
+            loadedCount: entries.count,
+            limit: displayLimit,
+            isPagingComplete: isHistoryPagingComplete,
+            isRefreshing: refreshTask != nil
+        ) {
+            localMutationGeneration += 1
+            entries = HistoryWindow.removing(ids: Set(ids), from: entries)
+        } else {
+            refresh()
+        }
         return count
     }
 
-    /// Sets the pinned state of a single entry, then refreshes if it changed.
+    /// Sets the pinned state of a single entry, then updates the visible
+    /// history if it changed (in place when no reload is in flight).
     @discardableResult
     func setPinned(id: UUID, pinned: Bool) throws -> Bool {
         let changed = try database.setPinned(id: id, pinned: pinned)
-        if changed {
+        guard changed else { return false }
+        if HistoryWindow.canUpdateRowsInPlace(
+            isPagingComplete: isHistoryPagingComplete,
+            isRefreshing: refreshTask != nil
+        ) {
+            if let updated = HistoryWindow.settingPinned(pinned, id: id, in: entries) {
+                localMutationGeneration += 1
+                entries = updated
+            }
+        } else {
             refresh()
         }
-        return changed
+        return true
+    }
+
+    /// Re-reads `ids` and swaps the fresh rows into `entries` (e.g. after an
+    /// upload flips `isSynced`). Capture uploads used to rely on the
+    /// once-a-minute full sync refresh to update the row's sync badge.
+    func reloadRowsInPlace(ids: [UUID]) async {
+        guard !ids.isEmpty else { return }
+        // A reload already in flight may have read these rows before the
+        // change; let it land first so it cannot overwrite the patch.
+        while let inFlight = refreshTask {
+            await inFlight.value
+            if refreshTask == inFlight { return }
+        }
+        let db = database
+        let rows = await Task.detached(priority: .utility) {
+            ids.compactMap { try? db.fetch(id: $0) }
+        }.value
+        // A reload that started during the read sees the change itself.
+        guard refreshTask == nil,
+              let updated = HistoryWindow.replacing(rows, in: entries) else { return }
+        localMutationGeneration += 1
+        entries = updated
     }
 }

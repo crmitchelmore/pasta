@@ -335,8 +335,13 @@ public final class SyncManager: ObservableObject {
     /// Downloads and durably applies changes before advancing the token.
     /// Both apps must use this operation; raw fetch results are never exposed
     /// to callers that could accidentally discard them.
+    ///
+    /// - Returns: the record IDs modified or deleted locally, so a periodic
+    ///   receive can update just those rows (or nothing) instead of
+    ///   reloading the whole history.
     @MainActor
-    public func pullChanges(into localDatabase: DatabaseManager) async throws {
+    @discardableResult
+    public func pullChanges(into localDatabase: DatabaseManager) async throws -> SyncPullResult {
         guard !isPullInProgress else { throw SyncPullService.PullError.alreadyInProgress }
         isPullInProgress = true
         defer { isPullInProgress = false }
@@ -364,6 +369,7 @@ public final class SyncManager: ObservableObject {
             lastDownloadDiagnostic = "Received \(batch.modified.count) records and \(batch.deleted.count) deletions at \(Date().ISO8601Format())"
             syncedEntryCount += batch.modified.count
             syncState = .idle
+            return SyncPullResult(modifiedIDs: batch.modified.map(\.id), deletedIDs: batch.deleted)
         } catch {
             syncState = .error(error.localizedDescription)
             lastDownloadDiagnostic = SyncDiagnostics.errorSummary(error)
