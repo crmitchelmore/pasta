@@ -99,6 +99,25 @@ enum ImageDownsampler {
         return image
     }
 
+    /// Like `cachedLoad(path:)` for files the user copied rather than files
+    /// Pasta stored. Those can be edited in place, so the key also carries
+    /// the file's modification date and size. Stats the file — call off the
+    /// main thread.
+    static func cachedLoad(userFilePath path: String, maxPixelSize: CGFloat) -> NSImage? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else {
+            return load(path: path, maxPixelSize: maxPixelSize) ?? NSImage(contentsOfFile: path)
+        }
+        let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSinceReferenceDate ?? 0
+        let size = (attributes[.size] as? NSNumber)?.int64Value ?? -1
+        let key = "user:\(path)|\(modified)|\(size)|\(Int(maxPixelSize))" as NSString
+        if let hit = renderCache.object(forKey: key) { return hit }
+        guard let image = load(path: path, maxPixelSize: maxPixelSize) ?? NSImage(contentsOfFile: path) else {
+            return nil
+        }
+        renderCache.setObject(image, forKey: key, cost: pixelCost(of: image))
+        return image
+    }
+
     private static func cacheKey(path: String, maxPixelSize: CGFloat) -> NSString {
         "\(path)|\(Int(maxPixelSize))" as NSString
     }
