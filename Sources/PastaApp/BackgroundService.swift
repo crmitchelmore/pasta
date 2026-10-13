@@ -271,10 +271,14 @@ final class BackgroundService: ObservableObject {
         }
         let db = database
         let ids = pulled.modifiedIDs
+        let generation = localMutationGeneration
         let fetched = await Task.detached(priority: .utility) {
             Result { try ids.compactMap { try db.fetch(id: $0) } }
         }.value
-        guard case .success(let rows) = fetched, refreshTask == nil else {
+        // A local edit (e.g. a pin) during the read may be newer than `rows`.
+        guard case .success(let rows) = fetched,
+              refreshTask == nil,
+              generation == localMutationGeneration else {
             refresh()
             return
         }
@@ -1017,14 +1021,15 @@ final class BackgroundService: ObservableObject {
     func setPinned(id: UUID, pinned: Bool) throws -> Bool {
         let changed = try database.setPinned(id: id, pinned: pinned)
         guard changed else { return false }
+        // A row outside the window (e.g. a search hit beyond a max-entries
+        // limit, since pinned rows are never pruned) still needs the reload
+        // that republishes `entries` and re-runs the panel's search.
         if HistoryWindow.canUpdateRowsInPlace(
             isPagingComplete: isHistoryPagingComplete,
             isRefreshing: refreshTask != nil
-        ) {
-            if let updated = HistoryWindow.settingPinned(pinned, id: id, in: entries) {
-                localMutationGeneration += 1
-                entries = updated
-            }
+        ), let updated = HistoryWindow.settingPinned(pinned, id: id, in: entries) {
+            localMutationGeneration += 1
+            entries = updated
         } else {
             refresh()
         }
@@ -1043,12 +1048,18 @@ final class BackgroundService: ObservableObject {
             if refreshTask == inFlight { return }
         }
         let db = database
+        let generation = localMutationGeneration
         let rows = await Task.detached(priority: .utility) {
             ids.compactMap { try? db.fetch(id: $0) }
         }.value
         // A reload that started during the read sees the change itself.
-        guard refreshTask == nil,
-              let updated = HistoryWindow.replacing(rows, in: entries) else { return }
+        guard refreshTask == nil else { return }
+        // A local edit (e.g. a pin) during the read may be newer than `rows`.
+        guard generation == localMutationGeneration else {
+            refresh()
+            return
+        }
+        guard let updated = HistoryWindow.replacing(rows, in: entries) else { return }
         localMutationGeneration += 1
         entries = updated
     }
