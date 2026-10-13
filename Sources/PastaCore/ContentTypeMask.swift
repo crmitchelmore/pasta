@@ -29,6 +29,8 @@ public struct ContentTypeMask: OptionSet, Hashable, Sendable, Codable, DatabaseV
     public static let envVarBlock = ContentTypeMask(rawValue: 1 << 9)
     public static let filePath = ContentTypeMask(rawValue: 1 << 10)
     public static let shellCommand = ContentTypeMask(rawValue: 1 << 11)
+    public static let mixed = ContentTypeMask(rawValue: 1 << 12)
+    public static let multipleItems = ContentTypeMask(rawValue: 1 << 13)
 
     /// The bit for `type`, or `nil` when the type is not one that metadata can
     /// carry (e.g. `.text`, `.image`).

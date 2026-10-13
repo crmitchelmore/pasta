@@ -4,7 +4,7 @@ import Foundation
 public struct MetadataParser {
     
     /// Extracted value with its type
-    public struct ExtractedValue: Identifiable, Hashable {
+    public struct ExtractedValue: Identifiable, Hashable, Sendable {
         public let id = UUID()
         public let type: ContentType
         public let value: String
@@ -34,6 +34,10 @@ public struct MetadataParser {
         guard let metadata, let dict = parseJSON(metadata) else { return [] }
 
         var mask: ContentTypeMask = []
+        if let composition = dict["composition"] as? [String: Any] {
+            if composition["isMixed"] as? Bool == true { mask.insert(.mixed) }
+            if (composition["itemCount"] as? Int ?? 0) > 1 { mask.insert(.multipleItems) }
+        }
         if hasItems(dict, key: "emails") { mask.insert(.email) }
         if hasItems(dict, key: "urls") { mask.insert(.url) }
         if hasItems(dict, key: "phoneNumbers") { mask.insert(.phoneNumber) }

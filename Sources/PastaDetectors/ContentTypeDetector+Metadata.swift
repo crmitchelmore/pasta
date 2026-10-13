@@ -14,9 +14,8 @@ extension ContentTypeDetector {
     }
 
     /// Extracts individual items from mixed content.
-    /// Only extracts when content is prose/text with multiple detectable items embedded.
+    /// The primary classification must not suppress embedded values.
     func makeExtractedItems(
-        primaryType: ContentType,
         analysisText: String,
         emails: [EmailDetector.Detection],
         urls: [URLDetector.Detection],
@@ -27,16 +26,6 @@ extension ContentTypeDetector {
         paths: [FilePathDetector.Detection],
         customDetections: [CustomDetection]
     ) -> [SplitEntry] {
-        // Only extract from prose or text content
-        guard primaryType == .prose || primaryType == .text else {
-            return []
-        }
-
-        // Minimum content length to consider for extraction (avoid extracting from short content)
-        guard analysisText.count >= 50 else {
-            return []
-        }
-
         // Count total extractable items
         let totalItems = emails.count + urls.count + apiKeys.count + phoneNumbers.count + ipAddresses.count + uuids.count + paths.count + customDetections.count
 
@@ -45,77 +34,46 @@ extension ContentTypeDetector {
             return []
         }
 
-        // If the whole content IS a single item, don't extract (it's already the primary type)
-        // This check ensures we don't duplicate when e.g. content is just "test@example.com"
-        let trimmedLength = analysisText.trimmingCharacters(in: .whitespacesAndNewlines).count
-        if totalItems == 1 {
-            // Check if single item spans most of the content
-            let singleItemLength: Int
-            if let email = emails.first {
-                singleItemLength = email.email.count
-            } else if let url = urls.first {
-                singleItemLength = url.url.count
-            } else if let apiKey = apiKeys.first {
-                singleItemLength = apiKey.key.count
-            } else if let phone = phoneNumbers.first {
-                singleItemLength = phone.phoneNumber.count
-            } else if let ip = ipAddresses.first {
-                singleItemLength = ip.address.count
-            } else if let uuid = uuids.first {
-                singleItemLength = uuid.uuid.count
-            } else if let path = paths.first {
-                singleItemLength = path.path.count
-            } else {
-                singleItemLength = 0
-            }
-
-            // If the single item is >80% of content, don't extract (it IS the content)
-            if singleItemLength > 0 && Double(singleItemLength) / Double(trimmedLength) > 0.8 {
-                return []
-            }
-        }
-
         var items: [SplitEntry] = []
-        let maxItems = 20 // Cap extraction to avoid excessive entries
 
         // Extract emails
-        for email in emails.prefix(maxItems - items.count) {
+        for email in emails {
             let meta = jsonString(["email": email.email, "confidence": email.confidence])
             items.append(SplitEntry(content: email.email, contentType: .email, metadataJSON: meta))
         }
 
         // Extract URLs
-        for url in urls.prefix(maxItems - items.count) {
+        for url in urls {
             let meta = jsonString(["url": url.url, "domain": url.domain, "category": url.category, "confidence": url.confidence])
             items.append(SplitEntry(content: url.url, contentType: .url, metadataJSON: meta))
         }
 
         // Extract API keys (high value)
-        for apiKey in apiKeys.prefix(maxItems - items.count) where apiKey.confidence >= 0.7 {
+        for apiKey in apiKeys where apiKey.confidence >= 0.7 {
             let meta = jsonString(["provider": apiKey.provider, "confidence": apiKey.confidence, "isLikelyLive": apiKey.isLikelyLive])
             items.append(SplitEntry(content: apiKey.key, contentType: .apiKey, metadataJSON: meta))
         }
 
         // Extract phone numbers
-        for phone in phoneNumbers.prefix(maxItems - items.count) {
+        for phone in phoneNumbers {
             let meta = jsonString(["number": phone.phoneNumber, "confidence": phone.confidence])
             items.append(SplitEntry(content: phone.phoneNumber, contentType: .phoneNumber, metadataJSON: meta))
         }
 
         // Extract IP addresses (only public, high confidence)
-        for ip in ipAddresses.prefix(maxItems - items.count) where !ip.isPrivate && !ip.isLoopback && ip.confidence >= 0.8 {
+        for ip in ipAddresses where !ip.isPrivate && !ip.isLoopback && ip.confidence >= 0.8 {
             let meta = jsonString(["address": ip.address, "version": ip.version, "confidence": ip.confidence])
             items.append(SplitEntry(content: ip.address, contentType: .ipAddress, metadataJSON: meta))
         }
 
         // Extract UUIDs (only high confidence)
-        for uuid in uuids.prefix(maxItems - items.count) where uuid.confidence >= 0.9 {
+        for uuid in uuids where uuid.confidence >= 0.9 {
             let meta = jsonString(["uuid": uuid.uuid, "variant": uuid.variant, "confidence": uuid.confidence])
             items.append(SplitEntry(content: uuid.uuid, contentType: .uuid, metadataJSON: meta))
         }
 
         // Extract file paths
-        for path in paths.prefix(maxItems - items.count) {
+        for path in paths where !urls.contains(where: { $0.url.contains(path.path) }) {
             var pathMeta: [String: Any] = [
                 "path": path.path,
                 "filename": path.filename,
@@ -132,7 +90,7 @@ extension ContentTypeDetector {
             items.append(SplitEntry(content: path.path, contentType: .filePath, metadataJSON: meta))
         }
 
-        for detection in customDetections.prefix(maxItems - items.count) {
+        for detection in customDetections {
             let meta = jsonString([
                 "name": detection.name,
                 "value": detection.value,
@@ -147,7 +105,12 @@ extension ContentTypeDetector {
             )
         }
 
-        return items
+        let trimmed = analysisText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !items.contains(where: { $0.content == trimmed && $0.contentType != .text }) else { return [] }
+        var seen: Set<String> = []
+        return items.filter {
+            $0.content != trimmed && seen.insert("\($0.contentType.rawValue):\($0.content)").inserted
+        }
     }
 
     func buildMetadataJSON(

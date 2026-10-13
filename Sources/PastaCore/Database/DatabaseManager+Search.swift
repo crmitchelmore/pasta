@@ -29,7 +29,7 @@ extension DatabaseManager {
     ///   - contentType: Optional filter by content type
     ///   - limit: Maximum results to return
     /// - Returns: Matching entries ordered by combined relevance + recency + popularity
-    public func searchFTS(query: String, contentType: ContentType?, limit: Int = 50, pinnedOnly: Bool = false) throws -> [ClipboardEntry] {
+    public func searchFTS(query: String, contentType: ContentType?, limit: Int = 50, pinnedOnly: Bool = false, mixedOnly: Bool = false) throws -> [ClipboardEntry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
 
@@ -67,6 +67,10 @@ extension DatabaseManager {
 
             if pinnedOnly {
                 rankSQL += " AND e.isPinned = 1"
+            }
+            if mixedOnly {
+                rankSQL += " AND e.parentEntryId IS NULL AND (e.contentTypeMask & ?) != 0"
+                rankArgs.append(ContentTypeMask.mixed.rawValue)
             }
 
             rankSQL += " ORDER BY rank ASC LIMIT ?"

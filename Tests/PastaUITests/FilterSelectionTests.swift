@@ -21,6 +21,13 @@ final class FilterSelectionTests: XCTestCase {
         XCTAssertFalse(selection.isPinnedOnly)
     }
 
+    func testMixedIsAnIndependentCompositionFilter() {
+        XCTAssertNil(FilterSelection.mixed.contentType)
+        XCTAssertNil(FilterSelection.mixed.sourceApp)
+        XCTAssertNil(FilterSelection.mixed.urlDomain)
+        XCTAssertFalse(FilterSelection.mixed.isPinnedOnly)
+    }
+
     func testDomainImpliesURLType() {
         let specific = FilterSelection.domain("github.com")
         XCTAssertEqual(specific.contentType, .url)

@@ -8,6 +8,7 @@ public struct FilterSidebarView: View {
     private let sourceAppCountsOverride: [String: Int]?
     private let domainCountsOverride: [String: Int]?
     private let pinnedCountOverride: Int?
+    private let mixedCountOverride: Int?
 
     /// Single source of truth for the panel's filter; the parent derives
     /// content type / domain / source app / pinned from it.
@@ -20,6 +21,7 @@ public struct FilterSidebarView: View {
     @State private var fallbackTypeCounts: [ContentType: Int] = [:]
     @State private var fallbackSourceAppCounts: [String: Int] = [:]
     @State private var fallbackPinnedCount: Int = 0
+    @State private var fallbackMixedCount: Int = 0
     @State private var fallbackCountsTask: Task<Void, Never>? = nil
 
     public init(
@@ -28,6 +30,7 @@ public struct FilterSidebarView: View {
         sourceAppCounts: [String: Int]? = nil,
         domainCounts: [String: Int]? = nil,
         pinnedCount: Int? = nil,
+        mixedCount: Int? = nil,
         selection: Binding<FilterSelection?>
     ) {
         self.entries = entries
@@ -35,6 +38,7 @@ public struct FilterSidebarView: View {
         sourceAppCountsOverride = sourceAppCounts
         domainCountsOverride = domainCounts
         pinnedCountOverride = pinnedCount
+        mixedCountOverride = mixedCount
         _selection = selection
     }
 
@@ -62,6 +66,15 @@ public struct FilterSidebarView: View {
             }
 
             Section {
+                let mixedCount = mixedCountOverride ?? fallbackMixedCount
+                if mixedCount > 0 || showAllTypes {
+                    sidebarRow(
+                        title: "Mixed",
+                        systemImageName: "square.stack.3d.up",
+                        count: mixedCount,
+                        selectionValue: .mixed
+                    )
+                }
                 let visibleTypes = showAllTypes ? sortedContentTypes : sortedContentTypes.filter { $0.count > 0 }
                 ForEach(visibleTypes, id: \.type) { item in
                     sidebarRow(
@@ -282,19 +295,21 @@ public struct FilterSidebarView: View {
         let snapshot = entries
 
         fallbackCountsTask = Task {
-            let result = await Task.detached(priority: .utility) { () -> ([ContentType: Int], [String: Int], Int) in
+            let result = await Task.detached(priority: .utility) { () -> ([ContentType: Int], [String: Int], Int, Int) in
                 var typeCounts: [ContentType: Int] = [:]
                 var appCounts: [String: Int] = [:]
                 var pinned = 0
+                var mixed = 0
 
                 for entry in snapshot {
                     typeCounts[entry.contentType, default: 0] += 1
                     let app = entry.sourceApp ?? "Unknown"
                     appCounts[app, default: 0] += 1
                     if entry.isPinned { pinned += 1 }
+                    if entry.isMixedContent { mixed += 1 }
                 }
 
-                return (typeCounts, appCounts, pinned)
+                return (typeCounts, appCounts, pinned, mixed)
             }.value
 
             guard !Task.isCancelled else { return }
@@ -302,6 +317,7 @@ public struct FilterSidebarView: View {
                 fallbackTypeCounts = result.0
                 fallbackSourceAppCounts = result.1
                 fallbackPinnedCount = result.2
+                fallbackMixedCount = result.3
             }
         }
     }

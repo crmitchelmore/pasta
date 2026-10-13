@@ -3,6 +3,16 @@ import PastaCore
 @testable import PastaUI
 
 final class ClipboardRowDataTests: XCTestCase {
+    func testMixedClassificationPreservesCodeAndAppearsInSharedRowMetadata() throws {
+        let metadata = try ContentComposition.metadata(nil, content: #"{"url":"https://example.com"}"#,
+            values: [(.url, "https://example.com")], analysisTruncated: false)
+        let row = ClipboardRowData(from: ClipboardEntry(content: "", contentType: .code, metadata: metadata))
+        XCTAssertEqual(row.contentType, .code)
+        XCTAssertEqual(row.classificationTitle, "Mixed \u{00b7} Code")
+        XCTAssertEqual(row.classificationBadge, "MIXED \u{00b7} CODE")
+        XCTAssertEqual(row.quickSearchMetadataSegments.first, row.classificationTitle)
+    }
+
     func testContentLengthUsesUTF8Bytes() {
         // utf8.count is O(1) for native strings; grapheme counting is not.
         let entry = ClipboardEntry(content: "héllo", contentType: .text)

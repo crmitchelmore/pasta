@@ -103,7 +103,9 @@ final class JevReclassificationE2ETests: XCTestCase {
         XCTAssertEqual(try database.fetch(id: snapshot.id)?.cloudSyncAllowed, false)
         let changed = try XCTUnwrap(database.fetch(id: snapshot.id))
         XCTAssertEqual(try apply(.url, to: changed), .applied)
-        XCTAssertTrue(try database.fetchExtractedEntries(parentId: snapshot.id).isEmpty)
+        let retypedChildren = try database.fetchExtractedEntries(parentId: snapshot.id)
+        XCTAssertEqual(Set(retypedChildren.map(\.content)), Set(children.map(\.content)))
+        XCTAssertTrue(try XCTUnwrap(database.fetch(id: snapshot.id)).isMixedContent)
     }
 
     func testUnknownRetainsOriginalCategoryAndChildren() throws {
@@ -113,6 +115,23 @@ final class JevReclassificationE2ETests: XCTestCase {
         XCTAssertEqual(try apply(.unknown, to: snapshot), .retained)
         XCTAssertEqual(try database.fetch(id: snapshot.id), snapshot)
         XCTAssertEqual(try database.fetchExtractedEntries(parentId: snapshot.id), children)
+    }
+
+    func testBothDecisionProvidersKeepEmbeddedItemsWhenChangingToCode() throws {
+        for provider in RemoteClassificationProvider.allCases {
+            let configuration = JevConfiguration(isEnabled: true, provider: provider, mode: .primary)
+            let result = try pipeline.ingest(ClipboardEntry(content: "Contact a@example.com and visit https://example.com", contentType: .text))
+            let snapshot = try primarySnapshot(result)
+            let outcome = try JevReclassificationService().apply(.init(category: .code), to: snapshot,
+                database: database, configuration: configuration, detectorConfiguration: .default,
+                extractContent: true, skipAPIKeys: true)
+            XCTAssertEqual(outcome, .applied)
+            let updated = try XCTUnwrap(database.fetch(id: snapshot.id))
+            XCTAssertEqual(updated.contentType, .code)
+            XCTAssertTrue(updated.isMixedContent)
+            XCTAssertEqual(Set(try database.fetchExtractedEntries(parentId: snapshot.id).map(\.content)),
+                           ["a@example.com", "https://example.com"])
+        }
     }
 
     func testInvalidExtractedParentRollsBackClassificationAndChildRetirement() throws {
@@ -250,7 +269,8 @@ final class JevReclassificationE2ETests: XCTestCase {
         let snapshot = try primarySnapshot(result)
         let oldChildren = try database.fetchExtractedEntries(parentId: snapshot.id)
         XCTAssertFalse(oldChildren.isEmpty)
-        XCTAssertEqual(try apply(.url, to: snapshot), .applied)
+        XCTAssertEqual(try JevReclassificationService().apply(.init(category: .url), to: snapshot, database: database,
+            configuration: configuration, detectorConfiguration: .default, extractContent: false, skipAPIKeys: false), .applied)
         XCTAssertEqual(Set(try database.pendingClassificationDeletions()), Set(oldChildren.map(\.id)))
         try database.applySyncChanges(modified: oldChildren, deleted: [])
         XCTAssertTrue(try database.fetchExtractedEntries(parentId: snapshot.id).isEmpty)
@@ -280,7 +300,8 @@ final class JevReclassificationE2ETests: XCTestCase {
         let snapshot = try primarySnapshot(result)
         let oldChildren = try database.fetchExtractedEntries(parentId: snapshot.id)
         XCTAssertFalse(oldChildren.isEmpty)
-        XCTAssertEqual(try apply(.url, to: snapshot), .applied)
+        XCTAssertEqual(try JevReclassificationService().apply(.init(category: .url), to: snapshot, database: database,
+            configuration: configuration, detectorConfiguration: .default, extractContent: false, skipAPIKeys: false), .applied)
         let db = try XCTUnwrap(database)
         do {
             _ = try await db.backfillUnsynced(deleting: { _ in throw URLError(.notConnectedToInternet) }) { _, _ in

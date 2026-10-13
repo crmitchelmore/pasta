@@ -27,6 +27,25 @@ picker, independent credentials and modes. **Legacy classifiers (local rules)**
 is collapsed by default; expanding it exposes all existing strictness, regex,
 custom-detector and local-history-reparse controls without changing their values.
 Local detectors remain active for privacy checks, extraction and failure fallback.
+Embedded-item extraction is independent of the primary classification: code,
+JSON, prose and short lists can all retain individually searchable values after
+either provider reclassifies them. Single whole-value captures are not duplicated.
+Mixed is an additional locally derived composition classification, not a new
+primary type: rows/previews retain the original type and code/file paste behaviour.
+Text surrounding a detected value, or several detected value types, makes a
+capture Mixed. A list containing only emails is multiple-item content, not Mixed.
+The macOS sidebar and iOS Search include a Mixed filter; FTS applies it before
+the result limit. This works with both providers disabled and with separate-entry
+extraction disabled. Existing parent metadata is backfilled without changing its
+primary type, pins, content or sharing consent; changed metadata is pending sync.
+Backfill samples up to 1,000 historical values and marks sampled summaries;
+Settings → Detection's local history reparse rebuilds those summaries and children.
+Separate extracted entries are bounded to 100 distinct values per capture;
+additional metadata values remain copyable through progressive disclosure.
+The preview reports the storage cap and the 30,000-character local analysis
+limit when applicable. The original clipboard content is never truncated.
+Decision models still classify the whole capture, not generate extracted strings;
+candidate-level AI validation is not enabled or required for Mixed/extraction.
 Decision models are recommended for context-aware classification, not advertised
 as having a measured universal accuracy advantage.
 
