@@ -123,7 +123,8 @@ public struct ContentTypeDetector {
     /// clipboard entry *is*; the entry itself still stores the full content.
     static let maxAnalysisLength = ContentComposition.analysisLimit
 
-    public func detect(in text: String, configuration: DetectorConfiguration = .default, primaryTypeOverride: ContentType? = nil) -> Output {
+    public func detect(in text: String, configuration: DetectorConfiguration = .default, primaryTypeOverride: ContentType? = nil,
+                       extractionConfiguration: ContentExtractionConfiguration = .default, skipAPIKeysForExtraction: Bool = false) -> Output {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return Output(primaryType: .unknown, confidence: 0.0)
@@ -233,15 +234,20 @@ public struct ContentTypeDetector {
             ipAddresses: ipAddresses,
             uuids: uuids,
             paths: paths,
-            customDetections: customDetections
+            customDetections: customDetections,
+            additionalItems: makeAdditionalExtractedItems(analysisText: analysisText, metadataJSON: metadataJSON)
         )
 
+        let eligibleItems = detectedItems.filter { !(skipAPIKeysForExtraction && $0.contentType == .apiKey) }
+        let savedItems = extractionConfiguration.limit(eligibleItems)
         do {
             metadataJSON = try ContentComposition.metadata(
                 metadataJSON,
                 content: analysisText,
                 values: detectedItems.map { (type: $0.contentType, value: $0.content) },
-                analysisTruncated: trimmed.count > Self.maxAnalysisLength
+                analysisTruncated: trimmed.count > Self.maxAnalysisLength,
+                extractionConfiguration: extractionConfiguration,
+                eligibleItemCount: eligibleItems.count
             )
         } catch {
             PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Failed to build content composition")
@@ -252,7 +258,7 @@ public struct ContentTypeDetector {
             confidence: confidence,
             metadataJSON: metadataJSON,
             splitEntries: splitEntries,
-            extractedItems: Array(detectedItems.prefix(ContentComposition.extractionLimit)),
+            extractedItems: savedItems,
             customDetections: customDetections
         )
     }

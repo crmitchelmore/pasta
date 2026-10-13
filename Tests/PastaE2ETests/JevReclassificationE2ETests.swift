@@ -146,6 +146,28 @@ final class JevReclassificationE2ETests: XCTestCase {
         XCTAssertTrue(try database.pendingClassificationDeletions().isEmpty)
     }
 
+    func testConfiguredExtractionLimitsReachCaptureAndBothProviders() throws {
+        let content = (0..<125).map { "person\($0)@example.com" }.joined(separator: "\n")
+        pipeline.extractionConfiguration = try .init(maximumSavedItems: 25)
+        let capture = try pipeline.ingest(ClipboardEntry(content: content, contentType: .text,
+                                                        cloudSyncAllowed: false, receivedViaTailnet: true))
+        let original = try primarySnapshot(capture)
+        XCTAssertEqual(try database.fetchExtractedEntries(parentId: original.id).count, 25)
+        for provider in RemoteClassificationProvider.allCases {
+            for limit in [1, 0] {
+                let snapshot = try XCTUnwrap(database.fetch(id: original.id))
+                let configuration = JevConfiguration(isEnabled: true, provider: provider, mode: .primary)
+                let outcome = try JevReclassificationService().apply(.init(category: .code), to: snapshot,
+                    database: database, configuration: configuration, detectorConfiguration: .default,
+                    extractContent: true, skipAPIKeys: true, extractionConfiguration: try .init(maximumSavedItems: limit))
+                XCTAssertEqual(outcome, .applied)
+                let children = try database.fetchExtractedEntries(parentId: original.id)
+                XCTAssertEqual(children.count, limit == 0 ? 125 : 1)
+                XCTAssertTrue(children.allSatisfy { !$0.cloudSyncAllowed && $0.receivedViaTailnet })
+            }
+        }
+    }
+
     func testChangedOrDeletedSnapshotCannotBeOverwrittenOrResurrected() throws {
         let result = try pipeline.ingest(ClipboardEntry(content: "Original title", contentType: .text))
         let snapshot = try primarySnapshot(result)

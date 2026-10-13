@@ -167,7 +167,7 @@ extension ContentTypeDetector {
             let matches = matchPatterns(rule.cleanedPatterns, in: text)
             guard !matches.isEmpty else { return nil }
             let detections = matches.map {
-                EnvVarDetector.Detection(key: "CUSTOM", value: $0, isExported: false, confidence: 0.75)
+                EnvVarDetector.Detection(key: "CUSTOM", value: $0, isExported: false, confidence: 0.75, raw: $0)
             }
             return EnvVarDetector.Output(detections: detections, isBlock: detections.count >= 2)
         }

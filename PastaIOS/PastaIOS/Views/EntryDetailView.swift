@@ -102,7 +102,7 @@ struct EntryDetailView: View {
             let metadata = entry.metadata
             let limit = detectedItemLimit
             let items = await Task.detached(priority: .utility) {
-                MetadataParser.extractAllValues(from: metadata, limit: limit + 1)
+                MetadataParser.extractAllValues(from: metadata, limit: limit + 1, content: entry.content)
             }.value
             guard !Task.isCancelled else { return }
             detectedItems = Array(items.prefix(limit))

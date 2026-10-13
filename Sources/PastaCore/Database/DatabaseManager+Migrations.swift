@@ -277,6 +277,24 @@ extension DatabaseManager {
             }
         }
 
+        migrator.registerMigration("backfillExpandedExtractionTypes") { db in
+            var lastRowID: Int64 = 0
+            while true {
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT rowid, metadata, contentTypeMask FROM clipboard_entries
+                    WHERE rowid > ? AND metadata IS NOT NULL ORDER BY rowid LIMIT 100
+                    """, arguments: [lastRowID])
+                guard !rows.isEmpty else { break }
+                for row in rows {
+                    lastRowID = row["rowid"]
+                    let mask = MetadataParser.typeMask(for: row["metadata"]).rawValue
+                    guard mask != row["contentTypeMask"] as Int else { continue }
+                    try db.execute(sql: "UPDATE clipboard_entries SET contentTypeMask = ? WHERE rowid = ?",
+                                   arguments: [mask, lastRowID])
+                }
+            }
+        }
+
         return migrator
     }
 }

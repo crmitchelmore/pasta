@@ -17,7 +17,8 @@ public struct JevReclassificationService {
         configuration: JevConfiguration,
         detectorConfiguration: DetectorConfiguration,
         extractContent: Bool,
-        skipAPIKeys: Bool
+        skipAPIKeys: Bool,
+        extractionConfiguration: ContentExtractionConfiguration = .default
     ) throws -> Outcome {
         guard classification.category != .unknown,
               JevEligibility.skipReason(for: snapshot, configuration: configuration) == nil else { return .retained }
@@ -26,7 +27,8 @@ public struct JevReclassificationService {
         guard JevEligibility.skipReason(contentType: local.primaryType, content: snapshot.content, configuration: configuration) == nil else {
             return .retained
         }
-        let output = detector.detect(in: snapshot.content, configuration: detectorConfiguration, primaryTypeOverride: classification.category)
+        let output = detector.detect(in: snapshot.content, configuration: detectorConfiguration, primaryTypeOverride: classification.category,
+                                     extractionConfiguration: extractionConfiguration, skipAPIKeysForExtraction: skipAPIKeys)
         guard !(skipAPIKeys && output.primaryType == .apiKey) else { return .retained }
         let children: [ClipboardEntry] = extractContent ? output.extractedItems.filter {
             !(skipAPIKeys && $0.contentType == .apiKey)
