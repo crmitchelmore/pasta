@@ -50,7 +50,6 @@ extension PanelContentView {
                 var sourceAppCounts: [String: Int] = [:]
                 var domainCounts: [String: Int] = [:]
                 var pinnedCount = 0
-                let urlDetector = URLDetector()
 
                 let extractableTypes = MetadataParser.extractableTypes
                 var buckets: [ContentType: [ClipboardEntry]] = [:]
@@ -69,8 +68,7 @@ extension PanelContentView {
                     let app = entry.sourceApp ?? "Unknown"
                     sourceAppCounts[app, default: 0] += 1
                     if entry.contentType == .url {
-                        let domains = Set(urlDetector.detect(in: entry.content).map(\.domain))
-                        for domain in domains {
+                        for domain in URLDetector.domains(in: entry.content) {
                             domainCounts[domain, default: 0] += 1
                         }
                     }
@@ -190,9 +188,8 @@ extension PanelContentView {
         }
 
         if contentTypeFilter == .url, let urlDomainFilter {
-            let detector = URLDetector()
             out = out.filter { entry in
-                Set(detector.detect(in: entry.content).map(\.domain)).contains(urlDomainFilter)
+                URLDetector.domains(in: entry.content).contains(urlDomainFilter)
             }
         }
 

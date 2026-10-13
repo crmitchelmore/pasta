@@ -117,4 +117,32 @@ public struct URLDetector {
         guard let decoded = text.removingPercentEncoding else { return text }
         return decoded
     }
+
+    // MARK: - Cached domains
+
+    private final class DomainSet: NSObject {
+        let domains: Set<String>
+        init(_ domains: Set<String>) { self.domains = domains }
+    }
+
+    /// Detection is a pure function of the text, and each call runs
+    /// NSDataDetector (~60µs per URL). The history panel recounts domains for
+    /// every URL entry whenever the history changes, so remember the answer.
+    private static let domainCache: NSCache<NSString, DomainSet> = {
+        let cache = NSCache<NSString, DomainSet>()
+        cache.countLimit = 20_000
+        return cache
+    }()
+
+    /// The distinct domains of the URLs in `text` (same as collecting
+    /// `detect(in:)`'s domains), cached by text. Safe from any thread.
+    public static func domains(in text: String) -> Set<String> {
+        let key = text as NSString
+        if let cached = domainCache.object(forKey: key) {
+            return cached.domains
+        }
+        let domains = Set(URLDetector().detect(in: text).map(\.domain))
+        domainCache.setObject(DomainSet(domains), forKey: key)
+        return domains
+    }
 }
