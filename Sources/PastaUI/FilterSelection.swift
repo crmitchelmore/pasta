@@ -6,6 +6,7 @@ import PastaCore
 public enum FilterSelection: Hashable {
     case all
     case pinned
+    case mixed
     case type(ContentType)
     case domain(String)
     case sourceApp(String)
@@ -15,7 +16,7 @@ public enum FilterSelection: Hashable {
         switch self {
         case .type(let type): return type
         case .domain: return .url
-        case .all, .pinned, .sourceApp: return nil
+        case .all, .pinned, .mixed, .sourceApp: return nil
         }
     }
 

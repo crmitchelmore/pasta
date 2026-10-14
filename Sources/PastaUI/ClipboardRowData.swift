@@ -20,6 +20,8 @@ public struct ClipboardRowData: Equatable {
     public let id: UUID
     public let previewText: String
     public let contentType: ContentType
+    public let classificationTitle: String
+    public let classificationBadge: String
     public let sourceAppIdentifier: String?
     public let sourceAppName: String?
     public let timestamp: Date
@@ -68,6 +70,10 @@ public struct ClipboardRowData: Equatable {
             self.previewText = baseText
         }
         self.contentType = entry.contentType
+        self.classificationTitle = entry.classificationDisplayTitle
+        self.classificationBadge = entry.isMixedContent
+            ? "MIXED \u{00b7} \(entry.contentType.badgeTitle)"
+            : entry.hasMultipleDetectedItems ? "MULTIPLE \u{00b7} \(entry.contentType.badgeTitle)" : entry.contentType.badgeTitle
         self.sourceAppIdentifier = entry.sourceApp
         self.sourceAppName = entry.sourceApp?.appDisplayName
         self.timestamp = entry.timestamp
@@ -144,6 +150,8 @@ public struct ClipboardRowData: Equatable {
         self.id = Self.headerID(for: headerTitle)
         self.previewText = ""
         self.contentType = .text
+        self.classificationTitle = ContentType.text.displayTitle
+        self.classificationBadge = ContentType.text.badgeTitle
         self.sourceAppIdentifier = nil
         self.sourceAppName = nil
         self.timestamp = .distantPast
@@ -200,7 +208,7 @@ public struct ClipboardRowData: Equatable {
     /// (`contentLength` is UTF-8 bytes), so the label must never say "chars"
     /// — that overstates by up to 4x for non-ASCII content.
     public var quickSearchMetadataSegments: [String] {
-        var parts: [String] = [contentType.displayTitle]
+        var parts: [String] = [classificationTitle]
         if let sourceAppName { parts.append(sourceAppName) }
         parts.append(timestamp.relativeFormatted)
         parts.append(Self.byteCountFormatter.string(fromByteCount: Int64(contentLength)))

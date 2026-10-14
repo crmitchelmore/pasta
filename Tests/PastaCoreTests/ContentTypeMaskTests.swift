@@ -19,7 +19,12 @@ final class ContentTypeMaskTests: XCTestCase {
           "jwt":[{"token":"a.b.c"}],
           "env":{"isBlock":true,"vars":[{"key":"A","value":"1"}]},
           "filePaths":[{"path":"/tmp/x"}],
-          "shellCommands":[{"command":"ls -la","executable":"ls"}]
+          "shellCommands":[{"command":"ls -la","executable":"ls"}],
+          "colors":[{"raw":"#ff8800"}],
+          "macAddresses":[{"raw":"00:1A:2B:3C:4D:5E"}],
+          "creditCards":[{"masked":"**** 1111","location":0,"length":16}],
+          "ibans":[{"iban":"GB82WEST12345698765432"}],
+          "code":[{"language":"python","location":0,"length":12}]
         }
         """
 
@@ -68,6 +73,11 @@ final class ContentTypeMaskTests: XCTestCase {
         XCTAssertEqual(ContentTypeMask.envVarBlock.rawValue, 1 << 9)
         XCTAssertEqual(ContentTypeMask.filePath.rawValue, 1 << 10)
         XCTAssertEqual(ContentTypeMask.shellCommand.rawValue, 1 << 11)
+        XCTAssertEqual(ContentTypeMask.color.rawValue, 1 << 14)
+        XCTAssertEqual(ContentTypeMask.macAddress.rawValue, 1 << 15)
+        XCTAssertEqual(ContentTypeMask.creditCard.rawValue, 1 << 16)
+        XCTAssertEqual(ContentTypeMask.iban.rawValue, 1 << 17)
+        XCTAssertEqual(ContentTypeMask.code.rawValue, 1 << 18)
         XCTAssertNil(ContentTypeMask(.text))
     }
 

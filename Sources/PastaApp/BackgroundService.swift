@@ -220,6 +220,7 @@ final class BackgroundService: ObservableObject {
         detectorConfiguration: DetectorConfiguration,
         extractContent: Bool,
         skipAPIKeys: Bool,
+        extractionConfiguration: ContentExtractionConfiguration,
         requirePreferredProvider: Bool = false
     ) async throws -> JevReclassificationService.Outcome {
         try await syncReceiver.runWhenAvailable {
@@ -230,6 +231,7 @@ final class BackgroundService: ObservableObject {
                     guard Self.isCurrentJevConfiguration(configuration, apiKey: apiKey),
                           !requirePreferredProvider || DecisionModelSelection.provider() == configuration.provider,
                           DetectorConfigurationStore.load() == detectorConfiguration,
+                          ContentExtractionConfiguration.load() == extractionConfiguration,
                           UserDefaults.standard.bool(forKey: Defaults.extractContent) == extractContent,
                           UserDefaults.standard.bool(forKey: Defaults.skipAPIKeys) == skipAPIKeys else {
                         throw JevConfigurationError.validationRequired
@@ -237,7 +239,7 @@ final class BackgroundService: ObservableObject {
                     return try JevReclassificationService().apply(
                         classification, to: snapshot, database: db, configuration: configuration,
                         detectorConfiguration: detectorConfiguration, extractContent: extractContent,
-                        skipAPIKeys: skipAPIKeys
+                        skipAPIKeys: skipAPIKeys, extractionConfiguration: extractionConfiguration
                     )
                 }
             }
@@ -627,6 +629,7 @@ final class BackgroundService: ObservableObject {
                 let deduplicate = UserDefaults.standard.bool(forKey: Defaults.deduplicateEntries)
                 let skipAPIKeys = UserDefaults.standard.bool(forKey: Defaults.skipAPIKeys)
                 let extractContent = UserDefaults.standard.bool(forKey: Defaults.extractContent)
+                let extractionConfiguration = ContentExtractionConfiguration.load()
                 let detectorConfiguration = self.detectorConfiguration
                 let syncManager = self.syncManager
                 let jevConfiguration = DecisionModelSelection.configuration()
@@ -641,7 +644,8 @@ final class BackgroundService: ObservableObject {
                             storeImages: storeImages,
                             extractContent: extractContent,
                             detectorConfiguration: detectorConfiguration,
-                            preserveEnvVarBlock: jevConfiguration.isEnabled && jevConfiguration.mode != .comparison
+                            preserveEnvVarBlock: jevConfiguration.isEnabled && jevConfiguration.mode != .comparison,
+                            extractionConfiguration: extractionConfiguration, skipAPIKeys: skipAPIKeys
                         )
                     } catch {
                         PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Failed to enrich entry")
@@ -716,12 +720,13 @@ final class BackgroundService: ObservableObject {
                                             guard DecisionModelSelection.provider() == jev.configuration.provider,
                                                   Self.isCurrentJevConfiguration(jev.configuration, apiKey: jev.apiKey),
                                                   DetectorConfigurationStore.load() == detectorConfiguration,
-                                                  UserDefaults.standard.bool(forKey: Defaults.extractContent) == extractContent else { return }
+                                                  UserDefaults.standard.bool(forKey: Defaults.extractContent) == extractContent,
+                                                  ContentExtractionConfiguration.load() == extractionConfiguration else { return }
                                             if jev.configuration.mode != .comparison {
                                                 let outcome = try await self.applyJevClassification(
                                                     classification, to: snapshot, configuration: jev.configuration, apiKey: jev.apiKey,
                                                     detectorConfiguration: detectorConfiguration, extractContent: extractContent,
-                                                    skipAPIKeys: skipAPIKeys, requirePreferredProvider: true
+                                                    skipAPIKeys: skipAPIKeys, extractionConfiguration: extractionConfiguration, requirePreferredProvider: true
                                                 )
                                                 if outcome == .applied {
                                                     await MainActor.run { NotificationCenter.default.post(name: Notification.Name("pasta.entriesDidChange"), object: nil) }
@@ -932,7 +937,9 @@ final class BackgroundService: ObservableObject {
         storeImages: Bool,
         extractContent: Bool,
         detectorConfiguration: DetectorConfiguration,
-        preserveEnvVarBlock: Bool = false
+        preserveEnvVarBlock: Bool = false,
+        extractionConfiguration: ContentExtractionConfiguration = .default,
+        skipAPIKeys: Bool = false
     ) throws -> EnrichResult {
         var entry = entry
 
@@ -953,7 +960,8 @@ final class BackgroundService: ObservableObject {
             return EnrichResult(primaryEntry: entry, extractedEntries: [], envVarSplitEntries: [], storageError: storageError)
         }
 
-        let output = detector.detect(in: entry.content, configuration: detectorConfiguration)
+        let output = detector.detect(in: entry.content, configuration: detectorConfiguration,
+                                     extractionConfiguration: extractionConfiguration, skipAPIKeysForExtraction: skipAPIKeys)
 
         // Handle env var block splitting (legacy behavior - these don't have parent links)
         if !preserveEnvVarBlock, output.primaryType == .envVarBlock, !output.splitEntries.isEmpty {

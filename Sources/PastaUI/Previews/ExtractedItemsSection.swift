@@ -11,12 +11,18 @@ struct ExtractedItemsSection: View {
     @State private var items: [PreviewPanelView.ExtractedItem] = []
     @State private var hasMore: Bool = false
     @State private var isLoading: Bool = false
+    @State private var compositionNotice: String? = nil
     @State private var loadTask: Task<Void, Never>? = nil
 
     var body: some View {
         Group {
-            if isLoading || !items.isEmpty {
+            if isLoading || !items.isEmpty || compositionNotice != nil {
                 SectionBox(title: "Detected Items") {
+                    if let compositionNotice {
+                        Text(compositionNotice)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     if isLoading && items.isEmpty {
                         ProgressView()
                             .controlSize(.small)
@@ -56,6 +62,9 @@ struct ExtractedItemsSection: View {
         .onChange(of: entry.id) { _, _ in
             loadItems(limit: Self.batchSize)
         }
+        .onChange(of: entry.metadata) { _, _ in
+            loadItems(limit: Self.batchSize)
+        }
         .onDisappear {
             loadTask?.cancel()
             loadTask = nil
@@ -66,6 +75,7 @@ struct ExtractedItemsSection: View {
         loadTask?.cancel()
         items = []
         hasMore = false
+        compositionNotice = nil
 
         guard entry.metadata != nil else {
             isLoading = false
@@ -76,15 +86,31 @@ struct ExtractedItemsSection: View {
         let snapshot = entry
 
         loadTask = Task {
-            let result = await Task.detached(priority: .utility) { () -> ([ExtractedItemPayload], Bool) in
+            let result = await Task.detached(priority: .utility) { () -> ([ExtractedItemPayload], Bool, String?) in
                 let extracted = MetadataParser.extractAllValues(
                     from: snapshot.metadata,
-                    limit: limit + 1
+                    limit: limit + 1,
+                    content: snapshot.content
                 )
                 let limited = extracted.prefix(limit).map {
                     ExtractedItemPayload(type: $0.type, value: $0.value, displayValue: $0.displayValue)
                 }
-                return (Array(limited), extracted.count > limit)
+                var notices: [String] = []
+                if let metadata = snapshot.metadata,
+                   let object = try? JSONSerialization.jsonObject(with: Data(metadata.utf8)) as? [String: Any],
+                   let composition = object["composition"] as? [String: Any] {
+                    if let count = composition["itemCount"] as? Int,
+                       let savedLimit = composition["extractionLimit"] as? Int, savedLimit > 0, count > savedLimit {
+                        notices.append("\(count.formatted()) distinct items detected. The saved-item limit for this copy was \(savedLimit.formatted()); remaining detected values can be copied here.")
+                    }
+                    if composition["analysisTruncated"] as? Bool == true {
+                        notices.append("Detection covers only the first \(ContentComposition.analysisLimit.formatted()) characters. The original clipboard content is preserved.")
+                    }
+                    if composition["summaryTruncated"] as? Bool == true {
+                        notices.append("This historical summary is sampled. Reparse history in Settings \u{2192} Detection to rebuild it.")
+                    }
+                }
+                return (Array(limited), extracted.count > limit, notices.isEmpty ? nil : notices.joined(separator: " "))
             }.value
 
             guard !Task.isCancelled else { return }
@@ -93,6 +119,7 @@ struct ExtractedItemsSection: View {
                     PreviewPanelView.ExtractedItem(type: $0.type, value: $0.value, displayValue: $0.displayValue)
                 }
                 hasMore = result.1
+                compositionNotice = result.2
                 isLoading = false
             }
         }

@@ -30,7 +30,8 @@ public final class SearchService: @unchecked Sendable {
         query: String,
         contentType: ContentType? = nil,
         limit: Int = 50,
-        pinnedOnly: Bool = false
+        pinnedOnly: Bool = false,
+        mixedOnly: Bool = false
     ) throws -> [Match] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -42,9 +43,9 @@ public final class SearchService: @unchecked Sendable {
         let startTime = CFAbsoluteTimeGetCurrent()
 
         // Use FTS5 for blazing fast search
-        var entries = try database.searchFTS(query: trimmed, contentType: contentType, limit: limit, pinnedOnly: pinnedOnly)
+        var entries = try database.searchFTS(query: trimmed, contentType: contentType, limit: limit, pinnedOnly: pinnedOnly, mixedOnly: mixedOnly)
         if entries.isEmpty, let relaxed = relaxedQuery(from: trimmed) {
-            entries = try database.searchFTS(query: relaxed, contentType: contentType, limit: limit, pinnedOnly: pinnedOnly)
+            entries = try database.searchFTS(query: relaxed, contentType: contentType, limit: limit, pinnedOnly: pinnedOnly, mixedOnly: mixedOnly)
         }
         
         // Convert to Match objects. FTS5 already returns results in our combined

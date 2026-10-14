@@ -107,6 +107,8 @@ struct E2ECapturePipeline {
     var extractContent = true
     var deduplicate = true
     var preserveEnvVarBlock = false
+    var extractionConfiguration: ContentExtractionConfiguration = .default
+    var skipAPIKeys = false
 
     func enrich(_ captured: ClipboardEntry) throws -> Result {
         var entry = captured
@@ -122,7 +124,8 @@ struct E2ECapturePipeline {
             return Result(primary: entry, extracted: [], envVarSplit: [])
         }
 
-        let output = detector.detect(in: entry.content, configuration: configuration)
+        let output = detector.detect(in: entry.content, configuration: configuration,
+                                     extractionConfiguration: extractionConfiguration, skipAPIKeysForExtraction: skipAPIKeys)
 
         if !preserveEnvVarBlock, output.primaryType == .envVarBlock, !output.splitEntries.isEmpty {
             let split = output.splitEntries.map { piece in

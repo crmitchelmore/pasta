@@ -176,7 +176,7 @@ public struct PreviewPanelView: View {
                 Image(systemName: entry.contentType.systemImageName)
                     .foregroundStyle(entry.contentType.tint)
 
-                Text(entry.contentType.displayTitle)
+                Text(entry.classificationDisplayTitle)
                     .textCase(.uppercase)
                     .font(.headline)
 

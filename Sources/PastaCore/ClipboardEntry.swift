@@ -85,6 +85,9 @@ public struct ClipboardEntry: Codable, FetchableRecord, PersistableRecord, Senda
     /// Whether this entry was extracted from a parent entry.
     public var isExtracted: Bool { parentEntryId != nil }
 
+    public var isMixedContent: Bool { !isExtracted && contentTypeMask.contains(.mixed) }
+    public var hasMultipleDetectedItems: Bool { !isExtracted && contentTypeMask.contains(.multipleItems) }
+
     public var allowsCloudUpload: Bool { cloudSyncAllowed && contentType != .filePath }
 
     public var filePaths: [String] {

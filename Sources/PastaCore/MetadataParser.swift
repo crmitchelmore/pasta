@@ -4,7 +4,7 @@ import Foundation
 public struct MetadataParser {
     
     /// Extracted value with its type
-    public struct ExtractedValue: Identifiable, Hashable {
+    public struct ExtractedValue: Identifiable, Hashable, Sendable {
         public let id = UUID()
         public let type: ContentType
         public let value: String
@@ -22,7 +22,7 @@ public struct MetadataParser {
         .email, .url, .phoneNumber, .ipAddress, .uuid,
         .hash, .apiKey, .jwt,
         .envVar, .envVarBlock,
-        .filePath, .shellCommand
+        .filePath, .shellCommand, .color, .macAddress, .creditCard, .iban, .code
     ]
 
     /// Derives the bitmask of extractable content types present in
@@ -34,6 +34,10 @@ public struct MetadataParser {
         guard let metadata, let dict = parseJSON(metadata) else { return [] }
 
         var mask: ContentTypeMask = []
+        if let composition = dict["composition"] as? [String: Any] {
+            if composition["isMixed"] as? Bool == true { mask.insert(.mixed) }
+            if (composition["itemCount"] as? Int ?? 0) > 1 { mask.insert(.multipleItems) }
+        }
         if hasItems(dict, key: "emails") { mask.insert(.email) }
         if hasItems(dict, key: "urls") { mask.insert(.url) }
         if hasItems(dict, key: "phoneNumbers") { mask.insert(.phoneNumber) }
@@ -44,6 +48,13 @@ public struct MetadataParser {
         if hasItems(dict, key: "jwt") { mask.insert(.jwt) }
         if hasItems(dict, key: "filePaths") { mask.insert(.filePath) }
         if hasItems(dict, key: "shellCommands") { mask.insert(.shellCommand) }
+        if hasItems(dict, key: "colors") { mask.insert(.color) }
+        if hasItems(dict, key: "macAddresses") { mask.insert(.macAddress) }
+        if hasItems(dict, key: "creditCards") { mask.insert(.creditCard) }
+        if hasItems(dict, key: "ibans") { mask.insert(.iban) }
+        if (dict["code"] as? [[String: Any]])?.contains(where: { $0["location"] as? Int != nil }) == true {
+            mask.insert(.code)
+        }
 
         if let env = dict["env"] as? [String: Any] {
             mask.insert(.envVar)
@@ -66,7 +77,7 @@ public struct MetadataParser {
     }
     
     /// Extract all values of a given type from metadata
-    public static func extractValues(for type: ContentType, from metadata: String?) -> [ExtractedValue] {
+    public static func extractValues(for type: ContentType, from metadata: String?, content: String? = nil) -> [ExtractedValue] {
         guard let metadata = metadata, let dict = parseJSON(metadata) else { return [] }
         
         switch type {
@@ -94,13 +105,15 @@ public struct MetadataParser {
             return extractFilePaths(from: dict)
         case .shellCommand:
             return extractShellCommands(from: dict)
+        case .color, .macAddress, .creditCard, .iban, .code:
+            return extractAdditionalValues(from: dict, content: content).filter { $0.type == type }
         default:
             return []
         }
     }
     
     /// Extract all detected values from metadata (all types)
-    public static func extractAllValues(from metadata: String?) -> [ExtractedValue] {
+    public static func extractAllValues(from metadata: String?, content: String? = nil) -> [ExtractedValue] {
         guard let metadata = metadata, let dict = parseJSON(metadata) else { return [] }
         
         var values: [ExtractedValue] = []
@@ -116,12 +129,13 @@ public struct MetadataParser {
         values.append(contentsOf: extractFilePaths(from: dict))
         values.append(contentsOf: extractShellCommands(from: dict))
         values.append(contentsOf: extractCustomDetections(from: dict))
+        values.append(contentsOf: extractAdditionalValues(from: dict, content: content))
         
         return values
     }
 
     /// Extract detected values from metadata up to a maximum count.
-    public static func extractAllValues(from metadata: String?, limit: Int) -> [ExtractedValue] {
+    public static func extractAllValues(from metadata: String?, limit: Int, content: String? = nil) -> [ExtractedValue] {
         guard limit > 0 else { return [] }
         guard let metadata = metadata, let dict = parseJSON(metadata) else { return [] }
 
@@ -146,6 +160,7 @@ public struct MetadataParser {
         appendLimited(extractFilePaths(from: dict))
         appendLimited(extractShellCommands(from: dict))
         appendLimited(extractCustomDetections(from: dict))
+        appendLimited(extractAdditionalValues(from: dict, content: content))
 
         return values
     }
@@ -260,7 +275,7 @@ public struct MetadataParser {
         return vars.compactMap { item in
             guard let key = item["key"] as? String else { return nil }
             let value = item["value"] as? String ?? ""
-            let display = value.isEmpty ? key : "\(key)=\(value)"
+            let display = item["raw"] as? String ?? ((item["isExported"] as? Bool == true ? "export " : "") + "\(key)=\(value)")
             return ExtractedValue(type: .envVar, value: display, displayValue: display)
         }
     }
@@ -291,6 +306,37 @@ public struct MetadataParser {
             return ExtractedValue(type: .text, value: value, displayValue: display)
         }
     }
+
+    private static func extractAdditionalValues(from dict: [String: Any], content: String?) -> [ExtractedValue] {
+        var values: [ExtractedValue] = []
+        for (key, field, type) in [
+            ("colors", "raw", ContentType.color),
+            ("macAddresses", "raw", .macAddress),
+            ("ibans", "raw", .iban)
+        ] {
+            for item in dict[key] as? [[String: Any]] ?? [] {
+                guard let value = item[field] as? String ?? (type == .iban ? item["iban"] as? String : nil),
+                      !value.isEmpty else { continue }
+                values.append(ExtractedValue(type: type, value: value))
+            }
+        }
+        // Source ranges preserve exact snippets without duplicating card numbers in metadata.
+        let decoded = (dict["encoding"] as? [String: Any])?["decodedPreview"] as? String
+        if let source = decoded ?? content {
+            let analyzed = String(source.trimmingCharacters(in: .whitespacesAndNewlines).prefix(ContentComposition.analysisLimit))
+            for (key, type) in [("creditCards", ContentType.creditCard), ("code", .code)] {
+                for item in dict[key] as? [[String: Any]] ?? [] {
+                    guard let location = item["location"] as? Int, let length = item["length"] as? Int,
+                          location >= 0, length > 0, location <= analyzed.utf16.count,
+                          length <= analyzed.utf16.count - location,
+                          let range = Range(NSRange(location: location, length: length), in: analyzed) else { continue }
+                    let value = String(analyzed[range])
+                    values.append(ExtractedValue(type: type, value: value, displayValue: item["masked"] as? String))
+                }
+            }
+        }
+        return values
+    }
 }
 
 
@@ -305,11 +351,11 @@ extension ClipboardEntry {
     
     /// Get all extracted values of a specific type from this entry's metadata
     public func extractedValues(for type: ContentType) -> [MetadataParser.ExtractedValue] {
-        MetadataParser.extractValues(for: type, from: metadata)
+        MetadataParser.extractValues(for: type, from: metadata, content: content)
     }
     
     /// Get all extracted values from this entry's metadata
     public var allExtractedValues: [MetadataParser.ExtractedValue] {
-        MetadataParser.extractAllValues(from: metadata)
+        MetadataParser.extractAllValues(from: metadata, content: content)
     }
 }

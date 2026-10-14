@@ -629,13 +629,13 @@ private final class ClipboardCellView: NSTableCellView {
         titleLabel.toolTip = row.previewText
         
         // Badge
-        badgeView.stringValue = " \(row.contentType.badgeTitle) "
+        badgeView.stringValue = " \(row.classificationBadge) "
         let tint = NSColor(row.contentType.tint)
         badgeView.textColor = tint
         badgeView.backgroundColor = tint.withAlphaComponent(0.15)
 
         // Badge text is visually uppercased; expose the readable title instead.
-        badgeView.setAccessibilityLabel(row.contentType.displayTitle)
+        badgeView.setAccessibilityLabel(row.classificationTitle)
 
         // Pinned state
         pinIndicator.isHidden = !row.isPinned

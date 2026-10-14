@@ -511,6 +511,7 @@ struct DetectionRulesSettingsTab: View {
                 let detectorConfiguration = DetectorConfigurationStore.load()
                 let extractContent = UserDefaults.standard.bool(forKey: Defaults.extractContent)
                 let skipAPIKeys = UserDefaults.standard.bool(forKey: Defaults.skipAPIKeys)
+                let extractionConfiguration = ContentExtractionConfiguration.load()
 
                 let total = try database.countPrimaryEntries()
                 DispatchQueue.main.async {
@@ -520,7 +521,7 @@ struct DetectionRulesSettingsTab: View {
                 // Walk the library in keyset-paged chunks with one write
                 // transaction per page, so a 100k-entry library never has to
                 // fit (with its rebuilt children) in memory at once.
-                let pageSize = 500
+                let pageSize = extractContent ? extractionConfiguration.reparsePageSize : 500
                 var cursor: DatabaseManager.PrimaryEntryCursor? = nil
                 var processed = 0
                 var totalUpdated = 0
@@ -541,7 +542,8 @@ struct DetectionRulesSettingsTab: View {
                         guard entry.contentType != .image && entry.contentType != .screenshot else { continue }
                         parentIDs.append(entry.id)
 
-                        let output = detector.detect(in: entry.content, configuration: detectorConfiguration)
+                        let output = detector.detect(in: entry.content, configuration: detectorConfiguration,
+                                                     extractionConfiguration: extractionConfiguration, skipAPIKeysForExtraction: skipAPIKeys)
                         if output.primaryType != entry.contentType || output.metadataJSON != entry.metadata {
                             updates.append(
                                 DatabaseManager.ReclassificationUpdate(
@@ -561,13 +563,21 @@ struct DetectionRulesSettingsTab: View {
                                         timestamp: entry.timestamp,
                                         sourceApp: entry.sourceApp,
                                         metadata: item.metadataJSON,
-                                        parentEntryId: entry.id
+                                        parentEntryId: entry.id,
+                                        cloudSyncAllowed: entry.cloudSyncAllowed,
+                                        receivedViaTailnet: entry.receivedViaTailnet
                                     )
                                 )
                             }
                         }
                     }
 
+                    guard ContentExtractionConfiguration.load() == extractionConfiguration,
+                          UserDefaults.standard.bool(forKey: Defaults.extractContent) == extractContent,
+                          UserDefaults.standard.bool(forKey: Defaults.skipAPIKeys) == skipAPIKeys,
+                          DetectorConfigurationStore.load() == detectorConfiguration else {
+                        throw ContentExtractionConfiguration.ConfigurationError.changedDuringReparse
+                    }
                     let result = try database.applyReclassificationChunk(
                         updates: updates,
                         parentIDs: parentIDs,

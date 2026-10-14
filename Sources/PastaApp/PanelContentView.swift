@@ -30,6 +30,7 @@ struct PanelContentView: View {
     var urlDomainFilter: String? { filterSelection?.urlDomain }
     var sourceAppFilter: String { filterSelection?.sourceApp ?? "" }
     var pinnedOnlyFilter: Bool { filterSelection?.isPinnedOnly ?? false }
+    var mixedOnlyFilter: Bool { filterSelection == .mixed }
 
     @State var selectedEntryID: UUID? = nil
     @State var selectedEntryIDs: Set<UUID> = []
@@ -59,6 +60,8 @@ struct PanelContentView: View {
     @State var preloadedSourceAppCounts: [String: Int]? = nil
     @State var preloadedDomainCounts: [String: Int]? = nil
     @State var preloadedPinnedCount: Int? = nil
+    @State var preloadedMixedCount: Int? = nil
+    @State var preloadedMixedEntries: [ClipboardEntry]? = nil
     @State var preloadTask: Task<Void, Never>? = nil
     @State var filterTask: Task<Void, Never>? = nil
     @State var searchTask: Task<Void, Never>? = nil
@@ -77,7 +80,7 @@ struct PanelContentView: View {
             contentTypeFilter != nil ||
             urlDomainFilter != nil ||
             !sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            pinnedOnlyFilter
+            pinnedOnlyFilter || mixedOnlyFilter
     }
 
     /// Content types that have at least one entry in the current history,
@@ -161,6 +164,7 @@ struct PanelContentView: View {
                     sourceAppCounts: preloadedSourceAppCounts,
                     domainCounts: preloadedDomainCounts,
                     pinnedCount: preloadedPinnedCount,
+                    mixedCount: preloadedMixedCount,
                     selection: $filterSelection
                 )
                 .frame(width: widths.sidebar)

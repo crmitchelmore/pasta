@@ -29,6 +29,13 @@ public struct ContentTypeMask: OptionSet, Hashable, Sendable, Codable, DatabaseV
     public static let envVarBlock = ContentTypeMask(rawValue: 1 << 9)
     public static let filePath = ContentTypeMask(rawValue: 1 << 10)
     public static let shellCommand = ContentTypeMask(rawValue: 1 << 11)
+    public static let mixed = ContentTypeMask(rawValue: 1 << 12)
+    public static let multipleItems = ContentTypeMask(rawValue: 1 << 13)
+    public static let color = ContentTypeMask(rawValue: 1 << 14)
+    public static let macAddress = ContentTypeMask(rawValue: 1 << 15)
+    public static let creditCard = ContentTypeMask(rawValue: 1 << 16)
+    public static let iban = ContentTypeMask(rawValue: 1 << 17)
+    public static let code = ContentTypeMask(rawValue: 1 << 18)
 
     /// The bit for `type`, or `nil` when the type is not one that metadata can
     /// carry (e.g. `.text`, `.image`).
@@ -46,6 +53,11 @@ public struct ContentTypeMask: OptionSet, Hashable, Sendable, Codable, DatabaseV
         case .envVarBlock: self = .envVarBlock
         case .filePath: self = .filePath
         case .shellCommand: self = .shellCommand
+        case .color: self = .color
+        case .macAddress: self = .macAddress
+        case .creditCard: self = .creditCard
+        case .iban: self = .iban
+        case .code: self = .code
         default: return nil
         }
     }

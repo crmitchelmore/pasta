@@ -2,9 +2,17 @@ import SwiftUI
 import PastaCore
 
 struct EntryDetailView: View {
+    private struct DetectedItemsRequest: Equatable {
+        let metadata: String?
+        let limit: Int
+    }
+
     let entry: ClipboardEntry
     @State private var showCopiedFeedback = false
     @State private var showShareSheet = false
+    @State private var detectedItems: [MetadataParser.ExtractedValue] = []
+    @State private var detectedItemLimit = 100
+    @State private var hasMoreDetectedItems = false
 
     var body: some View {
         ScrollView {
@@ -19,7 +27,7 @@ struct EntryDetailView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(entry.contentType.displayName)
+                        Text(entry.isMixedContent ? "Mixed \u{00b7} \(entry.contentType.displayName)" : entry.contentType.displayName)
                             .font(.headline)
                         Text(entry.timestamp, style: .date)
                             .font(.subheadline)
@@ -37,6 +45,31 @@ struct EntryDetailView: View {
                 }
 
                 Divider()
+
+                if !detectedItems.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Detected Items")
+                            .font(.headline)
+                        ForEach(detectedItems) { item in
+                            HStack {
+                                Text(item.displayValue)
+                                    .font(.callout)
+                                    .textSelection(.enabled)
+                                    .lineLimit(3)
+                                Spacer()
+                                Button {
+                                    copyToClipboard(item.value)
+                                } label: {
+                                    Image(systemName: "doc.on.doc")
+                                }
+                                .accessibilityLabel("Copy \(item.type.displayName)")
+                            }
+                        }
+                        if hasMoreDetectedItems {
+                            Button("Show 100 more") { detectedItemLimit += 100 }
+                        }
+                    }
+                }
 
                 // Content
                 contentView
@@ -65,6 +98,16 @@ struct EntryDetailView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: showCopiedFeedback)
+        .task(id: DetectedItemsRequest(metadata: entry.metadata, limit: detectedItemLimit)) {
+            let metadata = entry.metadata
+            let limit = detectedItemLimit
+            let items = await Task.detached(priority: .utility) {
+                MetadataParser.extractAllValues(from: metadata, limit: limit + 1, content: entry.content)
+            }.value
+            guard !Task.isCancelled else { return }
+            detectedItems = Array(items.prefix(limit))
+            hasMoreDetectedItems = items.count > limit
+        }
     }
 
     // MARK: - Content View
@@ -139,8 +182,8 @@ struct EntryDetailView: View {
 
     // MARK: - Actions
 
-    private func copyToClipboard() {
-        UIPasteboard.general.string = entry.content
+    private func copyToClipboard(_ value: String? = nil) {
+        UIPasteboard.general.string = value ?? entry.content
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
 

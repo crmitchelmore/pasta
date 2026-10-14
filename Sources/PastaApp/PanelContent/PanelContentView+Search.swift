@@ -20,6 +20,8 @@ extension PanelContentView {
         var sourceAppCounts: [String: Int]
         var domainCounts: [String: Int]
         var pinnedCount: Int
+        var mixedCount: Int
+        var mixedEntries: [ClipboardEntry]
     }
 
     func schedulePreload(for entries: [ClipboardEntry]) {
@@ -50,6 +52,8 @@ extension PanelContentView {
                 var sourceAppCounts: [String: Int] = [:]
                 var domainCounts: [String: Int] = [:]
                 var pinnedCount = 0
+                var mixedCount = 0
+                var mixedEntries: [ClipboardEntry] = []
 
                 let extractableTypes = MetadataParser.extractableTypes
                 var buckets: [ContentType: [ClipboardEntry]] = [:]
@@ -64,6 +68,10 @@ extension PanelContentView {
                     guard !Task.isCancelled else { return nil }
 
                     counts[entry.contentType, default: 0] += 1
+                    if entry.isMixedContent {
+                        mixedCount += 1
+                        if mixedEntries.count < Preload.limit { mixedEntries.append(entry) }
+                    }
                     if entry.isPinned { pinnedCount += 1 }
                     let app = entry.sourceApp ?? "Unknown"
                     sourceAppCounts[app, default: 0] += 1
@@ -112,7 +120,9 @@ extension PanelContentView {
                     effectiveTypeCounts: counts,
                     sourceAppCounts: SourceAppDisplay.groupedCounts(sourceAppCounts),
                     domainCounts: domainCounts,
-                    pinnedCount: pinnedCount
+                    pinnedCount: pinnedCount,
+                    mixedCount: mixedCount,
+                    mixedEntries: mixedEntries
                 )
             }
 
@@ -124,6 +134,8 @@ extension PanelContentView {
                 preloadedSourceAppCounts = result.sourceAppCounts
                 preloadedDomainCounts = result.domainCounts
                 preloadedPinnedCount = result.pinnedCount
+                preloadedMixedCount = result.mixedCount
+                preloadedMixedEntries = result.mixedEntries
 
                 // Update display from fresh cache if applicable (resolves race with asyncFilterEntries)
                 if let cached = preloadedEntriesForCurrentFilters() {
@@ -140,7 +152,7 @@ extension PanelContentView {
         guard urlDomainFilter == nil else { return nil }
         guard sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         guard !pinnedOnlyFilter else { return nil }
-        return preloadedEntriesByType[contentTypeFilter]
+        return mixedOnlyFilter ? preloadedMixedEntries : preloadedEntriesByType[contentTypeFilter]
     }
 
     func triggerSearchUpdate() {
@@ -165,9 +177,13 @@ extension PanelContentView {
         sourceFilter: String,
         urlDomainFilter: String?,
         pinnedOnly: Bool,
-        limit: Int
+        limit: Int,
+        mixedOnly: Bool = false
     ) -> [ClipboardEntry] {
         var out = input
+        if mixedOnly {
+            out = out.filter(\.isMixedContent)
+        }
 
         if pinnedOnly {
             out = out.filter { $0.isPinned }
@@ -204,6 +220,7 @@ extension PanelContentView {
         let srcFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines)
         let domainFilter = urlDomainFilter
         let pinnedOnly = pinnedOnlyFilter
+        let mixedOnly = mixedOnlyFilter
         let limit = Preload.limit
 
         filterTask = Task {
@@ -214,7 +231,8 @@ extension PanelContentView {
                     sourceFilter: srcFilter,
                     urlDomainFilter: domainFilter,
                     pinnedOnly: pinnedOnly,
-                    limit: limit
+                    limit: limit,
+                    mixedOnly: mixedOnly
                 )
             }.value
 
@@ -234,6 +252,7 @@ extension PanelContentView {
         let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines)
         let domainFilter = urlDomainFilter
         let pinnedOnly = pinnedOnlyFilter
+        let mixedOnly = mixedOnlyFilter
         let limit = Preload.limit
         let searchContentType: ContentType?
         if let typeFilter, MetadataParser.extractableTypes.contains(typeFilter) {
@@ -251,7 +270,8 @@ extension PanelContentView {
                         query: query,
                         contentType: searchContentType,
                         limit: Preload.limit,
-                        pinnedOnly: pinnedOnly
+                        pinnedOnly: pinnedOnly,
+                        mixedOnly: mixedOnly
                     )
                     guard !Task.isCancelled else { return [] }
                     return Self.filterEntries(

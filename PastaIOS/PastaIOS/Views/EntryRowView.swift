@@ -20,7 +20,7 @@ struct EntryRowView: View {
                     .foregroundStyle(.primary)
 
                 HStack(spacing: 6) {
-                    Text(entry.contentType.displayName)
+                    Text(entry.isMixedContent ? "Mixed \u{00b7} \(entry.contentType.displayName)" : entry.contentType.displayName)
                         .font(.caption2)
                         .fontWeight(.medium)
                         .padding(.horizontal, 6)

@@ -137,6 +137,17 @@ public struct SearchBarView: View {
 
             // Active content-type filter chip (also visible to confirm
             // selections made via the ⌘P picker or sidebar).
+            if filterSelection == .mixed {
+                Button {
+                    withAnimation(chromeAnimation) { filterSelection = .all }
+                } label: {
+                    Label("Mixed", systemImage: "xmark.circle.fill")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help("Clear Mixed filter")
+                .padding(.trailing, PastaTheme.Spacing.md)
+            }
             if let activeType = filterSelection?.contentType {
                 ContentTypeFilterChip.activeDismissable(type: activeType, onClear: {
                     withAnimation(chromeAnimation) {

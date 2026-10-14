@@ -100,6 +100,7 @@ struct ClipboardSettingsTab: View {
     @Binding var showPinnedSectionInQuickSearch: Bool
 
     @State private var multiCopyPreset: MultiCopyJoinSeparatorPreset = .newline
+    @AppStorage(ContentExtractionConfiguration.defaultsKey) private var maximumExtractedItems = ContentExtractionConfiguration.defaultMaximum
 
     var body: some View {
         Form {
@@ -132,8 +133,25 @@ struct ClipboardSettingsTab: View {
             }
 
             Section {
-                Toggle("Extract emails, URLs, and more", isOn: $extractContent)
-                Text("When enabled, emails, URLs, API keys, and other items found within copied text are also saved as separate entries for easy searching.")
+                Toggle("Save detected items separately", isOn: $extractContent)
+                Text("Extract supported values and snippets from any text classification, including code and mixed content. The original copy is preserved, except for legacy environment-block splitting.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("Maximum extracted entries per copy", selection: $maximumExtractedItems) {
+                    ForEach([25, 100, 250, 500, 1_000], id: \.self) { limit in
+                        Text(limit.formatted()).tag(limit)
+                    }
+                    Text("Save all detected items").tag(0)
+                }
+                .pickerStyle(.menu)
+                .disabled(!extractContent)
+
+                if maximumExtractedItems == 0 {
+                    Label("Save all can create thousands of history entries from one copy.", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.callout.weight(.semibold))
+                }
+                Text("Higher limits use more disk space, can slow capture and history rebuilds, and increase sync traffic when enabled. Extracted entries count toward the history retention limit and can displace older items. Even Save all analyzes only the first 30,000 characters. Legacy environment-block splitting is not affected. Changes apply to new copies and future reclassification; use Settings \u{2192} Detection \u{2192} Reparse History for existing entries.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {

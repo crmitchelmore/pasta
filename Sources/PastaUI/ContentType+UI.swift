@@ -1,6 +1,14 @@
 import PastaCore
 import SwiftUI
 
+extension ClipboardEntry {
+    public var classificationDisplayTitle: String {
+        if isMixedContent { return "Mixed \u{00b7} \(contentType.displayTitle)" }
+        if hasMultipleDetectedItems { return "Multiple items \u{00b7} \(contentType.displayTitle)" }
+        return contentType.displayTitle
+    }
+}
+
 extension ContentType {
     var systemImageName: String {
         switch self {

@@ -14,9 +14,8 @@ extension ContentTypeDetector {
     }
 
     /// Extracts individual items from mixed content.
-    /// Only extracts when content is prose/text with multiple detectable items embedded.
+    /// The primary classification must not suppress embedded values.
     func makeExtractedItems(
-        primaryType: ContentType,
         analysisText: String,
         emails: [EmailDetector.Detection],
         urls: [URLDetector.Detection],
@@ -25,97 +24,56 @@ extension ContentTypeDetector {
         ipAddresses: [IPAddressDetector.Detection],
         uuids: [UUIDDetector.Detection],
         paths: [FilePathDetector.Detection],
-        customDetections: [CustomDetection]
+        customDetections: [CustomDetection],
+        additionalItems: [SplitEntry]
     ) -> [SplitEntry] {
-        // Only extract from prose or text content
-        guard primaryType == .prose || primaryType == .text else {
-            return []
-        }
-
-        // Minimum content length to consider for extraction (avoid extracting from short content)
-        guard analysisText.count >= 50 else {
-            return []
-        }
-
         // Count total extractable items
-        let totalItems = emails.count + urls.count + apiKeys.count + phoneNumbers.count + ipAddresses.count + uuids.count + paths.count + customDetections.count
+        let totalItems = emails.count + urls.count + apiKeys.count + phoneNumbers.count + ipAddresses.count + uuids.count + paths.count + customDetections.count + additionalItems.count
 
         // Only extract if there are items to extract (and content isn't just one item)
         guard totalItems > 0 else {
             return []
         }
 
-        // If the whole content IS a single item, don't extract (it's already the primary type)
-        // This check ensures we don't duplicate when e.g. content is just "test@example.com"
-        let trimmedLength = analysisText.trimmingCharacters(in: .whitespacesAndNewlines).count
-        if totalItems == 1 {
-            // Check if single item spans most of the content
-            let singleItemLength: Int
-            if let email = emails.first {
-                singleItemLength = email.email.count
-            } else if let url = urls.first {
-                singleItemLength = url.url.count
-            } else if let apiKey = apiKeys.first {
-                singleItemLength = apiKey.key.count
-            } else if let phone = phoneNumbers.first {
-                singleItemLength = phone.phoneNumber.count
-            } else if let ip = ipAddresses.first {
-                singleItemLength = ip.address.count
-            } else if let uuid = uuids.first {
-                singleItemLength = uuid.uuid.count
-            } else if let path = paths.first {
-                singleItemLength = path.path.count
-            } else {
-                singleItemLength = 0
-            }
-
-            // If the single item is >80% of content, don't extract (it IS the content)
-            if singleItemLength > 0 && Double(singleItemLength) / Double(trimmedLength) > 0.8 {
-                return []
-            }
-        }
-
         var items: [SplitEntry] = []
-        let maxItems = 20 // Cap extraction to avoid excessive entries
 
         // Extract emails
-        for email in emails.prefix(maxItems - items.count) {
+        for email in emails {
             let meta = jsonString(["email": email.email, "confidence": email.confidence])
             items.append(SplitEntry(content: email.email, contentType: .email, metadataJSON: meta))
         }
 
         // Extract URLs
-        for url in urls.prefix(maxItems - items.count) {
+        for url in urls {
             let meta = jsonString(["url": url.url, "domain": url.domain, "category": url.category, "confidence": url.confidence])
             items.append(SplitEntry(content: url.url, contentType: .url, metadataJSON: meta))
         }
 
         // Extract API keys (high value)
-        for apiKey in apiKeys.prefix(maxItems - items.count) where apiKey.confidence >= 0.7 {
+        for apiKey in apiKeys where apiKey.confidence >= 0.7 {
             let meta = jsonString(["provider": apiKey.provider, "confidence": apiKey.confidence, "isLikelyLive": apiKey.isLikelyLive])
             items.append(SplitEntry(content: apiKey.key, contentType: .apiKey, metadataJSON: meta))
         }
 
         // Extract phone numbers
-        for phone in phoneNumbers.prefix(maxItems - items.count) {
+        for phone in phoneNumbers {
             let meta = jsonString(["number": phone.phoneNumber, "confidence": phone.confidence])
             items.append(SplitEntry(content: phone.phoneNumber, contentType: .phoneNumber, metadataJSON: meta))
         }
 
-        // Extract IP addresses (only public, high confidence)
-        for ip in ipAddresses.prefix(maxItems - items.count) where !ip.isPrivate && !ip.isLoopback && ip.confidence >= 0.8 {
+        // Include internal addresses accepted by the active detector rules.
+        for ip in ipAddresses {
             let meta = jsonString(["address": ip.address, "version": ip.version, "confidence": ip.confidence])
             items.append(SplitEntry(content: ip.address, contentType: .ipAddress, metadataJSON: meta))
         }
 
-        // Extract UUIDs (only high confidence)
-        for uuid in uuids.prefix(maxItems - items.count) where uuid.confidence >= 0.9 {
+        for uuid in uuids {
             let meta = jsonString(["uuid": uuid.uuid, "variant": uuid.variant, "confidence": uuid.confidence])
             items.append(SplitEntry(content: uuid.uuid, contentType: .uuid, metadataJSON: meta))
         }
 
         // Extract file paths
-        for path in paths.prefix(maxItems - items.count) {
+        for path in paths where !urls.contains(where: { $0.url.contains(path.path) }) {
             var pathMeta: [String: Any] = [
                 "path": path.path,
                 "filename": path.filename,
@@ -132,7 +90,7 @@ extension ContentTypeDetector {
             items.append(SplitEntry(content: path.path, contentType: .filePath, metadataJSON: meta))
         }
 
-        for detection in customDetections.prefix(maxItems - items.count) {
+        for detection in customDetections {
             let meta = jsonString([
                 "name": detection.name,
                 "value": detection.value,
@@ -147,6 +105,73 @@ extension ContentTypeDetector {
             )
         }
 
+        items.append(contentsOf: additionalItems)
+        let trimmed = analysisText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let containers: Set<ContentType> = [.text, .code, .shellCommand, .envVar, .envVarBlock]
+        guard !items.contains(where: { $0.content == trimmed && !containers.contains($0.contentType) }) else { return [] }
+        var seen: Set<String> = []
+        return items.filter {
+            $0.content != trimmed && seen.insert("\($0.contentType.rawValue):\($0.content)").inserted
+        }
+    }
+
+    func makeAdditionalExtractedItems(analysisText: String, metadataJSON: String?) -> [SplitEntry] {
+        guard let metadataJSON,
+              let object = try? JSONSerialization.jsonObject(with: Data(metadataJSON.utf8)) as? [String: Any] else { return [] }
+        let fields: [ContentType: (key: String, field: String)] = [
+            .hash: ("hashes", "hash"), .jwt: ("jwt", "token"),
+            .shellCommand: ("shellCommands", "command"), .code: ("code", "value"),
+            .color: ("colors", "raw"), .macAddress: ("macAddresses", "raw"),
+            .iban: ("ibans", "raw"), .creditCard: ("creditCards", "masked")
+        ]
+        var recordsByType: [ContentType: [String: [[String: Any]]]] = [:]
+        for (type, field) in fields {
+            for record in object[field.key] as? [[String: Any]] ?? [] {
+                let value: String?
+                if type == .code || type == .creditCard,
+                   let location = record["location"] as? Int, let length = record["length"] as? Int,
+                   let range = Range(NSRange(location: location, length: length), in: analysisText) {
+                    value = String(analysisText[range])
+                } else {
+                    value = record[field.field] as? String
+                }
+                if let value {
+                    recordsByType[type, default: [:]][value, default: []].append(record)
+                }
+            }
+        }
+        let env = object["env"] as? [String: Any]
+        for record in env?["vars"] as? [[String: Any]] ?? [] {
+            if let value = record["raw"] as? String {
+                recordsByType[.envVar, default: [:]][value, default: []].append(record)
+            }
+        }
+        let values = MetadataParser.extractAllValues(from: metadataJSON, content: analysisText)
+        var items: [SplitEntry] = []
+        for value in values {
+            guard var records = recordsByType[value.type]?[value.value] else { continue }
+            let metadata: [String: Any]
+            if value.type == .envVar {
+                metadata = ["env": ["isBlock": false, "vars": records]]
+            } else if let field = fields[value.type] {
+                if value.type == .creditCard || value.type == .code {
+                    records = records.map {
+                        var record = $0
+                        record["location"] = 0
+                        record["length"] = value.value.utf16.count
+                        return record
+                    }
+                }
+                metadata = [field.key: records]
+            } else {
+                continue
+            }
+            items.append(SplitEntry(content: value.value, contentType: value.type, metadataJSON: jsonString(metadata)))
+        }
+        if let env, env["isBlock"] as? Bool == true {
+            let assignments = values.filter { $0.type == .envVar }.map(\.value).joined(separator: "\n")
+            items.append(SplitEntry(content: assignments, contentType: .envVarBlock, metadataJSON: jsonString(["env": env])))
+        }
         return items
     }
 
@@ -268,7 +293,10 @@ extension ContentTypeDetector {
         if let env {
             meta["env"] = [
                 "isBlock": env.isBlock,
-                "vars": env.detections.map { ["key": $0.key, "value": $0.value, "isExported": $0.isExported, "confidence": $0.confidence] }
+                "vars": env.detections.map { [
+                    "key": $0.key, "value": $0.value, "isExported": $0.isExported, "confidence": $0.confidence,
+                    "raw": $0.raw ?? ($0.isExported ? "export " : "") + "\($0.key)=\($0.value)"
+                ] as [String: Any] }
             ]
         }
 
@@ -294,7 +322,16 @@ extension ContentTypeDetector {
         }
 
         if !code.isEmpty {
-            meta["code"] = code.map { ["language": $0.language.rawValue, "confidence": $0.confidence] }
+            meta["code"] = code.map {
+                var item: [String: Any] = ["language": $0.language.rawValue, "confidence": $0.confidence]
+                if $0.code != analysisText.trimmingCharacters(in: .whitespacesAndNewlines),
+                   let range = analysisText.range(of: $0.code) {
+                    let span = NSRange(range, in: analysisText)
+                    item["location"] = span.location
+                    item["length"] = span.length
+                }
+                return item
+            }
         }
 
         if !shellCommands.isEmpty {
@@ -324,12 +361,18 @@ extension ContentTypeDetector {
         if !creditCards.isEmpty {
             // Important: only store masked form + last4, NOT the full PAN.
             meta["creditCards"] = creditCards.map { d in
-                [
+                var item: [String: Any] = [
                     "masked": d.maskedDisplay,
                     "last4": d.last4,
                     "brand": d.brand,
                     "confidence": d.confidence
-                ] as [String: Any]
+                ]
+                if let range = analysisText.range(of: d.raw) {
+                    let span = NSRange(range, in: analysisText)
+                    item["location"] = span.location
+                    item["length"] = span.length
+                }
+                return item
             }
         }
 
@@ -337,6 +380,7 @@ extension ContentTypeDetector {
             meta["ibans"] = ibans.map { d in
                 [
                     "iban": d.normalized,
+                    "raw": d.raw,
                     "country": d.countryCode,
                     "confidence": d.confidence
                 ] as [String: Any]

@@ -28,7 +28,7 @@ struct QuickSearchPreviewPanel: View {
                     .foregroundStyle(entry.contentType.tint)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.contentType.displayTitle)
+                    Text(entry.classificationDisplayTitle)
                         .font(.headline)
 
                     HStack(spacing: 6) {
@@ -71,6 +71,7 @@ struct QuickSearchPreviewPanel: View {
                         .padding(16)
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
+                        ExtractedItemsSection(entry: entry)
                         Text(displayedContent)
                             .font(.system(.body, design: .monospaced))
                             .textSelection(.enabled)

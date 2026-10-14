@@ -255,6 +255,46 @@ extension DatabaseManager {
             }
         }
 
+        migrator.registerMigration("backfillContentComposition") { db in
+            var lastRowID: Int64 = 0
+            while true {
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT rowid, content, metadata FROM clipboard_entries
+                    WHERE rowid > ? AND parentEntryId IS NULL AND metadata IS NOT NULL
+                      AND contentType NOT IN ('image', 'screenshot', 'filePath')
+                    ORDER BY rowid LIMIT 100
+                    """, arguments: [lastRowID])
+                guard !rows.isEmpty else { break }
+                for row in rows {
+                    lastRowID = row["rowid"]
+                    let existing: String? = row["metadata"]
+                    let updated = try ContentComposition.backfilledMetadata(existing, content: row["content"])
+                    guard updated != existing else { continue }
+                    try db.execute(sql: """
+                        UPDATE clipboard_entries SET metadata = ?, contentTypeMask = ?, isSynced = 0 WHERE rowid = ?
+                        """, arguments: [updated, MetadataParser.typeMask(for: updated).rawValue, lastRowID])
+                }
+            }
+        }
+
+        migrator.registerMigration("backfillExpandedExtractionTypes") { db in
+            var lastRowID: Int64 = 0
+            while true {
+                let rows = try Row.fetchAll(db, sql: """
+                    SELECT rowid, metadata, contentTypeMask FROM clipboard_entries
+                    WHERE rowid > ? AND metadata IS NOT NULL ORDER BY rowid LIMIT 100
+                    """, arguments: [lastRowID])
+                guard !rows.isEmpty else { break }
+                for row in rows {
+                    lastRowID = row["rowid"]
+                    let mask = MetadataParser.typeMask(for: row["metadata"]).rawValue
+                    guard mask != row["contentTypeMask"] as Int else { continue }
+                    try db.execute(sql: "UPDATE clipboard_entries SET contentTypeMask = ? WHERE rowid = ?",
+                                   arguments: [mask, lastRowID])
+                }
+            }
+        }
+
         return migrator
     }
 }
