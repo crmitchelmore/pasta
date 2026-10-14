@@ -98,6 +98,8 @@ final class ContentTypeMaskPerformanceTests: XCTestCase {
             .ipAddress: "\"ipAddresses\"", .uuid: "\"uuids\"", .hash: "\"hashes\"",
             .apiKey: "\"apiKeys\"", .jwt: "\"jwt\"", .envVar: "\"env\"", .envVarBlock: "\"env\"",
             .filePath: "\"filePaths\"", .shellCommand: "\"shellCommands\"",
+            .color: "\"colors\"", .macAddress: "\"macAddresses\"", .creditCard: "\"creditCards\"",
+            .iban: "\"ibans\"", .code: "\"code\"",
         ]
         var counts: [ContentType: Int] = [:]
 

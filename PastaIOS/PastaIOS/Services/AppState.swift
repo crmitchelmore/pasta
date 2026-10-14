@@ -277,7 +277,7 @@ final class AppState: ObservableObject {
         entries = try database.fetchAll()
     }
 
-    func searchEntries(query: String, contentType: ContentType? = nil) async -> [ClipboardEntry] {
+    func searchEntries(query: String, contentType: ContentType? = nil, mixedOnly: Bool = false) async -> [ClipboardEntry] {
         guard let database else { return [] }
         // Capture the thread-safe database on MainActor, then do the read off
         // the UI executor. Calling a synchronous MainActor method from a
@@ -286,7 +286,7 @@ final class AppState: ObservableObject {
         return await withCancellableDetachedTask(priority: .userInitiated) {
             guard !Task.isCancelled else { return [] }
             do {
-                return try database.searchFTS(query: query, contentType: contentType, limit: 200)
+                return try database.searchFTS(query: query, contentType: contentType, limit: 200, mixedOnly: mixedOnly)
             } catch {
                 logger.error("Search failed: \(error.localizedDescription)")
                 return []

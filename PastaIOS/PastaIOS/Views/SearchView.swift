@@ -6,6 +6,7 @@ struct SearchView: View {
     @EnvironmentObject var appState: AppState
     @State private var searchText = ""
     @State private var selectedFilter: ContentType?
+    @State private var mixedOnly = false
     @State private var results: [ClipboardEntry] = []
     @State private var searchTask: Task<Void, Never>?
 
@@ -40,6 +41,9 @@ struct SearchView: View {
         .onChange(of: selectedFilter) { _, _ in
             performSearch(query: searchText)
         }
+        .onChange(of: mixedOnly) { _, _ in
+            performSearch(query: searchText)
+        }
         .onAppear {
             performSearch(query: searchText)
         }
@@ -55,11 +59,16 @@ struct SearchView: View {
             HStack(spacing: 8) {
                 FilterChip(
                     title: "All Types",
-                    isSelected: selectedFilter == nil
+                    isSelected: selectedFilter == nil && !mixedOnly
                 ) {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         selectedFilter = nil
+                        mixedOnly = false
                     }
+                }
+                FilterChip(title: "Mixed", icon: "square.stack.3d.up", isSelected: mixedOnly) {
+                    selectedFilter = nil
+                    mixedOnly.toggle()
                 }
                 ForEach(availableTypes, id: \.self) { type in
                     FilterChip(
@@ -70,6 +79,7 @@ struct SearchView: View {
                     ) {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             selectedFilter = (selectedFilter == type) ? nil : type
+                            mixedOnly = false
                         }
                     }
                 }
@@ -136,11 +146,12 @@ struct SearchView: View {
         }
 
         let filter = selectedFilter
+        let mixed = mixedOnly
         searchTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 100_000_000) // 100ms debounce
             guard !Task.isCancelled else { return }
 
-            let searchResults = await appState.searchEntries(query: trimmed, contentType: filter)
+            let searchResults = await appState.searchEntries(query: trimmed, contentType: filter, mixedOnly: mixed)
             guard !Task.isCancelled else { return }
             results = searchResults
         }

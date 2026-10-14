@@ -27,6 +27,46 @@ picker, independent credentials and modes. **Legacy classifiers (local rules)**
 is collapsed by default; expanding it exposes all existing strictness, regex,
 custom-detector and local-history-reparse controls without changing their values.
 Local detectors remain active for privacy checks, extraction and failure fallback.
+Embedded-item extraction is independent of the primary classification: code,
+JSON, prose and short lists can all retain individually searchable values after
+either provider reclassifies them. Single whole-value captures are not duplicated.
+Mixed is an additional locally derived composition classification, not a new
+primary type: rows/previews retain the original type and code/file paste behaviour.
+Text surrounding a detected value, or several detected value types, makes a
+capture Mixed. A list containing only emails is multiple-item content, not Mixed.
+The macOS sidebar and iOS Search include a Mixed filter; FTS applies it before
+the result limit. This works with both providers disabled and with separate-entry
+extraction disabled. Existing parent metadata is backfilled without changing its
+primary type, pins, content or sharing consent; changed metadata is pending sync.
+Backfill samples up to 1,000 historical values and marks sampled summaries;
+Settings → Detection's local history reparse rebuilds those summaries and children.
+Extraction covers email, URLs, phone numbers, IPv4/IPv6 (including internal
+addresses), UUIDs, hashes, API keys, JWTs, file paths, colors, MAC addresses,
+credit cards, IBANs, environment assignments/blocks, shell commands, fenced
+code snippets (including short snippets with recognized fence language hints)
+and custom detector matches. Whole-text prose/code classification
+does not invent sentence splitting or OCR. Native image/file handling is unchanged.
+Settings → Clipboard controls the maximum separately saved items per copy:
+25, 100 (default), 250, 500, 1,000, or **Save all detected items**. Save all
+still respects the 30,000-character analysis window and detector strictness.
+The setting is persisted under `pasta.maximumExtractedItems`; zero means all.
+API-key exclusions run before the cap so skipped keys do not consume slots.
+The UI warns about disk/database growth, slower capture/rebuilds, increased
+opt-in sync traffic and pressure on retention (older items can be displaced).
+New captures and both providers' reclassification snapshot the configured cap;
+stale model applications and reparses stop when settings change. Existing
+children change only on reclassification/reparse. Save-all reparses process
+one parent per transaction; finite caps budget roughly 10,000 children per page.
+Legacy env-block splitting remains unchanged and is outside the child limit.
+Additional detected values remain copyable through progressive disclosure.
+Card display stays masked; exact card values and code snippets are resolved
+from source ranges rather than duplicating them in their detector metadata.
+Extracted children inherit the parent's cloud-sharing and tailnet policy,
+including historical rebuilds.
+The preview reports the storage cap and the 30,000-character local analysis
+limit when applicable. The original clipboard content is never truncated.
+Decision models still classify the whole capture, not generate extracted strings;
+candidate-level AI validation is not enabled or required for Mixed/extraction.
 Decision models are recommended for context-aware classification, not advertised
 as having a measured universal accuracy advantage.
 

@@ -61,7 +61,7 @@ struct CopyableValueRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Click to copy: \(value)")
+        .help("Click to copy: \(type == .creditCard ? displayValue : value)")
     }
 
     @ViewBuilder

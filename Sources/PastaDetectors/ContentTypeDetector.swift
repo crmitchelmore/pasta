@@ -121,9 +121,10 @@ public struct ContentTypeDetector {
     /// passes, so an unclamped multi-MB paste costs seconds of CPU on the
     /// capture path. A generous prefix is more than enough to decide what a
     /// clipboard entry *is*; the entry itself still stores the full content.
-    static let maxAnalysisLength = 30_000
+    static let maxAnalysisLength = ContentComposition.analysisLimit
 
-    public func detect(in text: String, configuration: DetectorConfiguration = .default, primaryTypeOverride: ContentType? = nil) -> Output {
+    public func detect(in text: String, configuration: DetectorConfiguration = .default, primaryTypeOverride: ContentType? = nil,
+                       extractionConfiguration: ContentExtractionConfiguration = .default, skipAPIKeysForExtraction: Bool = false) -> Output {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return Output(primaryType: .unknown, confidence: 0.0)
@@ -200,7 +201,7 @@ public struct ContentTypeDetector {
         )
 
         let splitEntries = makeSplitEntries(envOutput: env)
-        let metadataJSON = buildMetadataJSON(
+        var metadataJSON = buildMetadataJSON(
             originalText: clamped,
             analysisText: analysisText,
             encoding: encodingDetections.first,
@@ -224,9 +225,7 @@ public struct ContentTypeDetector {
             customDetections: customDetections
         )
 
-        // Extract individual items from mixed content (only if content is "mixed" - i.e. prose/text with embedded items)
-        let extractedItems = makeExtractedItems(
-            primaryType: primaryTypeOverride ?? primary,
+        let detectedItems = makeExtractedItems(
             analysisText: analysisText,
             emails: emails,
             urls: urls,
@@ -235,15 +234,31 @@ public struct ContentTypeDetector {
             ipAddresses: ipAddresses,
             uuids: uuids,
             paths: paths,
-            customDetections: customDetections
+            customDetections: customDetections,
+            additionalItems: makeAdditionalExtractedItems(analysisText: analysisText, metadataJSON: metadataJSON)
         )
+
+        let eligibleItems = detectedItems.filter { !(skipAPIKeysForExtraction && $0.contentType == .apiKey) }
+        let savedItems = extractionConfiguration.limit(eligibleItems)
+        do {
+            metadataJSON = try ContentComposition.metadata(
+                metadataJSON,
+                content: analysisText,
+                values: detectedItems.map { (type: $0.contentType, value: $0.content) },
+                analysisTruncated: trimmed.count > Self.maxAnalysisLength,
+                extractionConfiguration: extractionConfiguration,
+                eligibleItemCount: eligibleItems.count
+            )
+        } catch {
+            PastaLogger.logError(error, logger: PastaLogger.clipboard, context: "Failed to build content composition")
+        }
 
         return Output(
             primaryType: primaryTypeOverride ?? primary,
             confidence: confidence,
             metadataJSON: metadataJSON,
             splitEntries: splitEntries,
-            extractedItems: extractedItems,
+            extractedItems: savedItems,
             customDetections: customDetections
         )
     }

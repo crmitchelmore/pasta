@@ -6,12 +6,14 @@ public struct EnvVarDetector {
         public var value: String
         public var isExported: Bool
         public var confidence: Double
+        public var raw: String?
 
-        public init(key: String, value: String, isExported: Bool, confidence: Double) {
+        public init(key: String, value: String, isExported: Bool, confidence: Double, raw: String? = nil) {
             self.key = key
             self.value = value
             self.isExported = isExported
             self.confidence = confidence
+            self.raw = raw
         }
     }
 
@@ -64,7 +66,7 @@ public struct EnvVarDetector {
         } else {
             confidence = isBlock ? 0.8 : 0.7
         }
-        let adjusted = detections.map { Detection(key: $0.key, value: $0.value, isExported: $0.isExported, confidence: confidence) }
+        let adjusted = detections.map { Detection(key: $0.key, value: $0.value, isExported: $0.isExported, confidence: confidence, raw: $0.raw) }
 
         return Output(detections: adjusted, isBlock: isBlock)
     }
@@ -86,7 +88,7 @@ public struct EnvVarDetector {
         guard isValidKey(keyPart) else { return nil }
         let value = parseValue(String(valuePart))
 
-        return Detection(key: keyPart, value: value, isExported: isExported, confidence: 0.95)
+        return Detection(key: keyPart, value: value, isExported: isExported, confidence: 0.95, raw: line)
     }
 
     private func isValidKey(_ key: String) -> Bool {

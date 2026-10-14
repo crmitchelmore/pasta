@@ -47,6 +47,7 @@ extension AppDelegate {
         let detectorConfiguration = DetectorConfigurationStore.load()
         let extractContent = UserDefaults.standard.bool(forKey: "pasta.extractContent")
         let skipAPIKeys = UserDefaults.standard.bool(forKey: "pasta.skipAPIKeys")
+        let extractionConfiguration = ContentExtractionConfiguration.load()
         let selectedConnections = connections
         let state = JevComparisonRunState(total: 0, destination: connections.compactMap { $0.configuration.endpointHost }.joined(separator: ", "),
                                           title: "Preparing classification", changesHistory: reclassify)
@@ -167,6 +168,7 @@ extension AppDelegate {
                         if Task.isCancelled { stopped = "Cancelled; unapplied entries retained."; break }
                         guard Self.isCurrentConnection(connection.configuration, apiKey: connection.apiKey),
                               DetectorConfigurationStore.load() == detectorConfiguration,
+                              ContentExtractionConfiguration.load() == extractionConfiguration,
                               UserDefaults.standard.bool(forKey: "pasta.extractContent") == extractContent,
                               UserDefaults.standard.bool(forKey: "pasta.skipAPIKeys") == skipAPIKeys else {
                             stopped = "Configuration changed; remaining entries retained."
@@ -178,7 +180,8 @@ extension AppDelegate {
                             let classification = JevClassification(category: category, rawChoice: row.jevChoice, confidence: row.confidence, modelVersion: row.jevModel)
                             let outcome = try await BackgroundService.shared.applyJevClassification(
                                 classification, to: snapshot, configuration: connection.configuration, apiKey: connection.apiKey,
-                                detectorConfiguration: detectorConfiguration, extractContent: extractContent, skipAPIKeys: skipAPIKeys
+                                detectorConfiguration: detectorConfiguration, extractContent: extractContent, skipAPIKeys: skipAPIKeys,
+                                extractionConfiguration: extractionConfiguration
                             )
                             switch outcome {
                             case .applied: applied += 1

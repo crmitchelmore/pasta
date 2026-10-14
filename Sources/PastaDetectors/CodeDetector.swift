@@ -24,11 +24,12 @@ public struct CodeDetector {
         out.reserveCapacity(candidates.count)
 
         for candidate in candidates {
-            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = candidate.code.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
             guard seen.insert(trimmed).inserted else { continue }
 
-            let (language, confidence) = classify(trimmed)
+            // Explicit fence languages identify short snippets that heuristics miss.
+            let (language, confidence) = candidate.language.map { ($0, 0.95) } ?? classify(trimmed)
             guard confidence >= 0.6 else { continue }
             out.append(Detection(code: trimmed, language: language, confidence: confidence))
         }
@@ -41,7 +42,7 @@ public struct CodeDetector {
         return try? NSRegularExpression(pattern: pattern, options: [])
     }()
 
-    private func extractCandidates(from text: String) -> [String] {
+    private func extractCandidates(from text: String) -> [(code: String, language: CodeLanguage?)] {
         // Prefer fenced code blocks when present.
         // ```lang
         // code
@@ -50,23 +51,29 @@ public struct CodeDetector {
         // backticks at all. Long prose without fences was paying ~2ms per call
         // for an FTS-style regex that found nothing.
         if !text.contains("```") {
-            return [text]
+            return [(text, nil)]
         }
         guard let regex = Self.fencedRegex else {
-            return [text]
+            return [(text, nil)]
         }
 
         let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
         let matches = regex.matches(in: text, options: [], range: nsRange)
-        guard !matches.isEmpty else { return [text] }
+        guard !matches.isEmpty else { return [(text, nil)] }
 
-        var blocks: [String] = []
+        var blocks: [(code: String, language: CodeLanguage?)] = []
         blocks.reserveCapacity(matches.count)
         for m in matches {
             guard m.numberOfRanges >= 3, let r = Range(m.range(at: 2), in: text) else { continue }
-            blocks.append(String(text[r]))
+            let hint = Range(m.range(at: 1), in: text).map { String(text[$0]).lowercased() }
+            let aliases: [String: CodeLanguage] = [
+                "js": .javaScript, "javascript": .javaScript, "ts": .typeScript, "typescript": .typeScript,
+                "py": .python, "sh": .shell, "bash": .shell, "zsh": .shell
+            ]
+            let language = hint.flatMap { aliases[$0] ?? CodeLanguage(rawValue: $0) }
+            blocks.append((String(text[r]), language == .unknown ? nil : language))
         }
-        return blocks.isEmpty ? [text] : blocks
+        return blocks.isEmpty ? [(text, nil)] : blocks
     }
 
     private func classify(_ code: String) -> (CodeLanguage, Double) {

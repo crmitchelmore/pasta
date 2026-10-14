@@ -169,9 +169,15 @@ final class LegacyDatabaseMigrationTests: XCTestCase {
         XCTAssertEqual(byID.count, rows.count, file: file, line: line)
         for row in rows {
             let stored = try XCTUnwrap(byID[row.id], "row \(row.content) missing after upgrade", file: file, line: line)
-            XCTAssertEqual(stored.contentTypeMask, row.expectedMask, "mask for \(row.content)", file: file, line: line)
+            XCTAssertEqual(stored.contentTypeMask.subtracting([.mixed, .multipleItems]), row.expectedMask, "mask for \(row.content)", file: file, line: line)
             XCTAssertEqual(stored.contentType, row.contentType, file: file, line: line)
-            XCTAssertEqual(stored.metadata, row.metadata, file: file, line: line)
+            if var metadata = e2eJSONDictionary(stored.metadata), metadata.removeValue(forKey: "composition") != nil {
+                XCTAssertEqual(NSDictionary(dictionary: metadata),
+                               NSDictionary(dictionary: e2eJSONDictionary(row.metadata) ?? [:]), file: file, line: line)
+                XCTAssertFalse(stored.isSynced, "new composition metadata must be pending sync", file: file, line: line)
+            } else {
+                XCTAssertEqual(stored.metadata, row.metadata, file: file, line: line)
+            }
             XCTAssertEqual(stored.timestamp.timeIntervalSince1970, row.timestamp.timeIntervalSince1970, accuracy: 0.001, file: file, line: line)
         }
 
@@ -187,8 +193,8 @@ final class LegacyDatabaseMigrationTests: XCTestCase {
         }
         XCTAssertEqual(mismatches, 0, "every backfilled mask must match the parser", file: file, line: line)
 
-        // Backfill must not have dirtied sync state.
-        XCTAssertEqual(try db.unsyncedCount(), 0, file: file, line: line)
+        let changedMetadataCount = byID.values.filter { e2eJSONDictionary($0.metadata)?["composition"] != nil }.count
+        XCTAssertEqual(try db.unsyncedCount(), changedMetadataCount, file: file, line: line)
 
         // The launch-time keyset walk covers the whole legacy library in order.
         var seen: [UUID] = []
@@ -257,10 +263,9 @@ final class LegacyDatabaseMigrationTests: XCTestCase {
         XCTAssertEqual(fetched.count, rows.count)
         XCTAssertTrue(fetched.allSatisfy { $0.parentEntryId == nil && !$0.isPinned })
         // assertUpgradedDatabaseWorks re-copied rows[0]: its copyCount changed,
-        // so that one row is pending upload again (the canonical record must
-        // carry the new count, pasta-109). Every other legacy row keeps the
-        // synced state the backfill gave it.
-        XCTAssertTrue(fetched.filter { $0.id != rows[0].id }.allSatisfy(\.isSynced), "backfillIsSynced marks pre-sync rows as synced")
+        // so that row is pending upload again. Rows with newly backfilled
+        // composition metadata are also pending; unchanged rows stay synced.
+        XCTAssertTrue(fetched.filter { $0.id != rows[0].id && e2eJSONDictionary($0.metadata)?["composition"] == nil }.allSatisfy(\.isSynced), "unchanged pre-sync rows remain synced")
         XCTAssertEqual(fetched.first { $0.id == rows[0].id }?.isSynced, false, "a re-copied legacy row must upload again with its new copyCount")
     }
 
