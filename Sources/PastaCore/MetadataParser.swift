@@ -351,7 +351,10 @@ extension ClipboardEntry {
     
     /// Get all extracted values of a specific type from this entry's metadata
     public func extractedValues(for type: ContentType) -> [MetadataParser.ExtractedValue] {
-        MetadataParser.extractValues(for: type, from: metadata, content: content)
+        // Only card and code snippets slice the content; other types never
+        // read it, so don't load a lazy history row's full text for them.
+        let usesContent = type == .creditCard || type == .code
+        return MetadataParser.extractValues(for: type, from: metadata, content: usesContent ? content : nil)
     }
     
     /// Get all extracted values from this entry's metadata

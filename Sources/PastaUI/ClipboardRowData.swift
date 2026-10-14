@@ -61,7 +61,13 @@ public struct ClipboardRowData: Equatable {
 
     public init(from entry: ClipboardEntry) {
         self.id = entry.id
-        let trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Rows show at most 300 characters, so trim the preview rather than
+        // loading a lazy entry's full text; only fall back to it when the
+        // preview is (nearly) all whitespace.
+        var trimmed = entry.previewContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        if entry.isPreviewContentTruncated, trimmed.prefix(300).count < 300 {
+            trimmed = entry.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         let baseText = trimmed.isEmpty ? "(empty)" : String(trimmed.prefix(300))
         // Credit-card primary entries should never show their full PAN in the row preview.
         if entry.contentType == .creditCard, !trimmed.isEmpty {
@@ -78,7 +84,7 @@ public struct ClipboardRowData: Equatable {
         self.sourceAppName = entry.sourceApp?.appDisplayName
         self.timestamp = entry.timestamp
         self.copyCount = entry.copyCount
-        self.isLarge = entry.content.utf8.count > 10 * 1024
+        self.isLarge = entry.contentByteCount > 10 * 1024
         self.isExtracted = entry.isExtracted
         self.parentEntryId = entry.parentEntryId
         self.isSynced = entry.isSynced
@@ -86,9 +92,9 @@ public struct ClipboardRowData: Equatable {
         self.isPinned = entry.isPinned
         self.imagePath = entry.imagePath
         self.imageSource = ClipboardImageSource(entry: entry)
-        // utf8.count is O(1) for native strings; `count` walks every grapheme,
-        // which is milliseconds per row for multi-MB entries.
-        self.contentLength = entry.content.utf8.count
+        // A byte count, not `count`: walking every grapheme is milliseconds
+        // per row for multi-MB entries.
+        self.contentLength = entry.contentByteCount
         self.sectionHeader = nil
     }
 

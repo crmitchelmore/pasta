@@ -30,10 +30,14 @@ public struct PreviewPanelView: View {
     public var body: some View {
         Group {
             if let entry {
-                let metadataIsLarge = isMetadataLarge(entry.metadata)
+                let metadataBytes = entry.metadataByteCount ?? 0
+                let metadataIsLarge = metadataBytes > Limits.maxMetadataRenderBytes
                 // Parse the metadata JSON once per body pass; every section below
-                // reads from this dictionary instead of re-parsing it.
-                let metadata = entry.metadata.flatMap { parseJSONDictionary($0) }
+                // reads from this dictionary instead of re-parsing it. Metadata
+                // past the parse limit is never parsed, so don't load it either.
+                let metadata = metadataBytes <= Limits.maxMetadataParseBytes
+                    ? entry.metadata.flatMap { parseJSONDictionary($0) }
+                    : nil
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         header(entry)
@@ -44,7 +48,8 @@ public struct PreviewPanelView: View {
                                 .textSelection(.enabled)
                         }
 
-                        if let decoded = decodedPreview(from: metadata), decoded != entry.content {
+                        if let decoded = decodedPreview(from: metadata),
+                           decoded.utf8.count != entry.contentByteCount || decoded != entry.content {
                             let decodedPreview = truncatedText(decoded, limit: Limits.inlineContentCharacters)
                             SectionBox(title: "Decoded") {
                                 MonospaceText(decodedPreview.text)
@@ -81,7 +86,7 @@ public struct PreviewPanelView: View {
                             } else if entry.contentType == .color, let swatch = colorSwatchPreview(from: metadata, entry: entry) {
                                 ColorSwatchPreview(swatch: swatch)
                             } else if entry.contentType == .code {
-                                let codePreview = truncatedText(entry.content, limit: Limits.inlineCodeCharacters)
+                                let codePreview = inlinePreview(entry, limit: Limits.inlineCodeCharacters)
                                 CodePreview(code: codePreview.text, language: detectedCodeLanguage(from: metadata))
                                 if codePreview.isTruncated {
                                     Text("Showing first \(Limits.inlineCodeCharacters.formatted()) characters for performance.")
@@ -89,7 +94,7 @@ public struct PreviewPanelView: View {
                                         .foregroundStyle(.secondary)
                                 }
                             } else {
-                                let contentPreview = truncatedText(entry.content, limit: Limits.inlineContentCharacters)
+                                let contentPreview = inlinePreview(entry, limit: Limits.inlineContentCharacters)
                                 Text(contentPreview.text)
                                     .textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -402,9 +407,11 @@ public struct PreviewPanelView: View {
         return truncatedText(prettyString, limit: Limits.maxMetadataRenderBytes).text
     }
 
-    private func isMetadataLarge(_ metadata: String?) -> Bool {
-        guard let metadata else { return false }
-        return metadata.utf8.count > Limits.maxMetadataRenderBytes
+    /// The leading `limit` characters of the entry's content, from its
+    /// preview so a lazy history row is never loaded just to be truncated.
+    private func inlinePreview(_ entry: ClipboardEntry, limit: Int) -> TruncatedText {
+        let preview = truncatedText(entry.previewContent, limit: limit)
+        return TruncatedText(text: preview.text, isTruncated: preview.isTruncated || entry.isPreviewContentTruncated)
     }
 
     private func truncatedText(_ text: String, limit: Int) -> TruncatedText {

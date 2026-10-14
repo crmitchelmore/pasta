@@ -103,7 +103,7 @@ struct QuickSearchPreviewPanel: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
         }
-        .onChange(of: entry.content, initial: true) { _, _ in
+        .onChange(of: ContentKey(entry: entry), initial: true) { _, _ in
             refreshDisplayedContent()
         }
     }
@@ -120,6 +120,15 @@ struct QuickSearchPreviewPanel: View {
         } else {
             displayedContent = content
             isContentTruncated = false
+        }
+    }
+
+    /// Changes when the entry's content does, without loading (or comparing)
+    /// a lazy row's full text on every body evaluation.
+    private struct ContentKey: Equatable {
+        let entry: ClipboardEntry
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.entry.id == rhs.entry.id && lhs.entry.hasSameContent(as: rhs.entry)
         }
     }
 }

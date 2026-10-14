@@ -15,7 +15,7 @@ extension DatabaseManager {
     /// loading its value. Checking it first stops the exact-equality test from
     /// reading and lower-casing every long matching entry, which doubled rank
     /// time when long entries matched. Older SQLite keeps the unguarded check.
-    fileprivate static let supportsOctetLength = sqlite3_libversion_number() >= 3_043_000
+    static let supportsOctetLength = sqlite3_libversion_number() >= 3_043_000
 
     /// Leading and trailing spaces that `TRIM` may strip from an otherwise
     /// exact-equal entry. Entries padded beyond this lose only the bonus.
