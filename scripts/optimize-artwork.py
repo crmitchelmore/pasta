@@ -2,7 +2,7 @@
 """Shrink committed artwork (PNG or ICNS) in place with no visible change.
 
 Every PNG, including each PNG slot inside an ICNS, is recompressed losslessly.
-Images at least 256 px wide are also palette-quantised. The palette version is
+Images at least 256 px wide (or --min-quantise-width) are also palette-quantised. The palette version is
 kept only if it saves at least 25% and stays at or above MIN_PSNR on both black
 and white backdrops. Colour metadata (sRGB/iCCP/gAMA/cHRM/cICP/pHYs) is kept.
 Re-running is safe: an already-optimised image fails the 25% gate and stays
@@ -80,10 +80,10 @@ def lossless(png):
     return oxipng.optimize_from_memory(png, level=6, strip=oxipng.StripChunks.keep(list(COLOUR_CHUNKS)))
 
 
-def optimise_png(data):
+def optimise_png(data, min_quantise_width=MIN_QUANTISE_WIDTH):
     best = min((data, lossless(data)), key=len)
     width = struct.unpack(">I", png_chunks(data)[0][1][:4])[0]
-    if width < MIN_QUANTISE_WIDTH:
+    if width < min_quantise_width:
         return best, None
     with Image.open(io.BytesIO(data)) as image:
         rgba = image.convert("RGBA")
@@ -99,10 +99,10 @@ def optimise_png(data):
     return best, None
 
 
-def optimise_file(path):
+def optimise_file(path, min_quantise_width=MIN_QUANTISE_WIDTH):
     data = path.read_bytes()
     if data.startswith(PNG_SIGNATURE):
-        output, psnr = optimise_png(data)
+        output, psnr = optimise_png(data, min_quantise_width)
         notes = [] if psnr is None else [f"palette {psnr:.1f} dB"]
     else:
         cache, notes, entries = {}, [], []
@@ -124,5 +124,9 @@ def optimise_file(path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("files", nargs="+", type=Path)
-    for file in parser.parse_args().files:
-        optimise_file(file)
+    parser.add_argument("--min-quantise-width", type=int, default=MIN_QUANTISE_WIDTH,
+                        help="smallest PNG width to try palette quantisation on (default %(default)s; "
+                             "web icons use 0 because they are displayed at or below their pixel size)")
+    args = parser.parse_args()
+    for file in args.files:
+        optimise_file(file, args.min_quantise_width)

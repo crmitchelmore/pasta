@@ -15,6 +15,8 @@ swift test --filter BrandAssetTests
 
 `Resources/DMG/create-background.sh` renders the 1320 × 800 px DMG backdrop (660 × 400 pt window at 2×) in sRGB, independent of the display profile, then optimises it to about 16 KB.
 
+Landing-page icons are exported at their exact display sizes: `app-icon-v3-144.png` (40 pt nav and 72 pt download at 2x) and `app-icon-v3-216.png` (72 pt at 3x). Optimise them with `python3 scripts/optimize-artwork.py --min-quantise-width 0 landing-page/images/app-icon-v3-*.png`, which takes the nav icon from 254 KB at 512 px to about 8 KB. `/images/*` is served `immutable`, so give a changed image a new filename.
+
 The macOS PNG fallbacks (`Sources/PastaApp/Resources/AppIcon.png`, `AppIconAlpha.png`) are only used by SwiftPM development runs; release staging removes them because installed apps load the ICNS. `BrandAssetTests` keeps them byte-identical to the matching `icon_512x512@2x.png` slots; recompress all four losslessly with `oxipng -o 6 --strip none` after exporting.
 
 The exporter reads both asset catalogues to produce exact pixel sizes. iOS icons are opaque and unmasked; macOS exports include transparent margins and rounded corners. The installed ICNS, SwiftPM fallback, onboarding/About artwork and web icons derive from the same source. Menu-bar controls use Apple's adaptive monochrome SF Symbol, rather than shrinking the full-colour icon.

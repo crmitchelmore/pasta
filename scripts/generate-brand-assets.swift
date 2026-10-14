@@ -72,7 +72,8 @@ if isAlpha {
     exit(0)
 }
 try export("Sources/PastaApp/Resources/AppIcon.png", size: 1024, macOS: true)
-for (name, size) in [("app-icon-v2.png", 512), ("apple-touch-icon-v2.png", 180), ("favicon-32x32-v2.png", 32), ("favicon-16x16-v2.png", 16)] {
+// Landing-page icons are rendered at their exact 2x/3x display sizes (40/72 pt).
+for (name, size) in [("app-icon-v3-144.png", 144), ("app-icon-v3-216.png", 216), ("apple-touch-icon-v2.png", 180), ("favicon-32x32-v2.png", 32), ("favicon-16x16-v2.png", 16)] {
     try export("landing-page/images/" + name, size: size)
 }
 
