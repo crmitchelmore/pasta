@@ -26,14 +26,19 @@ final class PerformanceBudgetTests: XCTestCase {
         let words = ["alpha", "beta", "gamma", "delta", "epsilon"]
         let longTail = String(repeating: "log line with alpha and beta tokens ", count: 600)
         let base = Date(timeIntervalSince1970: 1_700_000_000)
-        let entries = (0..<rowCount).map { i in
-            ClipboardEntry(
-                content: i % 20 == 0
-                    ? "\(words[i % words.count]) dump \(i) \(longTail)"
-                    : "\(words[i % words.count]) entry \(i) https://example.com/\(i)",
-                contentType: i % 3 == 0 ? .url : .text,
-                timestamp: base.addingTimeInterval(Double(i))
-            )
+        var entries: [ClipboardEntry] = []
+        entries.reserveCapacity(rowCount)
+        for i in 0..<rowCount {
+            let word: String = words[i % words.count]
+            let content: String
+            if i % 20 == 0 {
+                content = "\(word) dump \(i) \(longTail)"
+            } else {
+                content = "\(word) entry \(i) https://example.com/\(i)"
+            }
+            let type: ContentType = i % 3 == 0 ? .url : .text
+            let timestamp: Date = base.addingTimeInterval(Double(i))
+            entries.append(ClipboardEntry(content: content, contentType: type, timestamp: timestamp))
         }
         try! db.insertBatch(entries, deduplicate: false)
     }
