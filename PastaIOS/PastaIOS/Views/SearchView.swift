@@ -9,6 +9,8 @@ struct SearchView: View {
     @State private var mixedOnly = false
     @State private var results: [ClipboardEntry] = []
     @State private var searchTask: Task<Void, Never>?
+    // Mapping every entry on each keystroke's body pass was O(n); cache it.
+    @State private var availableTypes: [ContentType] = []
 
     var body: some View {
         List {
@@ -46,6 +48,11 @@ struct SearchView: View {
         }
         .onAppear {
             performSearch(query: searchText)
+        }
+        // `$entries` publishes before the property changes; use the value.
+        .onReceive(appState.$entries) { entries in
+            let typesInEntries = Set(entries.map(\.contentType))
+            availableTypes = ContentType.allCases.filter { typesInEntries.contains($0) && $0 != .unknown }
         }
         .onDisappear {
             searchTask?.cancel()
@@ -90,11 +97,6 @@ struct SearchView: View {
         .listRowBackground(Color.clear)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Search type filters")
-    }
-
-    private var availableTypes: [ContentType] {
-        let typesInEntries = Set(appState.entries.map(\.contentType))
-        return ContentType.allCases.filter { typesInEntries.contains($0) && $0 != .unknown }
     }
 
     private var recentSearchesSection: some View {

@@ -14,11 +14,21 @@ struct FilePathPreviewData {
 struct FilePreview: View {
     let preview: FilePathPreviewData
 
+    /// Longest edge of the decoded preview, in pixels.
+    private static let maxPixelSize: CGFloat = 1200
+
     @State private var image: NSImage?
+    /// Path the current `image` belongs to; the panel reuses this view when
+    /// the selection moves to another file entry.
+    @State private var loadedPath: String?
     @State private var quickLookURL: URL?
 
     private var isImage: Bool {
         preview.fileType == .image
+    }
+
+    private var imagePathToLoad: String? {
+        isImage && preview.exists ? preview.path : nil
     }
 
     private var systemImageName: String {
@@ -133,13 +143,26 @@ struct FilePreview: View {
             }
         }
         .onAppear {
-            if isImage && preview.exists && image == nil {
-                let path = preview.path
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let loaded = ImageDownsampler.load(path: path, maxPixelSize: 1200) ?? NSImage(contentsOfFile: path)
-                    DispatchQueue.main.async {
-                        self.image = loaded
-                    }
+            loadImage(for: imagePathToLoad)
+        }
+        .onChange(of: imagePathToLoad) { _, newPath in
+            loadImage(for: newPath)
+        }
+    }
+
+    private func loadImage(for path: String?) {
+        guard loadedPath != path || (path != nil && image == nil) else { return }
+        loadedPath = path
+        image = nil
+        guard let path else { return }
+        // Off-main: the cache key stats the file, and a miss decodes it.
+        // Reselecting the same unchanged file is then a cache hit.
+        DispatchQueue.global(qos: .userInitiated).async {
+            let loaded = ImageDownsampler.cachedLoad(userFilePath: path, maxPixelSize: Self.maxPixelSize)
+            DispatchQueue.main.async {
+                // A slow decode must not overwrite a newer selection's image.
+                if loadedPath == path {
+                    self.image = loaded
                 }
             }
         }

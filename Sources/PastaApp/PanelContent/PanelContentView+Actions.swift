@@ -30,14 +30,7 @@ extension PanelContentView {
 
     func deleteEntry(_ entry: ClipboardEntry) {
         PastaLogger.ui.debug("Deleting entry: \(entry.id.uuidString)")
-        do {
-            let imageStorage = try ImageStorageManager()
-            let deleteService = DeleteService(database: database, imageStorage: imageStorage)
-            _ = try deleteService.delete(id: entry.id)
-            refreshEntries()
-        } catch {
-            PastaLogger.logError(error, logger: PastaLogger.ui, context: "Failed to delete entry")
-        }
+        deleteEntries([entry.id])
     }
 
     func deleteEntries(_ ids: [UUID]) {

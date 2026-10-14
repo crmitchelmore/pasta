@@ -39,4 +39,19 @@ final class URLDetectorTests: XCTestCase {
         XCTAssertEqual(detections.first?.domain, "github.com")
         XCTAssertEqual(detections.first?.category, "github")
     }
+
+    func testCachedDomainsMatchDetection() {
+        let samples = [
+            "See https://github.com/groue/GRDB.swift and http://Example.com/a and ftp://example.com/file",
+            "https%3A%2F%2Fdocs.google.com%2Fdocument%2Fd%2F1",
+            "mailto:test@example.com",
+            "",
+        ]
+        for text in samples {
+            let expected = Set(URLDetector().detect(in: text).map(\.domain))
+            XCTAssertEqual(URLDetector.domains(in: text), expected, text)
+            XCTAssertEqual(URLDetector.domains(in: text), expected, "cached: \(text)")
+        }
+        XCTAssertEqual(URLDetector.domains(in: samples[0]), ["github.com", "example.com"])
+    }
 }

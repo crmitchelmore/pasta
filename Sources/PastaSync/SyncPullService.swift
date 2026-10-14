@@ -14,6 +14,21 @@ public struct SyncChangeBatch: Sendable {
     }
 }
 
+/// Which records an applied pull touched, so a caller can update just those
+/// rows instead of reloading its whole history.
+public struct SyncPullResult: Sendable, Equatable {
+    public let modifiedIDs: [UUID]
+    public let deletedIDs: [UUID]
+
+    public init(modifiedIDs: [UUID], deletedIDs: [UUID]) {
+        self.modifiedIDs = modifiedIDs
+        self.deletedIDs = deletedIDs
+    }
+
+    public var isEmpty: Bool { modifiedIDs.isEmpty && deletedIDs.isEmpty }
+    public var count: Int { modifiedIDs.count + deletedIDs.count }
+}
+
 /// Shared by both apps. The only substituted dependency in journey tests is
 /// the remote transport; persistence uses the real database transaction.
 public actor SyncPullService {

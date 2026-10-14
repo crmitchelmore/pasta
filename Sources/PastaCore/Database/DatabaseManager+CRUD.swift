@@ -248,9 +248,21 @@ extension DatabaseManager {
     /// made SQLite walk and discard `n` index entries per page (O(n²/pageSize)
     /// over the full library). Stable while rows are inserted mid-walk: new
     /// rows land at the head, above every cursor already issued.
+    ///
+    /// Content, raw data and metadata larger than `LazyPayload.thresholdBytes`
+    /// stay in the database: the entry keeps a content preview and loads the
+    /// full value on first access (see `ClipboardEntry.content`), so a
+    /// history with multi-megabyte entries no longer holds them all in memory.
+    /// Image raw data is always fetched because rows thumbnail it.
     public func fetchHistoryPage(after cursor: HistoryCursor?, limit: Int) throws -> HistoryPage {
         guard limit > 0 else { return HistoryPage(entries: [], nextCursor: cursor) }
 
+        // `octet_length` reads the byte length from the record header; on
+        // older SQLite `length(text)` would read every character, so fetch
+        // full rows there instead.
+        let lazy = Self.supportsOctetLength
+        let projection = lazy ? Self.lazyHistoryProjection : "rowid, *"
+        let reader = dbWriter
         return try dbWriter.read { db in
             // The row-value comparison compiles to a single index SEARCH; the
             // equivalent `ts < ? OR (ts = ? AND rowid < ?)` degrades to a SCAN.
@@ -259,22 +271,23 @@ extension DatabaseManager {
                 rows = try Row.fetchCursor(
                     db,
                     sql: """
-                    SELECT rowid, * FROM \(ClipboardEntry.databaseTableName)
+                    SELECT \(projection) FROM \(ClipboardEntry.databaseTableName)
                     WHERE (timestamp, rowid) < (:ts, :rowid)
                     ORDER BY timestamp DESC, rowid DESC
                     LIMIT :limit
                     """,
                     arguments: ["ts": cursor.timestamp, "rowid": cursor.rowID, "limit": limit]
+                        + Self.lazyHistoryArguments(lazy)
                 )
             } else {
                 rows = try Row.fetchCursor(
                     db,
                     sql: """
-                    SELECT rowid, * FROM \(ClipboardEntry.databaseTableName)
+                    SELECT \(projection) FROM \(ClipboardEntry.databaseTableName)
                     ORDER BY timestamp DESC, rowid DESC
                     LIMIT :limit
                     """,
-                    arguments: ["limit": limit]
+                    arguments: ["limit": limit] + Self.lazyHistoryArguments(lazy)
                 )
             }
 
@@ -287,8 +300,26 @@ extension DatabaseManager {
             entries.reserveCapacity(limit)
             var lastRowID: Int64?
             while let row = try rows.next() {
-                entries.append(try ClipboardEntry(row: row))
-                lastRowID = row["rowid"]
+                var entry = try ClipboardEntry(row: row)
+                // Positional reads: the projection fixes these columns'
+                // indexes, and name lookups cost per row over a full walk.
+                if lazy {
+                    let contentBytes: Int? = row[1]
+                    let rawDataBytes: Int? = row[2]
+                    let metadataBytes: Int? = row[3]
+                    if contentBytes != nil || rawDataBytes != nil || metadataBytes != nil {
+                        entry.attachLazyPayload(
+                            contentByteCount: contentBytes,
+                            rawDataByteCount: rawDataBytes,
+                            metadataByteCount: metadataBytes,
+                            storedContentHash: row[4],
+                            reader: reader,
+                            rowKey: row[5]
+                        )
+                    }
+                }
+                entries.append(entry)
+                lastRowID = row[0]
             }
 
             let nextCursor = entries.last.flatMap { last in
@@ -298,12 +329,47 @@ extension DatabaseManager {
         }
     }
 
+    /// `fetchHistoryPage`'s lazy column list. Indexes 0-5 are read
+    /// positionally: rowid, then the full byte lengths of lazy content, raw
+    /// data and metadata (NULL when fetched in full), the stored content hash
+    /// of lazy content, and the row's `id` (lazy loads match it verbatim).
+    private static let lazyHistoryProjection = """
+    rowid,
+    CASE WHEN octet_length(content) > :lazyBytes THEN octet_length(content) END,
+    CASE WHEN contentType NOT IN ('image', 'screenshot') AND length(rawData) > :lazyBytes THEN length(rawData) END,
+    CASE WHEN octet_length(metadata) > :lazyBytes THEN octet_length(metadata) END,
+    CASE WHEN octet_length(content) > :lazyBytes THEN contentHash END,
+    id, contentType, imagePath, timestamp, copyCount, sourceApp, parentEntryId,
+    isSynced, isPinned, contentTypeMask, cloudSyncAllowed, receivedViaTailnet,
+    CASE WHEN octet_length(content) > :lazyBytes THEN substr(content, 1, :previewChars) ELSE content END AS content,
+    CASE WHEN contentType NOT IN ('image', 'screenshot') AND length(rawData) > :lazyBytes THEN NULL ELSE rawData END AS rawData,
+    CASE WHEN octet_length(metadata) > :lazyBytes THEN NULL ELSE metadata END AS metadata
+    """
+
+    private static func lazyHistoryArguments(_ lazy: Bool) -> StatementArguments {
+        lazy ? ["lazyBytes": LazyPayload.thresholdBytes, "previewChars": LazyPayload.previewCharacters] : [:]
+    }
+
     public func countEntries() throws -> Int {
         try dbWriter.read { db in
             try Int.fetchOne(
                 db,
                 sql: "SELECT COUNT(*) FROM \(ClipboardEntry.databaseTableName)"
             ) ?? 0
+        }
+    }
+
+    /// SQLite's `PRAGMA data_version` on this manager's writer connection.
+    ///
+    /// The value changes only when ANOTHER connection (e.g. a Settings import
+    /// or clear that opens its own `DatabaseManager`) commits to the file;
+    /// writes made through this manager leave it unchanged. Callers that keep
+    /// their in-memory view current for their own writes can compare two
+    /// readings to skip reloads when nothing external happened. It must be
+    /// read from the writer: each pool reader keeps its own counter.
+    public func dataVersion() throws -> Int {
+        try dbWriter.writeWithoutTransaction { db in
+            try Int.fetchOne(db, sql: "PRAGMA data_version") ?? 0
         }
     }
 

@@ -63,24 +63,19 @@ for (originalFolder, macOS) in [
 }
 if isAlpha {
     try export("Sources/PastaApp/Resources/AppIconAlpha.png", size: 1024, macOS: true)
-    let iconset = root.appendingPathComponent(".build/PastaAlpha.iconset")
-    try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
-    let folder = root.appendingPathComponent("Sources/PastaApp/Resources/Assets.xcassets/AppIconAlpha.appiconset")
-    for file in try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) where file.pathExtension == "png" {
-        let target = iconset.appendingPathComponent(file.lastPathComponent)
-        if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
-        try FileManager.default.copyItem(at: file, to: target)
-    }
+    // Builds and size-optimises both trains' committed ICNS from the appiconsets.
     let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
-    process.arguments = ["-c", "icns", iconset.path, "-o", "Resources/DMG/AppIconAlpha.icns"]
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = ["Resources/DMG/create-icns.sh"]
     try process.run(); process.waitUntilExit()
     guard process.terminationStatus == 0 else { fatalError("Alpha ICNS generation failed") }
     exit(0)
 }
 try export("Sources/PastaApp/Resources/AppIcon.png", size: 1024, macOS: true)
-for (name, size) in [("app-icon-v2.png", 512), ("apple-touch-icon-v2.png", 180), ("favicon-32x32-v2.png", 32), ("favicon-16x16-v2.png", 16)] {
+// Landing-page icons are rendered at their exact 2x/3x display sizes (40/72 pt).
+for (name, size) in [("app-icon-v3-144.png", 144), ("app-icon-v3-216.png", 216), ("apple-touch-icon-v2.png", 180), ("favicon-32x32-v2.png", 32), ("favicon-16x16-v2.png", 16)] {
     try export("landing-page/images/" + name, size: size)
 }
 
-try export("PastaIOS/PastaIOS/Assets.xcassets/PastaMark.imageset/PastaMark.png", size: 1024)
+// iOS onboarding shows the mark at 96 pt, so 288 px covers 3x displays exactly.
+try export("PastaIOS/PastaIOS/Assets.xcassets/PastaMark.imageset/PastaMark.png", size: 288)

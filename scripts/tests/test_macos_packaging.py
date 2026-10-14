@@ -9,6 +9,9 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("resources", ROOT / "scripts/ci-stage-macos-resources.py")
 resources = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(resources)
+slim_spec = importlib.util.spec_from_file_location("slim_icns", ROOT / "scripts/ci-slim-icns.py")
+slim = importlib.util.module_from_spec(slim_spec)
+slim_spec.loader.exec_module(slim)
 
 
 class ResourcePackagingTests(unittest.TestCase):
@@ -43,8 +46,7 @@ class ResourcePackagingTests(unittest.TestCase):
                 output = self.app / "Contents/Resources"
                 bundle = output / "Pasta_PastaApp.bundle"
                 self.assertEqual((output / "AppIcon.icns").read_bytes(), icon.read_bytes())
-                self.assertEqual((bundle / "AppIcon.png").read_bytes(),
-                                 (self.build / "Pasta_PastaApp.bundle" / f"{train}.png").read_bytes())
+                self.assertFalse((bundle / "AppIcon.png").exists())
                 self.assertFalse((bundle / "AppIconAlpha.png").exists())
                 self.assertFalse((bundle / "Assets.xcassets").exists())
                 self.assertFalse((output / "AppIcon.png").exists())
@@ -65,12 +67,49 @@ class ResourcePackagingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Missing required"):
             resources.stage_resources(self.build, self.app, self.root / "missing.icns")
 
-    def test_missing_selected_fallback_fails(self):
+    def test_development_png_fallbacks_are_not_required(self):
         icon = self.root / "AppIconAlpha.icns"
         icon.write_bytes(b"icon")
-        (self.build / "Pasta_PastaApp.bundle/AppIconAlpha.png").unlink()
-        with self.assertRaises(FileNotFoundError):
-            resources.stage_resources(self.build, self.app, icon)
+        for name in ("AppIcon.png", "AppIconAlpha.png"):
+            (self.build / "Pasta_PastaApp.bundle" / name).unlink()
+        resources.stage_resources(self.build, self.app, icon)
+        self.assertEqual((self.app / "Contents/Resources/AppIcon.icns").read_bytes(), b"icon")
+
+
+def sample_icns(*kinds):
+    return slim.build_icns([(kind, kind.encode() * 3) for kind in kinds])
+
+
+class VolumeIconTests(unittest.TestCase):
+    def test_slim_drops_only_the_1024_slot_and_keeps_order(self):
+        source = sample_icns("ic12", "ic07", "ic13", "ic08", "ic14", "ic09", "ic10", "ic11", "info")
+        slimmed = slim.slim_icns(source)
+        self.assertEqual([kind for kind, _ in slim.parse_icns(slimmed)],
+                         ["ic12", "ic07", "ic13", "ic08", "ic14", "ic09", "ic11", "info"])
+        self.assertEqual(slim.parse_icns(slimmed),
+                         [entry for entry in slim.parse_icns(source) if entry[0] != "ic10"])
+        self.assertEqual(int.from_bytes(slimmed[4:8], "big"), len(slimmed))
+
+    def test_malformed_or_already_slim_icns_fails(self):
+        source = sample_icns("ic09", "ic10")
+        for data in (b"PNG" + source[3:], source[:-1], source + b"x", sample_icns("ic09")):
+            with self.subTest(data=data[:12]):
+                with self.assertRaises(ValueError):
+                    slim.slim_icns(data)
+
+    def test_committed_train_icons_keep_every_slot(self):
+        for name in ("AppIcon.icns", "AppIconAlpha.icns"):
+            with self.subTest(name=name):
+                kinds = {kind for kind, _ in slim.parse_icns((ROOT / "Resources/DMG" / name).read_bytes())}
+                self.assertTrue({"ic07", "ic08", "ic09", "ic10", "ic11", "ic12", "ic13", "ic14"} <= kinds)
+
+    def test_dmg_background_is_exact_pixel_size_without_density_override(self):
+        data = (ROOT / "Resources/DMG/background@2x.png").read_bytes()
+        self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(data[12:16], b"IHDR")
+        self.assertEqual((int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")), (1320, 800))
+        self.assertNotIn(b"pHYs", data)
+        self.assertFalse((ROOT / "Resources/DMG/background.png").exists())
 
 
 class PackagingCommandTests(unittest.TestCase):
@@ -133,6 +172,33 @@ if tool == 'xcrun':
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("['--format', 'ULMO', '--volname', 'Pasta Alpha', '--background', "
                       "'background.png', 'output.dmg', 'Pasta Alpha.app']", self.log.read_text())
+
+    def test_dmg_volume_icon_is_a_slim_copy_of_the_app_icon(self):
+        icon = self.root / "App Icon.icns"
+        icon.write_bytes(sample_icns("ic09", "ic10", "ic11"))
+        create_dmg = self.bin / "create-dmg"
+        create_dmg.write_text(create_dmg.read_text() + """
+args = sys.argv[1:]
+volicon = pathlib.Path(args[args.index('--volicon') + 1])
+pathlib.Path(os.environ['COMMAND_LOG'] + '.icns').write_bytes(volicon.read_bytes())
+""")
+        result = self.run_script("ci-create-macos-dmg.sh", "--volname", "Pasta", "--volicon", icon,
+                                 "--background", "background@2x.png", "output.dmg", "Pasta.app")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        logged = self.log.read_text()
+        self.assertNotIn(str(icon), logged)
+        self.assertRegex(logged, r"\['--format', 'ULMO', '--volname', 'Pasta', '--volicon', "
+                                 r"'[^']+/VolumeIcon\.icns', '--background', 'background@2x\.png', "
+                                 r"'output\.dmg', 'Pasta\.app'\]")
+        self.assertEqual(Path(str(self.log) + ".icns").read_bytes(), sample_icns("ic09", "ic11"))
+        self.assertEqual(icon.read_bytes(), sample_icns("ic09", "ic10", "ic11"))
+
+    def test_dmg_fails_when_volume_icon_cannot_be_slimmed(self):
+        icon = self.root / "broken.icns"
+        icon.write_bytes(b"not an icon")
+        result = self.run_script("ci-create-macos-dmg.sh", "--volicon", icon, "output.dmg", "Pasta.app")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.log.exists())
 
 
 if __name__ == "__main__":

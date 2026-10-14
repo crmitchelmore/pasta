@@ -260,6 +260,9 @@ struct StorageSettingsTab: View {
                 clearAllSummary = summary
                 isClearingAll = false
                 refreshStorageSummary()
+                // Even a partial failure may have removed rows, so the open
+                // panel must reload rather than keep showing deleted entries.
+                NotificationCenter.default.post(name: .entriesDidChange, object: nil)
             }
         }
     }

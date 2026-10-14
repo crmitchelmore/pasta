@@ -23,7 +23,7 @@ public struct DeleteConfirmationView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
-                    Text(entry.content.trimmingCharacters(in: .whitespacesAndNewlines))
+                    Text(entry.previewContent.trimmingCharacters(in: .whitespacesAndNewlines))
                         .font(.body)
                         .lineLimit(6)
                         .textSelection(.enabled)

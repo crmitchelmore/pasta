@@ -62,7 +62,7 @@ struct ExtractedItemsSection: View {
         .onChange(of: entry.id) { _, _ in
             loadItems(limit: Self.batchSize)
         }
-        .onChange(of: entry.metadata) { _, _ in
+        .onChange(of: MetadataKey(entry: entry)) { _, _ in
             loadItems(limit: Self.batchSize)
         }
         .onDisappear {
@@ -77,7 +77,7 @@ struct ExtractedItemsSection: View {
         hasMore = false
         compositionNotice = nil
 
-        guard entry.metadata != nil else {
+        guard entry.metadataByteCount != nil else {
             isLoading = false
             return
         }
@@ -129,5 +129,12 @@ struct ExtractedItemsSection: View {
         let type: ContentType
         let value: String
         let displayValue: String
+    }
+
+    /// Changes when the entry's metadata does, without loading a lazy row's
+    /// metadata on the main thread for the comparison.
+    private struct MetadataKey: Equatable {
+        let entry: ClipboardEntry
+        static func == (lhs: Self, rhs: Self) -> Bool { lhs.entry.hasSameMetadata(as: rhs.entry) }
     }
 }

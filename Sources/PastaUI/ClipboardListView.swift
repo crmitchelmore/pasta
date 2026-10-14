@@ -134,7 +134,7 @@ public struct ClipboardListView: View {
 
     private var deleteConfirmMessage: String {
         if deleteConfirmEntries.count == 1, let entry = deleteConfirmEntries.first {
-            return "Delete \"\(entry.content.prefix(50))\"?"
+            return "Delete \"\(entry.previewContent.prefix(50))\"?"
         }
         return "This permanently deletes the selected entries."
     }
@@ -402,7 +402,7 @@ public struct ClipboardListView: View {
                     displayValue: value.displayValue,
                     type: type,
                     sourceEntryID: entry.id,
-                    sourcePreview: String(entry.content.prefix(50))
+                    sourcePreview: String(entry.previewContent.prefix(50))
                 ))
             }
 
@@ -410,7 +410,7 @@ public struct ClipboardListView: View {
             if entry.contentType == type {
                 results.append(ExtractedValueItem(
                     value: entry.content,
-                    displayValue: String(entry.content.prefix(100)),
+                    displayValue: String(entry.previewContent.prefix(100)),
                     type: type,
                     sourceEntryID: entry.id,
                     sourcePreview: nil

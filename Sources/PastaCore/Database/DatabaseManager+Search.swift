@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import SQLite3
 
 extension DatabaseManager {
     /// Coefficient applied to `ln(1 + copyCount)` in the FTS5 ranking score.
@@ -9,6 +10,16 @@ extension DatabaseManager {
     /// Bonus applied when an entry's content equals the trimmed query
     /// (case-insensitive). Large enough to dominate BM25 + recency.
     fileprivate static let exactEqualityBonus: Double = 10.0
+
+    /// `octet_length` (SQLite 3.43+) reads a column's stored size without
+    /// loading its value. Checking it first stops the exact-equality test from
+    /// reading and lower-casing every long matching entry, which doubled rank
+    /// time when long entries matched. Older SQLite keeps the unguarded check.
+    static let supportsOctetLength = sqlite3_libversion_number() >= 3_043_000
+
+    /// Leading and trailing spaces that `TRIM` may strip from an otherwise
+    /// exact-equal entry. Entries padded beyond this lose only the bonus.
+    fileprivate static let exactEqualityPaddingBytes = 1024
 
     public func search(query: String, limit: Int = 50) throws -> [ClipboardEntry] {
         let pattern = "%\(query)%"
@@ -36,8 +47,13 @@ extension DatabaseManager {
         let ftsQuery = buildFTSQuery(from: trimmed)
         guard !ftsQuery.isEmpty else { return [] }
 
+        let signpostState = PastaSignpost.signposter.beginInterval("FTS search")
+        defer { PastaSignpost.signposter.endInterval("FTS search", signpostState) }
+
         // Pre-normalised form used for the SQL exact-equality boost.
         let normalisedExact = trimmed.lowercased()
+
+        let exactLengthGuard = Self.supportsOctetLength ? "octet_length(e.content) <= ? AND " : ""
 
         return try dbWriter.read { db in
             // Two-stage query: rank rowids inside the FTS5 virtual table first
@@ -51,14 +67,19 @@ extension DatabaseManager {
                    bm25(clipboard_entries_fts)
                    + \(Self.recencyPenaltyCoefficient) * ln(1.0 + max(julianday('now') - julianday(e.timestamp), 0.0))
                    - \(Self.copyCountBonusCoefficient) * ln(1.0 + e.copyCount)
-                   + (CASE WHEN LOWER(TRIM(e.content)) = ? THEN -\(Self.exactEqualityBonus) ELSE 0.0 END)
+                   + (CASE WHEN \(exactLengthGuard)LOWER(TRIM(e.content)) = ? THEN -\(Self.exactEqualityBonus) ELSE 0.0 END)
                    AS rank
             FROM clipboard_entries_fts
             JOIN \(ClipboardEntry.databaseTableName) e ON e.rowid = clipboard_entries_fts.rowid
             WHERE clipboard_entries_fts MATCH ?
             """
 
-            var rankArgs: [DatabaseValueConvertible] = [normalisedExact, ftsQuery]
+            var rankArgs: [DatabaseValueConvertible] = []
+            if Self.supportsOctetLength {
+                // SQLite's LOWER only folds ASCII, so it preserves byte length.
+                rankArgs.append(normalisedExact.utf8.count + Self.exactEqualityPaddingBytes)
+            }
+            rankArgs += [normalisedExact, ftsQuery]
 
             if let contentType {
                 rankSQL += " AND e.contentType = ?"

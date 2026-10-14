@@ -385,9 +385,7 @@ struct PanelContentView: View {
 
     private func handleOnAppear() {
         PastaLogger.ui.debug("Panel appeared")
-        if !backgroundService.isLoadingEntries {
-            refreshEntries()
-        }
+        backgroundService.refreshIfStale()
 
         // Initialize search service if needed
         if searchService == nil {
@@ -456,10 +454,6 @@ struct PanelContentView: View {
             message += "\n\n" + suggestion
         }
         return message
-    }
-
-    func refreshEntries() {
-        backgroundService.refresh()
     }
 
     func closePanel() {

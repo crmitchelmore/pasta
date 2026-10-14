@@ -120,6 +120,40 @@ final class DatabaseManagerTests: XCTestCase {
         XCTAssertTrue(manager.dbWriter is DatabaseQueue)
     }
 
+    /// The main window skips its reopen reload unless `dataVersion()` moved,
+    /// so it must ignore the manager's own writes (already patched into the
+    /// visible history) yet catch commits from any other connection, such as
+    /// a Settings clear/import that opens its own `DatabaseManager`.
+    func testDataVersionIgnoresOwnWritesButSeesOtherConnections() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PastaDataVersionTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let url = directory.appendingPathComponent("pasta.sqlite")
+        let app = try DatabaseManager(databaseURL: url)
+        let settings = try DatabaseManager(databaseURL: url)
+
+        let initial = try app.dataVersion()
+        XCTAssertEqual(try app.dataVersion(), initial)
+
+        let own = ClipboardEntry(content: "own write", contentType: .text)
+        _ = try app.insert(own)
+        _ = try app.setPinned(id: own.id, pinned: true)
+        _ = try app.delete(id: own.id)
+        XCTAssertEqual(try app.dataVersion(), initial)
+
+        let foreign = ClipboardEntry(content: "foreign write", contentType: .text)
+        _ = try settings.insert(foreign)
+        let afterForeignInsert = try app.dataVersion()
+        XCTAssertNotEqual(afterForeignInsert, initial)
+        XCTAssertEqual(try app.dataVersion(), afterForeignInsert)
+
+        XCTAssertTrue(try settings.delete(id: foreign.id))
+        XCTAssertNotEqual(try app.dataVersion(), afterForeignInsert)
+    }
+
     func testCRUD() throws {
         let db = try DatabaseManager.inMemory()
 

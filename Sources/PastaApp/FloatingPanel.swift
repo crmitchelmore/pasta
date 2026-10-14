@@ -172,7 +172,9 @@ final class QuickSearchController: ObservableObject {
     
     func show(initialQuery: String = "") {
         guard let contentBuilder else { return }
-        
+        let signpostState = PastaSignpost.signposter.beginInterval("Quick Search show")
+        defer { PastaSignpost.signposter.endInterval("Quick Search show", signpostState) }
+
         // Always clear search state when showing
         QuickSearchManager.shared.prepareForSearch()
         QuickSearchManager.shared.query = initialQuery
