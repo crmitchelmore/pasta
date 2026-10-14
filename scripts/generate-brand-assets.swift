@@ -77,4 +77,5 @@ for (name, size) in [("app-icon-v3-144.png", 144), ("app-icon-v3-216.png", 216),
     try export("landing-page/images/" + name, size: size)
 }
 
-try export("PastaIOS/PastaIOS/Assets.xcassets/PastaMark.imageset/PastaMark.png", size: 1024)
+// iOS onboarding shows the mark at 96 pt, so 288 px covers 3x displays exactly.
+try export("PastaIOS/PastaIOS/Assets.xcassets/PastaMark.imageset/PastaMark.png", size: 288)

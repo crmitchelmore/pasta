@@ -46,8 +46,11 @@ final class BrandAssetTests: XCTestCase {
         func data(_ path: String) throws -> Data { try Data(contentsOf: root.appendingPathComponent(path)) }
         XCTAssertEqual(try data("Sources/PastaApp/Resources/AppIcon.png"),
                        try data("Sources/PastaApp/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png"))
-        XCTAssertEqual(try data("PastaIOS/PastaIOS/Assets.xcassets/PastaMark.imageset/PastaMark.png"),
-                       try data("PastaIOS/PastaIOS/Assets.xcassets/AppIcon.appiconset/icon_1024.png"))
+        // iOS onboarding draws the mark at 96 pt, so it ships at exactly 3x.
+        let mark = try XCTUnwrap(NSBitmapImageRep(data: data("PastaIOS/PastaIOS/Assets.xcassets/PastaMark.imageset/PastaMark.png")))
+        XCTAssertEqual(mark.pixelsWide, 288)
+        XCTAssertEqual(mark.pixelsHigh, 288)
+        XCTAssertFalse(mark.hasAlpha)
         let icon = try XCTUnwrap(NSImage(contentsOf: root.appendingPathComponent("Resources/DMG/AppIcon.icns")))
         let sizes = Set(icon.representations.map(\.pixelsWide))
         XCTAssertTrue(Set([16, 32, 64, 128, 256, 512, 1024]).isSubset(of: sizes), "Incomplete ICNS: \(sizes)")

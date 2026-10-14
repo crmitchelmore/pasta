@@ -5,17 +5,13 @@ import PastaSync
 struct EntryListView: View {
     @EnvironmentObject var syncManager: SyncManager
     @EnvironmentObject var appState: AppState
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedFilter: ContentType?
     @State private var isRefreshing = false
     @State private var typeCounts: [ContentType: Int] = [:]
-
-    private var displayedEntries: [ClipboardEntry] {
-        appState.filteredEntries(contentType: selectedFilter)
-    }
-
-    private var groupedEntries: [(String, [ClipboardEntry])] {
-        TimeGrouper.group(displayedEntries)
-    }
+    // Filtering and time grouping are O(n). Computed properties re-ran them on
+    // every body pass, including each sync status change, so cache them.
+    @State private var sections: [(String, [ClipboardEntry])] = []
 
     var body: some View {
         entryList
@@ -31,11 +27,20 @@ struct EntryListView: View {
                     syncStatusView
                 }
             }
-            .onChange(of: appState.entries.count) { _, _ in
-                updateTypeCounts(appState.entries)
+            // `$entries` publishes before the property changes, so use the
+            // delivered value rather than reading `appState.entries`.
+            .onReceive(appState.$entries) { entries in
+                rebuild(from: entries)
+            }
+            .onChange(of: selectedFilter) { _, _ in
+                rebuild(from: appState.entries)
             }
             .onAppear {
-                updateTypeCounts(appState.entries)
+                rebuild(from: appState.entries)
+            }
+            // Re-bucket relative sections ("Last Minute") as time passes.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { rebuild(from: appState.entries) }
             }
     }
 
@@ -43,10 +48,13 @@ struct EntryListView: View {
         List {
             filterChips
 
-            if displayedEntries.isEmpty {
-                emptyState
+            if sections.isEmpty {
+                // Before the first rebuild, avoid flashing the empty state.
+                if appState.entries.isEmpty || selectedFilter != nil {
+                    emptyState
+                }
             } else {
-                ForEach(groupedEntries, id: \.0) { section, entries in
+                ForEach(sections, id: \.0) { section, entries in
                     Section(section) {
                         ForEach(entries, id: \.id) { entry in
                             NavigationLink(destination: EntryDetailView(entry: entry)) {
@@ -60,12 +68,14 @@ struct EntryListView: View {
         }
     }
 
-    private func updateTypeCounts(_ entries: [ClipboardEntry]) {
+    private func rebuild(from entries: [ClipboardEntry]) {
         var counts: [ContentType: Int] = [:]
         for entry in entries {
             counts[entry.contentType, default: 0] += 1
         }
         typeCounts = counts
+        let filtered = selectedFilter.map { type in entries.filter { $0.contentType == type } } ?? entries
+        sections = TimeGrouper.group(filtered)
     }
 
     // MARK: - Filter Chips

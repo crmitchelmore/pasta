@@ -36,6 +36,9 @@ final class AppState: ObservableObject {
     private var isSyncInProgress = false
     private var hasCompletedSync = false
     private var isClipboardCaptureInProgress = false
+    /// Bumped by every history read and local insert, so a slower read that
+    /// finishes after a newer one cannot replace fresher entries.
+    private var entriesGeneration = 0
     private let activationRequests = SyncRequestQueue()
     private let syncRequests = SyncRequestQueue()
 
@@ -54,8 +57,13 @@ final class AppState: ObservableObject {
     func initialise(syncManager: SyncManager) async {
         syncManager.setSyncEnabled(isICloudSyncEnabled)
         do {
-            database = try DatabaseManager(databaseURL: Self.databaseURL())
-            try loadEntries()
+            // Opening runs migrations and the history read decodes every row;
+            // keep both off the main thread so launch stays responsive.
+            let url = Self.databaseURL()
+            database = try await Task.detached(priority: .userInitiated) {
+                try DatabaseManager(databaseURL: url)
+            }.value
+            try await loadEntries()
         } catch {
             logger.error("Database initialisation failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
@@ -131,6 +139,7 @@ final class AppState: ObservableObject {
 
             // Show the durable local row, and invalidate an earlier sync
             // success, before awaiting an upload that can fail or be delayed.
+            entriesGeneration += 1
             entries.insert(entry, at: 0)
             refreshPendingUploadFeedback()
 
@@ -145,7 +154,7 @@ final class AppState: ObservableObject {
 
             // A concurrent sync may have updated the row while capture was
             // awaiting CloudKit. Use durable state for the pending count.
-            try loadEntries()
+            try await loadEntries()
             logger.info("Captured current clipboard on app activation")
         } catch {
             logger.error("Failed to capture current clipboard: \(error.localizedDescription)")
@@ -242,8 +251,8 @@ final class AppState: ObservableObject {
                 }
                 try Task.checkCancellation()
                 try await syncManager.pullChanges(into: database)
-                try self.loadEntries()
-                pendingUploadCount = self.entries.filter { !$0.isSynced }.count
+                let loaded = try await self.loadEntries()
+                pendingUploadCount = loaded.filter { !$0.isSynced }.count
                 try Task.checkCancellation()
                 completedSync = true
             }
@@ -272,9 +281,19 @@ final class AppState: ObservableObject {
         }
     }
 
-    func loadEntries() throws {
-        guard let database else { return }
-        entries = try database.fetchAll()
+    /// Returns this read's rows even when a newer read supersedes them.
+    @discardableResult
+    func loadEntries() async throws -> [ClipboardEntry] {
+        guard let database else { return entries }
+        entriesGeneration += 1
+        let generation = entriesGeneration
+        let loaded = try await Task.detached(priority: .userInitiated) {
+            try database.fetchAll()
+        }.value
+        if generation == entriesGeneration {
+            entries = loaded
+        }
+        return loaded
     }
 
     func searchEntries(query: String, contentType: ContentType? = nil, mixedOnly: Bool = false) async -> [ClipboardEntry] {
@@ -292,11 +311,6 @@ final class AppState: ObservableObject {
                 return []
             }
         }
-    }
-
-    func filteredEntries(contentType: ContentType?) -> [ClipboardEntry] {
-        guard let contentType else { return entries }
-        return entries.filter { $0.contentType == contentType }
     }
 
     func completeOnboarding() {

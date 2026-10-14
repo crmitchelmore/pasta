@@ -15,6 +15,8 @@ swift test --filter BrandAssetTests
 
 `Resources/DMG/create-background.sh` renders the 1320 × 800 px DMG backdrop (660 × 400 pt window at 2×) in sRGB, independent of the display profile, then optimises it to about 16 KB.
 
+The iOS onboarding mark (`PastaMark.png`) is exported at 288 px, exactly 96 pt at 3x, and optimised with `--min-quantise-width 0` to about 30 KB. That cut the compiled iOS `Assets.car` from 2.34 MB to 1.62 MB.
+
 Landing-page icons are exported at their exact display sizes: `app-icon-v3-144.png` (40 pt nav and 72 pt download at 2x) and `app-icon-v3-216.png` (72 pt at 3x). Optimise them with `python3 scripts/optimize-artwork.py --min-quantise-width 0 landing-page/images/app-icon-v3-*.png`, which takes the nav icon from 254 KB at 512 px to about 8 KB. `/images/*` is served `immutable`, so give a changed image a new filename.
 
 The macOS PNG fallbacks (`Sources/PastaApp/Resources/AppIcon.png`, `AppIconAlpha.png`) are only used by SwiftPM development runs; release staging removes them because installed apps load the ICNS. `BrandAssetTests` keeps them byte-identical to the matching `icon_512x512@2x.png` slots; recompress all four losslessly with `oxipng -o 6 --strip none` after exporting.

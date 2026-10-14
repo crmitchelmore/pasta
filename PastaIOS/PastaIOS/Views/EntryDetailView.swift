@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import PastaCore
 
@@ -7,12 +8,42 @@ struct EntryDetailView: View {
         let limit: Int
     }
 
+    private enum Limits {
+        // Matches the macOS preview. SwiftUI lays out the whole string, so
+        // multi-megabyte entries froze the screen. Copy and share stay full.
+        static let inlineContentCharacters = 12_000
+        // Wider images are downsampled to this, which still exceeds every
+        // iPhone and iPad screen; narrower ones decode at full resolution.
+        static let maxImagePixelWidth: CGFloat = 2_048
+    }
+
+    private enum ImageState {
+        case loading
+        case loaded(UIImage)
+        case unavailable
+    }
+
+    /// Re-decodes when sync later downloads or replaces this entry's image.
+    private struct ImageDecodeKey: Equatable {
+        let entryID: UUID
+        let byteCount: Int
+    }
+
     let entry: ClipboardEntry
+    // Decoded once off the main thread. `UIImage(data:)` in `body` re-decoded
+    // the full image on every re-render, such as the copy toast.
+    @State private var imageState: ImageState
     @State private var showCopiedFeedback = false
     @State private var showShareSheet = false
     @State private var detectedItems: [MetadataParser.ExtractedValue] = []
     @State private var detectedItemLimit = 100
     @State private var hasMoreDetectedItems = false
+
+    init(entry: ClipboardEntry) {
+        self.entry = entry
+        let hasImageData = entry.rawData.map { !$0.isEmpty } ?? false
+        _imageState = State(initialValue: hasImageData ? .loading : .unavailable)
+    }
 
     var body: some View {
         ScrollView {
@@ -108,6 +139,61 @@ struct EntryDetailView: View {
             detectedItems = Array(items.prefix(limit))
             hasMoreDetectedItems = items.count > limit
         }
+        .task(id: ImageDecodeKey(entryID: entry.id, byteCount: entry.rawData?.count ?? 0)) {
+            guard entry.contentType == .image || entry.contentType == .screenshot,
+                  let data = entry.rawData, !data.isEmpty else {
+                imageState = .unavailable
+                return
+            }
+            if case .unavailable = imageState { imageState = .loading }
+            let image = await Task.detached(priority: .userInitiated) {
+                Self.decodeImage(data)
+            }.value
+            guard !Task.isCancelled else { return }
+            imageState = image.map(ImageState.loaded) ?? .unavailable
+        }
+    }
+
+    nonisolated private static func decodeImage(_ data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let pixelWidth = (properties[kCGImagePropertyPixelWidth] as? NSNumber).map({ CGFloat(truncating: $0) }),
+              let pixelHeight = (properties[kCGImagePropertyPixelHeight] as? NSNumber).map({ CGFloat(truncating: $0) }),
+              pixelWidth > 0, pixelHeight > 0 else {
+            return UIImage(data: data)
+        }
+        // EXIF orientations 5-8 swap the displayed width and height.
+        let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
+        let displayWidth = orientation >= 5 ? pixelHeight : pixelWidth
+        let longEdge = max(pixelWidth, pixelHeight)
+        let scale = min(1, Limits.maxImagePixelWidth / displayWidth)
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: (longEdge * scale).rounded(.up)
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return UIImage(data: data)
+        }
+        return UIImage(cgImage: image)
+    }
+
+    private var contentPreview: (text: String, isTruncated: Bool) {
+        let content = entry.content
+        // Step at most the limit; `count` would walk the whole string.
+        guard let end = content.index(content.startIndex, offsetBy: Limits.inlineContentCharacters, limitedBy: content.endIndex),
+              end < content.endIndex else {
+            return (content, false)
+        }
+        return (String(content[..<end]), true)
+    }
+
+    private var truncationNote: some View {
+        Text("Showing the first \(Limits.inlineContentCharacters.formatted()) characters for performance. Copy or share to get the full text.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("detail.truncationNote")
     }
 
     // MARK: - Content View
@@ -126,21 +212,29 @@ struct EntryDetailView: View {
     }
 
     private var textContent: some View {
-        Text(entry.content)
-            .font(.body)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        let preview = contentPreview
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(preview.text)
+                .font(.body)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if preview.isTruncated { truncationNote }
+        }
     }
 
     private var codeContent: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            Text(entry.content)
-                .font(.system(.body, design: .monospaced))
-                .textSelection(.enabled)
-                .padding(12)
+        let preview = contentPreview
+        return VStack(alignment: .leading, spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: true) {
+                Text(preview.text)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .padding(12)
+            }
+            .background(Color(.systemGray6))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            if preview.isTruncated { truncationNote }
         }
-        .background(Color(.systemGray6))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var urlContent: some View {
@@ -161,12 +255,17 @@ struct EntryDetailView: View {
 
     @ViewBuilder
     private var imageContent: some View {
-        if let data = entry.rawData, let uiImage = UIImage(data: data) {
+        switch imageState {
+        case .loaded(let uiImage):
             Image(uiImage: uiImage)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
-        } else {
+        case .loading:
+            ProgressView()
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 40)
+        case .unavailable:
             VStack(spacing: 12) {
                 Image(systemName: "photo.badge.arrow.down")
                     .font(.largeTitle)
