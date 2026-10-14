@@ -232,6 +232,24 @@ final class SearchServiceTests: XCTestCase {
                        "Exact-equality boost should put 'Acme Corp' first even though the fuzzy match is fresher")
     }
 
+    /// The byte-length guard on the exact-equality check must still allow
+    /// space padding that TRIM strips, and must not boost long entries.
+    func testExactEqualityBoostSurvivesLengthGuard() throws {
+        let db = try DatabaseManager.inMemory()
+        let now = Date()
+
+        let padded = "   Acme Corp   "
+        try db.insert(ClipboardEntry(content: padded, contentType: .text, timestamp: now.addingTimeInterval(-30 * 86_400)))
+        let long = "Acme Corp " + String(repeating: "quarterly filing notes ", count: 2_000)
+        try db.insert(ClipboardEntry(content: long, contentType: .text, timestamp: now.addingTimeInterval(-60)))
+        try db.insert(ClipboardEntry(content: "Acme Corp acquired Initech today", contentType: .text, timestamp: now.addingTimeInterval(-30)))
+
+        let results = try SearchService(database: db).search(query: "acme corp", limit: 10)
+
+        XCTAssertEqual(results.count, 3)
+        XCTAssertEqual(results.first?.entry.content, padded)
+    }
+
     /// Frequently-pasted entries should rank higher when relevance is comparable.
     func testCopyCountBoostsRanking() throws {
         let db = try DatabaseManager.inMemory()
