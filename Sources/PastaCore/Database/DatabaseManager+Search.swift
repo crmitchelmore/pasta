@@ -47,6 +47,9 @@ extension DatabaseManager {
         let ftsQuery = buildFTSQuery(from: trimmed)
         guard !ftsQuery.isEmpty else { return [] }
 
+        let signpostState = PastaSignpost.signposter.beginInterval("FTS search")
+        defer { PastaSignpost.signposter.endInterval("FTS search", signpostState) }
+
         // Pre-normalised form used for the SQL exact-equality boost.
         let normalisedExact = trimmed.lowercased()
 

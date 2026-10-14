@@ -355,6 +355,10 @@ final class BackgroundService: ObservableObject {
         isHistoryPagingComplete = false
 
         refreshTask = Task {
+            let signposter = PastaSignpost.signposter
+            let signpostID = signposter.makeSignpostID()
+            let signpostState = signposter.beginInterval("History load", id: signpostID)
+            defer { signposter.endInterval("History load", signpostState) }
             do {
                 let totalTask = Task.detached(priority: .utility) {
                     try db.countEntries()
@@ -390,6 +394,7 @@ final class BackgroundService: ObservableObject {
                     // replaced once paging completes below.
                     entries = HistoryWindow.merge(head: firstPage, into: entries, limit: limit)
                 }
+                signposter.emitEvent("History first page", id: signpostID)
                 PastaLogger.ui.debug("Loaded initial clipboard history page: \(firstPage.count)/\(expectedCount) items")
 
                 guard firstPage.count < expectedCount else {
