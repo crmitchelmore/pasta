@@ -1,14 +1,16 @@
 #!/bin/bash
-# Generate DMG background image using native macOS tools (sips + Core Graphics via Swift)
+# Generate the committed DMG background (660 x 400 pt window, 1320 x 800 px).
+# Release jobs ship the committed file; rerun this only when the artwork changes.
+# Rendering into an explicit sRGB bitmap makes the output independent of the
+# host's display scale and colour profile.
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUTPUT="$SCRIPT_DIR/background.png"
-OUTPUT_2X="$SCRIPT_DIR/background@2x.png"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+OUTPUT="$SCRIPT_DIR/background@2x.png"
 
-# Use Swift to generate the background image
-swift - <<'SWIFT'
+PASTA_DMG_BACKGROUND="$OUTPUT" swift - <<'SWIFT'
 import Cocoa
 
 let width: CGFloat = 660
@@ -25,13 +27,20 @@ let appIconX: CGFloat = 180
 let appsIconX: CGFloat = 480
 let iconY: CGFloat = 200
 
-func createImage(scaleFactor: CGFloat) -> NSImage {
+func createImage(scaleFactor: CGFloat) -> NSBitmapImageRep {
     let w = width * scaleFactor
     let h = height * scaleFactor
     let s = scaleFactor
     
-    let image = NSImage(size: NSSize(width: w, height: h))
-    image.lockFocus()
+    // Exact pixels with no pHYs (72 dpi), matching the layout Finder has always shown.
+    let rep = NSBitmapImageRep(
+        bitmapDataPlanes: nil, pixelsWide: Int(w), pixelsHigh: Int(h),
+        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+    )!.retagging(with: .sRGB)!
+    rep.size = NSSize(width: w, height: h)
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
     
     // Background
     backgroundColor.setFill()
@@ -130,32 +139,18 @@ func createImage(scaleFactor: CGFloat) -> NSImage {
         withAttributes: textAttrs
     )
     
-    image.unlockFocus()
-    return image
+    NSGraphicsContext.restoreGraphicsState()
+    return rep
 }
 
-// Create 2x image
-let image2x = createImage(scaleFactor: 2)
-if let tiff = image2x.tiffRepresentation,
-   let bitmap = NSBitmapImageRep(data: tiff),
-   let png = bitmap.representation(using: .png, properties: [:]) {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        .appendingPathComponent("background@2x.png")
-    try? png.write(to: url)
-    print("Created: \(url.path)")
+let output = URL(fileURLWithPath: ProcessInfo.processInfo.environment["PASTA_DMG_BACKGROUND"]!)
+guard let png = createImage(scaleFactor: scale).representation(using: .png, properties: [:]) else {
+    fatalError("Could not encode the DMG background")
 }
-
-// Create 1x image
-let image1x = createImage(scaleFactor: 1)
-if let tiff = image1x.tiffRepresentation,
-   let bitmap = NSBitmapImageRep(data: tiff),
-   let png = bitmap.representation(using: .png, properties: [:]) {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        .appendingPathComponent("background.png")
-    try? png.write(to: url)
-    print("Created: \(url.path)")
-}
+try png.write(to: output)
+print("Created: \(output.path)")
 SWIFT
 
-echo "==> Background images created"
-ls -la "$SCRIPT_DIR"/background*.png
+"${PYTHON:-python3}" "$REPO_ROOT/scripts/optimize-artwork.py" "$OUTPUT"
+echo "==> Background image created"
+ls -la "$OUTPUT"

@@ -63,17 +63,10 @@ for (originalFolder, macOS) in [
 }
 if isAlpha {
     try export("Sources/PastaApp/Resources/AppIconAlpha.png", size: 1024, macOS: true)
-    let iconset = root.appendingPathComponent(".build/PastaAlpha.iconset")
-    try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
-    let folder = root.appendingPathComponent("Sources/PastaApp/Resources/Assets.xcassets/AppIconAlpha.appiconset")
-    for file in try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) where file.pathExtension == "png" {
-        let target = iconset.appendingPathComponent(file.lastPathComponent)
-        if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
-        try FileManager.default.copyItem(at: file, to: target)
-    }
+    // Builds and size-optimises both trains' committed ICNS from the appiconsets.
     let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
-    process.arguments = ["-c", "icns", iconset.path, "-o", "Resources/DMG/AppIconAlpha.icns"]
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = ["Resources/DMG/create-icns.sh"]
     try process.run(); process.waitUntilExit()
     guard process.terminationStatus == 0 else { fatalError("Alpha ICNS generation failed") }
     exit(0)

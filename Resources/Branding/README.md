@@ -6,11 +6,16 @@ Run from the repository root:
 
 ```sh
 swift scripts/generate-brand-assets.swift
+swift scripts/generate-brand-assets.swift --alpha   # also runs create-icns.sh
 bash Resources/DMG/create-icns.sh
 swift test --filter BrandAssetTests
 ```
 
-The macOS SwiftPM fallback PNGs ship inside the app, so after exporting, recompress them losslessly: `oxipng -o 6 --strip none` on `Sources/PastaApp/Resources/AppIcon.png`, `AppIconAlpha.png` and the matching `icon_512x512@2x.png` slots, which `BrandAssetTests` keeps byte-identical. The pixels are unchanged and each file is about 300 KB (31%) smaller. `iconutil` re-encodes its inputs, so this does not shrink the ICNS.
+`create-icns.sh` builds `Resources/DMG/AppIcon.icns` and `AppIconAlpha.icns` from the appiconsets, then runs `scripts/optimize-artwork.py` (needs `python3 -m pip install pillow imagequant pyoxipng`; set `PYTHON` to use another interpreter). The optimiser recompresses every PNG slot losslessly and palette-quantises slots at least 256 px wide only when they stay at or above 45 dB PSNR over black and white and save at least 25%. That makes each ICNS about 1.6 MB → 0.5 MB with no visible change; re-running it is a no-op. Releases ship the committed ICNS and DMG background as-is, so commit the regenerated files. The DMG volume icon is the app ICNS without its 1024 px slot (`scripts/ci-slim-icns.py`, applied by `ci-create-macos-dmg.sh`).
+
+`Resources/DMG/create-background.sh` renders the 1320 × 800 px DMG backdrop (660 × 400 pt window at 2×) in sRGB, independent of the display profile, then optimises it to about 16 KB.
+
+The macOS PNG fallbacks (`Sources/PastaApp/Resources/AppIcon.png`, `AppIconAlpha.png`) are only used by SwiftPM development runs; release staging removes them because installed apps load the ICNS. `BrandAssetTests` keeps them byte-identical to the matching `icon_512x512@2x.png` slots; recompress all four losslessly with `oxipng -o 6 --strip none` after exporting.
 
 The exporter reads both asset catalogues to produce exact pixel sizes. iOS icons are opaque and unmasked; macOS exports include transparent margins and rounded corners. The installed ICNS, SwiftPM fallback, onboarding/About artwork and web icons derive from the same source. Menu-bar controls use Apple's adaptive monochrome SF Symbol, rather than shrinking the full-colour icon.
 

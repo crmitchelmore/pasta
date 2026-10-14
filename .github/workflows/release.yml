@@ -166,24 +166,6 @@ jobs:
         persist-credentials: false
     - name: Add pinned create-dmg to PATH
       run: echo "$GITHUB_WORKSPACE/.build/tools/create-dmg" >> "$GITHUB_PATH"
-    - name: Generate DMG assets
-      run: 'cd Resources/DMG
-
-
-        echo "==> Generating app icon (icns)"
-
-        chmod +x create-icns.sh
-
-        ./create-icns.sh
-
-
-        echo "==> Generating background image"
-
-        chmod +x create-background.sh
-
-        ./create-background.sh
-
-        '
     - name: Create fancy DMG
       id: dmg
       run: "DMG_FILE=\"${DMG_NAME// /-}-${{ steps.version.outputs.version }}.dmg\"\n\necho \"==> Creating DMG with custom background\

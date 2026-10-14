@@ -20,10 +20,10 @@ def stage_resources(build_dir, app_dir, icon):
             shutil.rmtree(destination)
         if bundle.name == "Pasta_PastaApp.bundle":
             shutil.copytree(bundle, destination, ignore=shutil.ignore_patterns("Assets.xcassets"))
-            # The installed app uses AppIcon.icns; retain a matching PNG fallback.
-            selected = "AppIconAlpha.png" if icon.stem == "AppIconAlpha" else "AppIcon.png"
-            shutil.copyfile(bundle / selected, destination / "AppIcon.png")
-            (destination / "AppIconAlpha.png").unlink(missing_ok=True)
+            # Installed apps load Contents/Resources/AppIcon.icns; the 1024 px PNGs
+            # are only the SwiftPM development fallback, so neither train ships them.
+            for fallback in ("AppIcon.png", "AppIconAlpha.png"):
+                (destination / fallback).unlink(missing_ok=True)
         else:
             shutil.copytree(bundle, destination)
     shutil.copyfile(icon, resources / "AppIcon.icns")

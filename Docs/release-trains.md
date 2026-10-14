@@ -90,13 +90,16 @@ the separate dSYM archive remains available for crash symbolication.
 `ci-stage-macos-resources.py` stages SwiftPM resource bundles once, including
 release notes, train configuration and dependency privacy manifests. Source icon
 catalogs are excluded from the executable target; they remain in the repository
-for full-resolution ICNS generation. Installed packages keep the selected train's
-full-resolution ICNS and matching PNG fallback, not both trains' source artwork
-and duplicate loose resource copies. CI launch-tests the same resource staging
-and stripping path as releases.
+for full-resolution ICNS generation. Installed packages keep only the selected
+train's full-resolution ICNS; the SwiftPM development PNG fallbacks, both
+trains' source artwork and duplicate loose resource copies are not shipped. CI
+launch-tests the same resource staging and stripping path as releases.
 
 `ci-create-macos-dmg.sh` uses lossless LZMA (`ULMO`) compression, supported since
-macOS 10.15, below Pasta's macOS 14 minimum. Installer artwork, signing,
+macOS 10.15, below Pasta's macOS 14 minimum. The volume icon is the train ICNS
+without its 1024 px slot (`ci-slim-icns.py`). Releases ship the committed,
+pre-optimised ICNS and DMG background (`Resources/Branding/README.md`) rather
+than regenerating them. Layout, signing,
 notarisation, Sparkle signatures and pre-/post-publication verification remain
 unchanged. Optimisations happen before signing; never modify a signed bundle or
 recompress an already Sparkle-signed update.
