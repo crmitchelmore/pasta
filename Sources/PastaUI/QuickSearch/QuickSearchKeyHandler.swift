@@ -139,6 +139,11 @@ final class KeyInterceptingView: NSView {
         }
     }
 
+    static func focusedTextHasContent(in window: NSWindow?) -> Bool {
+        guard let textView = window?.firstResponder as? NSTextView else { return false }
+        return !textView.string.isEmpty
+    }
+
     private func handleKeyEvent(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
@@ -150,8 +155,10 @@ final class KeyInterceptingView: NSView {
                 onCommandNumber(digit)
                 return true
             }
-            // ⌘⌫ deletes the selected entry (mirrors the main panel).
-            if event.keyCode == 51 {
+            // ⌘⌫ deletes the selected entry (mirrors the main panel), but only
+            // when the search field is empty; otherwise it keeps the standard
+            // "delete to start of line" text editing behaviour.
+            if event.keyCode == 51 && !Self.focusedTextHasContent(in: window) {
                 onCommandDelete()
                 return true
             }
