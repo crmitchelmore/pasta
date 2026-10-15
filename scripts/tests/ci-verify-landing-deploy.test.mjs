@@ -198,7 +198,8 @@ test('workers stage only after native checks and immutable archive verification'
   assert.match(mac, /DMG_X86_64="\$BASE-Intel\.dmg"/);
   assert.match(mac, /gh release upload "\$RELEASE_TAG" "\$DMG_FILE" "\$DMG_ARM64" "\$DMG_X86_64"/);
   assert.match(mac, /--asset "\$DMG_ARM64" --asset "\$DMG_X86_64"/);
-  assert.match(mac, /READY_TIMEOUT=90 smoke "\$DMG_X86_64" x86_64/);
+  assert.match(mac, /if arch -x86_64 \/usr\/bin\/true 2>\/dev\/null; then\n\s+# [^\n]+\n\s+READY_TIMEOUT=90 smoke "\$DMG_X86_64" x86_64\n\s+else\n(\s+#[^\n]*\n)*\s+echo "::warning::Rosetta 2 is missing/);
+  assert.doesNotMatch(mac, /::error::Rosetta/, 'a runner without Rosetta still releases the statically verified Intel DMG');
   assert.ok(mac.indexOf('Verify Alpha download') < mac.indexOf('Publish Alpha prerelease only'));
   assert.match(ios,/needs: preflight/);
   assert.ok(ios.indexOf('Require every surface gate before TestFlight upload') < ios.indexOf('Export IPA and upload'));

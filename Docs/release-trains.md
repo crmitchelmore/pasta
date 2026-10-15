@@ -84,8 +84,8 @@ hash, Sparkle feed and isolated Production CloudKit container.
 Alpha and Stable retain universal ARM/Intel executables and identical features.
 Each release also ships thin `-AppleSilicon.dmg` and `-Intel.dmg` builds, made
 by `lipo -thin` on every Mach-O of the universal app and then signed,
-notarised and launch-tested like the universal DMG (Intel under Rosetta, so the
-release runner needs it installed). They are about half the size. The
+notarised and launch-tested like the universal DMG. The Intel DMG launches under
+Rosetta; on a runner without Rosetta it gets the static checks and a warning. They are about half the size. The
 website's `/download` routes and the Homebrew cask serve them, falling back to
 the universal DMG for releases without them. Sparkle keeps the universal DMG:
 clients before Sparkle 2.9 cannot filter enclosures by hardware, and an update
