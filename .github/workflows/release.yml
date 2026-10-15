@@ -134,29 +134,122 @@ jobs:
       env:
         TRAIN_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_MACOS_PROVISIONING_PROFILE || secrets.MACOS_PROVISIONING_PROFILE
           }}
-    - name: Code sign app bundle
-      run: "echo \"==> Signing app bundle with hardened runtime\"\nIDENTITY=\"${{ steps.signing.outputs.identity }}\"\n\n\
-        # Sign framework internals first (WITHOUT app entitlements)\n# Applying iCloud/CloudKit entitlements to framework\
-        \ binaries causes\n# dyld signature rejection at launch.\necho \"==> Signing framework binaries (no app entitlements)...\"\
-        \nfind \"${APP_DIR}/Contents/Frameworks\" -type f -perm +111 | while read -r binary; do\n  if file \"$binary\" | grep\
-        \ -q \"Mach-O\"; then\n    echo \"  Signing: $binary\"\n    codesign --force --keychain \"$KEYCHAIN_PATH\" \\\n  \
-        \    --sign \"$IDENTITY\" \\\n      --options runtime \\\n      --timestamp \\\n      \"$binary\" || true\n  fi\n\
-        done\n\n# Sign framework bundles (XPC services, apps inside frameworks)\nfind \"${APP_DIR}/Contents/Frameworks\" -name\
-        \ \"*.xpc\" -o -name \"*.app\" | while read -r bundle; do\n  if [ -d \"$bundle\" ]; then\n    echo \"  Signing bundle:\
-        \ $bundle\"\n    codesign --force --keychain \"$KEYCHAIN_PATH\" \\\n      --sign \"$IDENTITY\" \\\n      --options\
-        \ runtime \\\n      --timestamp \\\n      \"$bundle\" || true\n  fi\ndone\n\n# Sign the framework itself\nfind \"\
-        ${APP_DIR}/Contents/Frameworks\" -name \"*.framework\" | while read -r fw; do\n  echo \"  Signing framework: $fw\"\
-        \n  codesign --force --keychain \"$KEYCHAIN_PATH\" \\\n    --sign \"$IDENTITY\" \\\n    --options runtime \\\n   \
-        \ --timestamp \\\n    \"$fw\" || true\ndone\n\n# Sign the main app binary WITH entitlements\necho \"==> Signing main\
-        \ binary with entitlements...\"\ncodesign --force --keychain \"$KEYCHAIN_PATH\" \\\n  --sign \"$IDENTITY\" \\\n  --options\
-        \ runtime \\\n  --timestamp \\\n  --entitlements entitlements.plist \\\n  \"${APP_DIR}/Contents/MacOS/PastaApp\"\n\
-        \n# Sign the app bundle (top-level, with entitlements)\necho \"==> Signing app bundle...\"\ncodesign --force --keychain\
-        \ \"$KEYCHAIN_PATH\" \\\n  --sign \"$IDENTITY\" \\\n  --options runtime \\\n  --timestamp \\\n  --entitlements entitlements.plist\
-        \ \\\n  \"${APP_DIR}\"\n\necho \"==> Verifying signature\"\ncodesign --verify --verbose=4 \"${APP_DIR}\"\n\n# Verify\
-        \ entitlements are NOT on framework binaries\necho \"==> Checking framework entitlements are clean...\"\nSPARKLE_ENTS=$(codesign\
-        \ -d --entitlements - \"${APP_DIR}/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle\" 2>&1 || true)\nif echo\
-        \ \"$SPARKLE_ENTS\" | grep -q \"icloud\"; then\n  echo \"ERROR: Sparkle binary has iCloud entitlements \u2014 this\
-        \ will crash at launch!\"\n  exit 1\nfi\necho \"\u2713 Framework entitlements are clean\"\n"
+    - name: Create per-architecture app bundles
+      run: |
+        set -euo pipefail
+        # Sparkle keeps the universal bundle so older updaters (which ignore
+        # hardware requirements) can never install the wrong slice. Website and
+        # Homebrew downloads get thin copies, roughly half the size each.
+        if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+          echo "::error::Rosetta 2 is missing on this runner, so the Intel build cannot be launch-tested. Install it once with: softwareupdate --install-rosetta --agree-to-license"
+          exit 1
+        fi
+        for arch in arm64 x86_64; do
+          THIN_APP=".build/thin-$arch/${DMG_NAME}.app"
+          rm -rf ".build/thin-$arch"
+          mkdir -p ".build/thin-$arch"
+          ditto "$APP_DIR" "$THIN_APP"
+          while IFS= read -r -d '' file; do
+            archs=$(lipo -archs "$file" 2>/dev/null) || continue
+            [ "$archs" = "$arch" ] && continue
+            case " $archs " in
+              *" $arch "*) ;;
+              *) echo "::error::$file has no $arch slice ($archs)"; exit 1 ;;
+            esac
+            lipo -thin "$arch" "$file" -output "$file.thin"
+            chmod "$(stat -f '%Lp' "$file")" "$file.thin"
+            mv -f "$file.thin" "$file"
+          done < <(find "$THIN_APP" -type f -print0)
+          while IFS= read -r -d '' file; do
+            archs=$(lipo -archs "$file" 2>/dev/null) || continue
+            if [ "$archs" != "$arch" ]; then
+              echo "::error::$file still contains '$archs' after thinning to $arch"
+              exit 1
+            fi
+          done < <(find "$THIN_APP" -type f -print0)
+          echo "==> $arch bundle: $(du -sh "$THIN_APP" | cut -f1) (universal: $(du -sh "$APP_DIR" | cut -f1))"
+        done
+        echo "APP_DIR_ARM64=.build/thin-arm64/${DMG_NAME}.app" >> "$GITHUB_ENV"
+        echo "APP_DIR_X86_64=.build/thin-x86_64/${DMG_NAME}.app" >> "$GITHUB_ENV"
+    - name: Code sign app bundles
+      run: |
+        IDENTITY="${{ steps.signing.outputs.identity }}"
+
+        sign_bundle() {
+          local app="$1"
+          echo "==> Signing $app with hardened runtime"
+
+          # Sign framework internals first (WITHOUT app entitlements)
+          # Applying iCloud/CloudKit entitlements to framework binaries causes
+          # dyld signature rejection at launch.
+          echo "==> Signing framework binaries (no app entitlements)..."
+          find "${app}/Contents/Frameworks" -type f -perm +111 | while read -r binary; do
+            if file "$binary" | grep -q "Mach-O"; then
+              echo "  Signing: $binary"
+              codesign --force --keychain "$KEYCHAIN_PATH" \
+                --sign "$IDENTITY" \
+                --options runtime \
+                --timestamp \
+                "$binary" || true
+            fi
+          done
+
+          # Sign framework bundles (XPC services, apps inside frameworks)
+          find "${app}/Contents/Frameworks" -name "*.xpc" -o -name "*.app" | while read -r bundle; do
+            if [ -d "$bundle" ]; then
+              echo "  Signing bundle: $bundle"
+              codesign --force --keychain "$KEYCHAIN_PATH" \
+                --sign "$IDENTITY" \
+                --options runtime \
+                --timestamp \
+                "$bundle" || true
+            fi
+          done
+
+          # Sign the framework itself
+          find "${app}/Contents/Frameworks" -name "*.framework" | while read -r fw; do
+            echo "  Signing framework: $fw"
+            codesign --force --keychain "$KEYCHAIN_PATH" \
+              --sign "$IDENTITY" \
+              --options runtime \
+              --timestamp \
+              "$fw" || true
+          done
+
+          # Sign the main app binary WITH entitlements
+          echo "==> Signing main binary with entitlements..."
+          codesign --force --keychain "$KEYCHAIN_PATH" \
+            --sign "$IDENTITY" \
+            --options runtime \
+            --timestamp \
+            --entitlements entitlements.plist \
+            "${app}/Contents/MacOS/PastaApp"
+
+          # Sign the app bundle (top-level, with entitlements)
+          echo "==> Signing app bundle..."
+          codesign --force --keychain "$KEYCHAIN_PATH" \
+            --sign "$IDENTITY" \
+            --options runtime \
+            --timestamp \
+            --entitlements entitlements.plist \
+            "${app}"
+
+          echo "==> Verifying signature"
+          codesign --verify --verbose=4 "${app}"
+
+          # Verify entitlements are NOT on framework binaries
+          echo "==> Checking framework entitlements are clean..."
+          SPARKLE_ENTS=$(codesign -d --entitlements - "${app}/Contents/Frameworks/Sparkle.framework/Versions/B/Sparkle" 2>&1 || true)
+          if echo "$SPARKLE_ENTS" | grep -q "icloud"; then
+            echo "ERROR: Sparkle binary has iCloud entitlements — this will crash at launch!"
+            exit 1
+          fi
+          echo "✓ Framework entitlements are clean"
+        }
+
+        for app in "$APP_DIR" "$APP_DIR_ARM64" "$APP_DIR_X86_64"; do
+          sign_bundle "$app"
+        done
     - name: Install create-dmg
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
@@ -166,66 +259,144 @@ jobs:
         persist-credentials: false
     - name: Add pinned create-dmg to PATH
       run: echo "$GITHUB_WORKSPACE/.build/tools/create-dmg" >> "$GITHUB_PATH"
-    - name: Create fancy DMG
+    - name: Create fancy DMGs
       id: dmg
-      run: "DMG_FILE=\"${DMG_NAME// /-}-${{ steps.version.outputs.version }}.dmg\"\n\necho \"==> Creating DMG with custom background\
-        \ and layout\"\nbash scripts/ci-create-macos-dmg.sh \\\n  --volname \"${DMG_NAME}\" \\\n  --volicon \"$ICON_PATH\" \\\n  --background \"Resources/DMG/background@2x.png\"\
-        \ \\\n  --window-pos 200 120 \\\n  --window-size 660 400 \\\n  --icon-size 100 \\\n  --icon \"${DMG_NAME}.app\" 180\
-        \ 200 \\\n  --app-drop-link 480 200 \\\n  --hide-extension \"${DMG_NAME}.app\" \\\n  --no-internet-enable \\\n  \"\
-        ${DMG_FILE}\" \\\n  \"${APP_DIR}\"\n\necho \"dmg_file=$DMG_FILE\" >> \"$GITHUB_OUTPUT\"\necho \"==> DMG created: $DMG_FILE\"\
-        \nls -lh \"$DMG_FILE\"\n"
-    - name: Notarize DMG
+      run: |
+        set -euo pipefail
+        BASE="${DMG_NAME// /-}-${{ steps.version.outputs.version }}"
+        # The universal DMG keeps its historical name: Sparkle, the appcast and
+        # older download links all point at it.
+        DMG_FILE="$BASE.dmg"
+        DMG_ARM64="$BASE-AppleSilicon.dmg"
+        DMG_X86_64="$BASE-Intel.dmg"
+
+        create_dmg() {
+          echo "==> Creating $1 from $2"
+          bash scripts/ci-create-macos-dmg.sh \
+            --volname "${DMG_NAME}" \
+            --volicon "$ICON_PATH" \
+            --background "Resources/DMG/background@2x.png" \
+            --window-pos 200 120 \
+            --window-size 660 400 \
+            --icon-size 100 \
+            --icon "${DMG_NAME}.app" 180 200 \
+            --app-drop-link 480 200 \
+            --hide-extension "${DMG_NAME}.app" \
+            --no-internet-enable \
+            "$1" \
+            "$2"
+          ls -lh "$1"
+        }
+
+        create_dmg "$DMG_FILE" "$APP_DIR"
+        create_dmg "$DMG_ARM64" "$APP_DIR_ARM64"
+        create_dmg "$DMG_X86_64" "$APP_DIR_X86_64"
+
+        {
+          echo "dmg_file=$DMG_FILE"
+          echo "dmg_arm64=$DMG_ARM64"
+          echo "dmg_x86_64=$DMG_X86_64"
+        } >> "$GITHUB_OUTPUT"
+    - name: Notarize DMGs
       env:
         APPLE_ID: ${{ secrets.APPLE_ID }}
         APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
         APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      run: "DMG_FILE=\"${{ steps.dmg.outputs.dmg_file }}\"\n\necho \"==> Submitting DMG for notarization\"\nxcrun notarytool\
-        \ submit \"$DMG_FILE\" \\\n  --apple-id \"$APPLE_ID\" \\\n  --password \"$APPLE_ID_PASSWORD\" \\\n  --team-id \"$APPLE_TEAM_ID\"\
-        \ \\\n  --wait \\\n  --timeout 60m\n\necho \"==> Notarization successful\"\n"
-    - name: Staple notarization ticket
-      run: 'DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
+        DMG_FILE: ${{ steps.dmg.outputs.dmg_file }}
+        DMG_ARM64: ${{ steps.dmg.outputs.dmg_arm64 }}
+        DMG_X86_64: ${{ steps.dmg.outputs.dmg_x86_64 }}
+      run: |
+        set -euo pipefail
+        # Submit all three at once; each waits for Apple's verdict independently.
+        dmgs=("$DMG_FILE" "$DMG_ARM64" "$DMG_X86_64")
+        pids=()
+        for dmg in "${dmgs[@]}"; do
+          echo "==> Submitting $dmg for notarization"
+          xcrun notarytool submit "$dmg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait \
+            --timeout 60m > "$RUNNER_TEMP/notarize-$dmg.log" 2>&1 &
+          pids+=("$!")
+        done
 
-
-        echo "==> Stapling notarization ticket to DMG"
-
-        xcrun stapler staple "$DMG_FILE"
-
-
-        echo "==> Verifying stapled ticket"
-
-        xcrun stapler validate "$DMG_FILE"
-
-        '
-    - name: Verify signed and notarized DMG
-      run: "DMG_FILE=\"${{ steps.dmg.outputs.dmg_file }}\"\n\necho \"==> Verifying DMG\"\n\n# Mount DMG\nhdiutil attach \"\
-        $DMG_FILE\" -mountpoint /tmp/pasta-verify\n\n# Verify signature\necho \"==> Checking code signature\"\ncodesign --verify\
-        \ --deep --strict --verbose=2 \"/tmp/pasta-verify/${DMG_NAME}.app\"\n\n# Check notarization ticket (stapler validate\
-        \ on the DMG already verified this)\necho \"==> Checking notarization\"\nxcrun stapler validate \"$DMG_FILE\"\n\n\
-        # Unmount\nhdiutil detach /tmp/pasta-verify\n\necho \"==> \u2705 All verifications passed!\"\n"
+        failed=0
+        for i in "${!dmgs[@]}"; do
+          if wait "${pids[$i]}"; then status=succeeded; else status=FAILED; failed=1; fi
+          echo "==> ${dmgs[$i]}: notarization $status"
+          cat "$RUNNER_TEMP/notarize-${dmgs[$i]}.log"
+        done
+        if [ "$failed" -ne 0 ]; then
+          echo "::error::Notarization failed for at least one DMG"
+          exit 1
+        fi
+        echo "==> Notarization successful"
+    - name: Staple notarization tickets
+      env:
+        DMG_FILE: ${{ steps.dmg.outputs.dmg_file }}
+        DMG_ARM64: ${{ steps.dmg.outputs.dmg_arm64 }}
+        DMG_X86_64: ${{ steps.dmg.outputs.dmg_x86_64 }}
+      run: |
+        set -euo pipefail
+        for dmg in "$DMG_FILE" "$DMG_ARM64" "$DMG_X86_64"; do
+          echo "==> Stapling notarization ticket to $dmg"
+          xcrun stapler staple "$dmg"
+          echo "==> Verifying stapled ticket"
+          xcrun stapler validate "$dmg"
+        done
+    - name: Verify signed and notarized DMGs
+      env:
+        DMG_FILE: ${{ steps.dmg.outputs.dmg_file }}
+        DMG_ARM64: ${{ steps.dmg.outputs.dmg_arm64 }}
+        DMG_X86_64: ${{ steps.dmg.outputs.dmg_x86_64 }}
+      run: |
+        set -euo pipefail
+        verify_dmg() {
+          local dmg="$1" expected_archs="$2"
+          echo "==> Verifying $dmg"
+          hdiutil attach "$dmg" -mountpoint /tmp/pasta-verify
+          echo "==> Checking code signature"
+          codesign --verify --deep --strict --verbose=2 "/tmp/pasta-verify/${DMG_NAME}.app"
+          archs=$(lipo -archs "/tmp/pasta-verify/${DMG_NAME}.app/Contents/MacOS/PastaApp")
+          hdiutil detach /tmp/pasta-verify
+          if [ "$archs" != "$expected_archs" ]; then
+            echo "::error::$dmg contains '$archs', expected '$expected_archs'"
+            exit 1
+          fi
+          # Check notarization ticket (stapler validate on the DMG already verified this)
+          echo "==> Checking notarization"
+          xcrun stapler validate "$dmg"
+        }
+        verify_dmg "$DMG_FILE" "x86_64 arm64"
+        verify_dmg "$DMG_ARM64" "arm64"
+        verify_dmg "$DMG_X86_64" "x86_64"
+        echo "==> ✅ All verifications passed!"
     - name: Launch readiness smoke test (notarized DMG contents)
-      run: 'set -euo pipefail
-
-        DMG_FILE="${{ steps.dmg.outputs.dmg_file }}"
-
-        MOUNTPOINT="$RUNNER_TEMP/pasta-smoke-mnt"
-
-        INSTALL_DIR="$RUNNER_TEMP/pasta-smoke-Applications"
-
-        mkdir -p "$MOUNTPOINT" "$INSTALL_DIR"
-
-        hdiutil attach "$DMG_FILE" -mountpoint "$MOUNTPOINT" -nobrowse -readonly -noautoopen
-
-        # Copy out exactly as a user dragging to /Applications would (ditto keeps
-
-        # the signature and resource forks intact), then release the DMG.
-
-        ditto "$MOUNTPOINT/${DMG_NAME}.app" "$INSTALL_DIR/${DMG_NAME}.app"
-
-        hdiutil detach "$MOUNTPOINT"
-
-        scripts/ci-launch-smoke.sh "$INSTALL_DIR/${DMG_NAME}.app"
-
-        '
+      env:
+        DMG_FILE: ${{ steps.dmg.outputs.dmg_file }}
+        DMG_ARM64: ${{ steps.dmg.outputs.dmg_arm64 }}
+        DMG_X86_64: ${{ steps.dmg.outputs.dmg_x86_64 }}
+      run: |
+        set -euo pipefail
+        smoke() {
+          local dmg="$1" label="$2"
+          local mountpoint="$RUNNER_TEMP/pasta-smoke-mnt-$label"
+          local install_dir="$RUNNER_TEMP/pasta-smoke-Applications-$label"
+          rm -rf "$install_dir"
+          mkdir -p "$mountpoint" "$install_dir"
+          hdiutil attach "$dmg" -mountpoint "$mountpoint" -nobrowse -readonly -noautoopen
+          # Copy out exactly as a user dragging to /Applications would (ditto keeps
+          # the signature and resource forks intact), then release the DMG.
+          ditto "$mountpoint/${DMG_NAME}.app" "$install_dir/${DMG_NAME}.app"
+          hdiutil detach "$mountpoint"
+          echo "==> Launch smoke: $label"
+          scripts/ci-launch-smoke.sh "$install_dir/${DMG_NAME}.app"
+        }
+        smoke "$DMG_FILE" universal
+        smoke "$DMG_ARM64" arm64
+        # The Intel-only build runs under Rosetta here; allow for first-launch translation.
+        READY_TIMEOUT=90 smoke "$DMG_X86_64" x86_64
     - name: Generate Appcast for Sparkle Updates
       env:
         SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
@@ -242,11 +413,17 @@ jobs:
 
           '
     - name: Verify signed train identity and frozen notes
-      run: python3 scripts/verify-release-train-archive.py "$APP_DIR" "$RUNNER_TEMP/release-manifest.json" mac-direct
+      run: |
+        set -euo pipefail
+        for app in "$APP_DIR" "$APP_DIR_ARM64" "$APP_DIR_X86_64"; do
+          python3 scripts/verify-release-train-archive.py "$app" "$RUNNER_TEMP/release-manifest.json" mac-direct
+        done
     - name: Stage immutable candidate assets
       env:
         DMG_FILE: ${{ steps.dmg.outputs.dmg_file }}
-      run: gh release upload "$RELEASE_TAG" "$DMG_FILE" "$APPCAST_PATH" .build/universal/PastaApp.dSYM.zip --clobber
+        DMG_ARM64: ${{ steps.dmg.outputs.dmg_arm64 }}
+        DMG_X86_64: ${{ steps.dmg.outputs.dmg_x86_64 }}
+      run: gh release upload "$RELEASE_TAG" "$DMG_FILE" "$DMG_ARM64" "$DMG_X86_64" "$APPCAST_PATH" .build/universal/PastaApp.dSYM.zip --clobber
     - name: Expose Alpha assets for external verification
       if: env.RELEASE_TRAIN == 'alpha'
       run: gh release edit "$RELEASE_TAG" --draft=false --prerelease --latest=false
@@ -266,8 +443,10 @@ jobs:
     - name: Record verified candidate assets
       env:
         DMG_FILE: ${{ steps.dmg.outputs.dmg_file }}
+        DMG_ARM64: ${{ steps.dmg.outputs.dmg_arm64 }}
+        DMG_X86_64: ${{ steps.dmg.outputs.dmg_x86_64 }}
       run: node scripts/release-train.mjs receipt --tag "$RELEASE_TAG" --surface mac-direct --status verified --asset "$DMG_FILE"
-        --asset "$APPCAST_PATH" --asset .build/universal/PastaApp.dSYM.zip
+        --asset "$DMG_ARM64" --asset "$DMG_X86_64" --asset "$APPCAST_PATH" --asset .build/universal/PastaApp.dSYM.zip
     - name: Publish Alpha prerelease only
       if: env.RELEASE_TRAIN == 'alpha'
       run: node scripts/release-train.mjs publish-alpha --tag "$RELEASE_TAG"

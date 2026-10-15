@@ -3,20 +3,55 @@ import { expect, test } from './fixtures';
 
 const REPO_URL = 'https://github.com/crmitchelmore/pasta';
 
-// Every "Download" call to action must send users to a GitHub release: either
-// the evergreen `releases/latest` page or a pinned DMG asset whose file name
-// carries the same version as its tag.
-const DOWNLOAD_URL =
+// Primary download buttons go to the site's /download route, which redirects straight to a DMG
+// (see _worker.js). download.js swaps in the chip-specific route when it can identify the Mac.
+const DOWNLOAD_ROUTE = /^\/download(\/apple-silicon|\/intel)?$/;
+const GITHUB_RELEASE =
   /^https:\/\/github\.com\/crmitchelmore\/pasta\/releases\/(latest|download\/v(\d+\.\d+\.\d+)\/Pasta-(\d+\.\d+\.\d+)\.dmg)$/;
 
 function assertWellFormedDownloadUrl(href: string) {
-  const match = DOWNLOAD_URL.exec(href);
+  const url = new URL(href);
+  if (url.hostname === '127.0.0.1' || url.hostname === 'localhost') {
+    expect(url.pathname, `download href should use the /download route: ${href}`).toMatch(DOWNLOAD_ROUTE);
+    return;
+  }
+  const match = GITHUB_RELEASE.exec(href);
   expect(match, `download href should point at a GitHub release: ${href}`).not.toBeNull();
   const [, , tagVersion, fileVersion] = match!;
   if (tagVersion) {
     expect(fileVersion, `DMG file version must match its tag in ${href}`).toBe(tagVersion);
   }
 }
+
+// Simulates the browser's chip report before download.js runs.
+async function emulateMac(page: import('@playwright/test').Page, hint: { platform: string; architecture?: string } | { renderer: string; astc?: boolean }) {
+  await page.addInitScript((hint) => {
+    if ('platform' in hint) {
+      Object.defineProperty(navigator, 'userAgentData', {
+        configurable: true,
+        value: { platform: hint.platform, getHighEntropyValues: async () => ({ architecture: hint.architecture ?? '' }) },
+      });
+      return;
+    }
+    Object.defineProperty(navigator, 'userAgentData', { configurable: true, value: undefined });
+    Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15' });
+    Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 0 });
+    const RENDERER = 0x9246;
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, ...rest: unknown[]) {
+      if (type !== 'webgl') return original.call(this, type, ...rest);
+      return {
+        getExtension: (name: string) =>
+          name === 'WEBGL_debug_renderer_info' ? { UNMASKED_RENDERER_WEBGL: RENDERER }
+            : name === 'WEBGL_compressed_texture_astc' ? (hint.astc ? {} : null)
+              : name === 'WEBGL_lose_context' ? { loseContext() {} } : null,
+        getParameter: (parameter: number) => (parameter === RENDERER ? hint.renderer : null),
+      };
+    } as typeof original;
+  }, hint);
+}
+
+const PRIMARY_CTAS = ['nav .nav__cta', '.hero__actions .btn--primary', '#download .btn--primary'];
 
 test.describe('landing page renders', () => {
   test('title, hero and primary sections are present', async ({ page }) => {
@@ -70,7 +105,7 @@ test.describe('landing page renders', () => {
 });
 
 test.describe('calls to action', () => {
-  test('every download CTA points at a GitHub release', async ({ page }) => {
+  test('every download CTA uses the direct download route', async ({ page }) => {
     await page.goto('/');
 
     const downloadLinks = page.getByRole('link', { name: /download/i });
@@ -81,10 +116,53 @@ test.describe('calls to action', () => {
     }
 
     // The three canonical placements: nav, hero, closing download section.
-    await expect(page.locator('nav .nav__cta')).toHaveAttribute('href', DOWNLOAD_URL);
-    await expect(page.locator('.hero__actions .btn--primary')).toHaveAttribute('href', DOWNLOAD_URL);
-    await expect(page.locator('#download .btn--primary')).toHaveAttribute('href', DOWNLOAD_URL);
+    for (const selector of PRIMARY_CTAS) {
+      await expect(page.locator(selector)).toHaveAttribute('href', DOWNLOAD_ROUTE);
+    }
   });
+
+  test('both chip-specific downloads are always offered', async ({ page }) => {
+    await page.goto('/');
+    for (const section of ['.hero__copy', '#download']) {
+      await expect(page.locator(section).getByRole('link', { name: 'Apple Silicon', exact: true })).toHaveAttribute('href', '/download/apple-silicon');
+      await expect(page.locator(section).getByRole('link', { name: 'Intel', exact: true })).toHaveAttribute('href', '/download/intel');
+    }
+  });
+
+  const detections = [
+    { name: 'Chromium on Apple Silicon', hint: { platform: 'macOS', architecture: 'arm' }, arch: 'apple-silicon', label: 'Download for Apple Silicon' },
+    { name: 'Chromium on Intel', hint: { platform: 'macOS', architecture: 'x86' }, arch: 'intel', label: 'Download for Intel Mac' },
+    { name: 'Safari on Apple Silicon', hint: { renderer: 'Apple GPU', astc: true }, arch: 'apple-silicon', label: 'Download for Apple Silicon' },
+    { name: 'Firefox on Apple Silicon', hint: { renderer: 'Apple M2 Pro' }, arch: 'apple-silicon', label: 'Download for Apple Silicon' },
+    { name: 'Safari on Intel', hint: { renderer: 'Intel(R) Iris(TM) Plus Graphics' }, arch: 'intel', label: 'Download for Intel Mac' },
+  ];
+  for (const { name, hint, arch, label } of detections) {
+    test(`detects ${name} and offers its build by default`, async ({ page }) => {
+      await emulateMac(page, hint);
+      await page.goto('/');
+      for (const selector of PRIMARY_CTAS) {
+        await expect(page.locator(selector)).toHaveAttribute('href', `/download/${arch}`);
+      }
+      await expect(page.locator('.hero__actions .btn--primary')).toContainText(label);
+      await expect(page.locator('#download .btn--primary')).toContainText(label);
+    });
+  }
+
+  for (const { name, hint } of [
+    { name: 'a non-Mac', hint: { platform: 'Windows', architecture: 'x86' } },
+    { name: 'a Mac that hides its chip', hint: { renderer: 'Apple GPU' } },
+  ]) {
+    test(`keeps the universal download for ${name}`, async ({ page }) => {
+      await emulateMac(page, hint);
+      await page.goto('/');
+      await page.waitForFunction(() => document.readyState === 'complete');
+      await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 50)));
+      for (const selector of PRIMARY_CTAS) {
+        await expect(page.locator(selector)).toHaveAttribute('href', '/download');
+      }
+      await expect(page.locator('.hero__actions .btn--primary')).toContainText('Download for Mac');
+    });
+  }
 
   test('GitHub CTAs point at the repository', async ({ page }) => {
     await page.goto('/');

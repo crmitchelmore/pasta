@@ -60,7 +60,7 @@ npm ci
 npx playwright install --with-deps chromium   # once
 
 npm test               # contract checks + Playwright smoke suite
-npm run test:contract  # appcast.xml / _redirects / _headers only (plain Node, ~1s)
+npm run test:contract  # appcast.xml, _redirects, _headers and _worker.js (plain Node, ~1s)
 npm run test:e2e       # Playwright smoke suite (Chromium, ~10s)
 npm run test:live      # ADVISORY: probes https://pasta-app.com (needs network)
 npm run report         # open the last Playwright HTML report
@@ -70,10 +70,11 @@ npm run report         # open the last Playwright HTML report
 
 | Suite | Files | Checks |
 | --- | --- | --- |
-| Playwright smoke (`tests/e2e/`) | `landing.spec.ts` | Page renders with title and hero; no console/page errors or failed requests; only the font CDN is contacted; no horizontal overflow at desktop and mobile widths; every **Download** CTA points at a GitHub release (`releases/latest` or a `releases/download/v<x.y.z>/Pasta-<x.y.z>.dmg` URL whose versions agree); GitHub/Releases/Issues links point at the repo; every `href` is well-formed, `#anchors` resolve, `target=_blank` has `rel=noopener`; every `<img>` and icon is served and decodes; `appcast.xml` is served; `lang`, one `h1`, nav/main/footer landmarks, alt text; axe-core WCAG 2.0/2.1 A+AA has zero violations. |
+| Playwright smoke (`tests/e2e/`) | `landing.spec.ts` | Page renders with title and hero; no console/page errors or failed requests; only the font CDN is contacted; no horizontal overflow at desktop and mobile widths; every primary **Download** CTA uses `/download`, and `download.js` swaps in `/download/apple-silicon` or `/download/intel` from client hints or the WebGL renderer, with the label to match; both chip links are always shown; GitHub/Releases/Issues links point at the repo; every `href` is well-formed, `#anchors` resolve, `target=_blank` has `rel=noopener`; every `<img>` and icon is served and decodes; `appcast.xml` is served; `lang`, one `h1`, nav/main/footer landmarks, alt text; axe-core WCAG 2.0/2.1 A+AA has zero violations. |
 | Appcast contract (`tests/contract/appcast.test.mjs`) | `appcast.xml` | Well-formed XML with the Sparkle namespace; >= 1 item; each item has `sparkle:shortVersionString`, integer `sparkle:version`, parseable `pubDate`, an `https://github.com/crmitchelmore/pasta/releases/download/v<x.y.z>/Pasta-<x.y.z>.dmg` enclosure whose version matches the item, a plausible `length`, and a 64-byte base64 `sparkle:edSignature`; items strictly descending and unique; the top item points at an existing `v*` git tag and is never ahead of the newest tag. |
-| Cloudflare config (`tests/contract/cloudflare-config.test.mjs`) | `_redirects`, `_headers` | Non-empty, valid syntax, `/download` -> latest release, security headers on `/*`, short non-immutable cache on `/appcast.xml`. |
-| Live probe (`tests/live/`) — **advisory** | live site | `HEAD` of `/`, `/appcast.xml`, `/download` and the top DMG URL respond 200/302 with the expected headers; live appcast top version equals the newest `v*` git tag. |
+| Cloudflare config (`tests/contract/cloudflare-config.test.mjs`) | `_redirects`, `_headers` | Non-empty, valid syntax, `/github` and `/releases` shortcuts, no stale `/download` rule, security headers and `Accept-CH: Sec-CH-UA-Arch` on `/*`, short non-immutable cache on `/appcast.xml`. |
+| Worker routes (`tests/contract/worker-routes.test.mjs`) | `_worker.js`, `_routes.json` | `/download` redirects to the DMG for the chip in `Sec-CH-UA-Arch`, else the appcast's universal DMG; `/download/apple-silicon` and `/download/intel` serve thin DMGs and fall back to universal when the release has none; Alpha routes use the validated pointer; other paths stay static. |
+| Live probe (`tests/live/`) — **advisory** | live site | `HEAD` of `/`, `/appcast.xml` and the top DMG URL respond 200 with the expected headers; `/download` redirects to the top DMG and the chip routes to their thin DMG or that same universal DMG; live appcast top version equals the newest `v*` git tag. |
 
 The Playwright suite serves this directory with `tests/support/static-server.mjs`
 and stubs every third-party request, so it can run on a plane.
@@ -114,7 +115,7 @@ landing-page/
 ├── playwright.config.ts  # Chromium-only, offline, serves this dir locally
 └── tests/
     ├── e2e/              # Playwright smoke suite
-    ├── contract/         # appcast.xml / _redirects / _headers checks (node --test)
+    ├── contract/         # appcast.xml, Cloudflare config and worker route checks (node --test)
     ├── live/             # advisory probe of the deployed site
     └── support/          # static server + shared appcast helpers
 ```

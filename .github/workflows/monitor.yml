@@ -2,7 +2,7 @@ name: Production monitor
 
 # Recurring, delivery-independent check that what users actually reach is
 # healthy (issue #110): the landing page and its security headers, the
-# /download redirect, the live Sparkle appcast (parses, signed, DMG reachable)
+# /download routes, the live Sparkle appcast (parses, signed, DMG reachable)
 # and that the feed advertises the newest PUBLISHED GitHub release. The
 # release-time checks in release.yml only run when we ship; this catches a
 # CDN, DNS, GitHub-asset or stray-deploy regression in between.
