@@ -841,3 +841,15 @@ details[open] > summary::after { content: '+'; transform: rotate(45deg); }
   }
 }
 @media (max-width: 760px) { .features::before { inset-inline: 24px; } }
+.hero__meta a {
+  color:var(--ink);
+  text-underline-offset:3px
+}
+.download>p.download__choice {
+  font-size:14px;
+  margin-top:20px
+}
+.download__choice a {
+  color:white;
+  text-underline-offset:3px
+}

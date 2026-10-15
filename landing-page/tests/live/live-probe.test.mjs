@@ -29,10 +29,26 @@ test(`live: ${ORIGIN}/ responds 200 with security headers`, async () => {
   assert.equal(response.headers.get('x-frame-options'), 'DENY', '_headers not applied on /');
 });
 
-test('live: /download redirects to the latest GitHub release', async () => {
-  const response = await probe(`${ORIGIN}/download`);
-  assert.equal(response.status, 302, 'expected the _redirects 302');
-  assert.equal(response.headers.get('location'), 'https://github.com/crmitchelmore/pasta/releases/latest');
+test('live: /download redirects straight to the DMG for the visitor\'s chip', async () => {
+  const appcast = parseAppcast(await (await probe(`${ORIGIN}/appcast.xml`, { method: 'GET' })).text());
+  const universal = appcast.items[0]?.enclosure.url ?? '';
+  assert.match(universal, DMG_URL, 'live top enclosure URL');
+
+  // Node sends no client hints, so the automatic route serves the universal DMG Sparkle also uses.
+  const automatic = await probe(`${ORIGIN}/download`);
+  assert.equal(automatic.status, 302, 'expected the _worker.js 302');
+  assert.equal(automatic.headers.get('location'), universal);
+  assert.equal(automatic.headers.get('accept-ch'), 'Sec-CH-UA-Arch');
+
+  // Releases built before the architecture split only have the universal DMG.
+  for (const [route, suffix] of [['apple-silicon', 'AppleSilicon'], ['intel', 'Intel']]) {
+    const response = await probe(`${ORIGIN}/download/${route}`);
+    assert.equal(response.status, 302, `/download/${route}`);
+    assert.ok(
+      [universal, universal.replace(/\.dmg$/, `-${suffix}.dmg`)].includes(response.headers.get('location')),
+      `/download/${route} -> ${response.headers.get('location')}`,
+    );
+  }
 });
 
 test('live: appcast.xml is served, parses, and its top DMG is downloadable', async (t) => {

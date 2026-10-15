@@ -57,25 +57,52 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
       run: |
-        gh release download "v$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --pattern "Pasta-$RELEASE_VERSION.dmg" --dir "$RUNNER_TEMP"
+        set -euo pipefail
         VERSION="$RELEASE_VERSION"
-        DMG_FILE="$RUNNER_TEMP/Pasta-$RELEASE_VERSION.dmg"
-        SHA256=$(shasum -a 256 "$DMG_FILE" | awk '{print $1}')
+        DL_DIR="$RUNNER_TEMP/homebrew-dmgs"
+        rm -rf "$DL_DIR"
+        mkdir -p "$DL_DIR"
+        ASSETS=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+        ARM_DMG="Pasta-$VERSION-AppleSilicon.dmg"
+        INTEL_DMG="Pasta-$VERSION-Intel.dmg"
 
-        echo "==> Updating Homebrew tap for version $VERSION"
-        echo "    SHA256: $SHA256"
+        # Releases built before the architecture split only carry the universal DMG.
+        if grep -qxF "$ARM_DMG" <<<"$ASSETS" && grep -qxF "$INTEL_DMG" <<<"$ASSETS"; then
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --dir "$DL_DIR" --pattern "$ARM_DMG" --pattern "$INTEL_DMG"
+          ARM_SHA256=$(shasum -a 256 "$DL_DIR/$ARM_DMG" | awk '{print $1}')
+          INTEL_SHA256=$(shasum -a 256 "$DL_DIR/$INTEL_DMG" | awk '{print $1}')
+          echo "==> Updating Homebrew tap for version $VERSION (per-architecture DMGs)"
+          echo "    arm SHA256:   $ARM_SHA256"
+          echo "    intel SHA256: $INTEL_SHA256"
+          CASK_HEAD=$(printf '%s\n' \
+            '  arch arm: "AppleSilicon", intel: "Intel"' \
+            '' \
+            "  version \"$VERSION\"" \
+            "  sha256 arm:   \"$ARM_SHA256\"," \
+            "         intel: \"$INTEL_SHA256\"" \
+            '' \
+            '  url "https://github.com/crmitchelmore/pasta/releases/download/v#{version}/Pasta-#{version}-#{arch}.dmg"')
+        else
+          gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --dir "$DL_DIR" --pattern "Pasta-$VERSION.dmg"
+          SHA256=$(shasum -a 256 "$DL_DIR/Pasta-$VERSION.dmg" | awk '{print $1}')
+          echo "==> Updating Homebrew tap for version $VERSION (universal DMG)"
+          echo "    SHA256: $SHA256"
+          CASK_HEAD=$(printf '%s\n' \
+            "  version \"$VERSION\"" \
+            "  sha256 \"$SHA256\"" \
+            '' \
+            '  url "https://github.com/crmitchelmore/pasta/releases/download/v#{version}/Pasta-#{version}.dmg"')
+        fi
 
         # Clone the tap repo
         git clone "https://x-access-token:${GH_TOKEN}@github.com/crmitchelmore/homebrew-pasta.git" /tmp/homebrew-tap
         cd /tmp/homebrew-tap
 
         # Update the cask file
-        cat > Casks/pasta.rb << EOF
-        cask "pasta" do
-          version "$VERSION"
-          sha256 "$SHA256"
-
-          url "https://github.com/crmitchelmore/pasta/releases/download/v#{version}/Pasta-#{version}.dmg"
+        {
+          echo 'cask "pasta" do'
+          echo "$CASK_HEAD"
+          cat << 'EOF'
           name "Pasta"
           desc "Blazing-fast, local-first clipboard history manager for macOS"
           homepage "https://pasta-app.com"
@@ -96,6 +123,8 @@ jobs:
           ]
         end
         EOF
+        } > Casks/pasta.rb
+        cat Casks/pasta.rb
 
         # Commit and push
         git config user.name "github-actions[bot]"

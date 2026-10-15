@@ -47,12 +47,12 @@ test('_redirects is non-empty and every rule is "<from> <to> [status]"', () => {
   }
 });
 
-test('_redirects keeps the /download, /github and /releases shortcuts pointing at GitHub', () => {
+test('_redirects keeps the /github and /releases shortcuts and leaves /download to the worker', () => {
   const text = readFileSync(resolve(LANDING_DIR, '_redirects'), 'utf8');
   const byFrom = new Map(nonCommentLines(text).map(({ line }) => line.trim().split(/\s+/)).map(([from, to, status]) => [from, { to, status }]));
 
-  assert.equal(byFrom.get('/download')?.to, 'https://github.com/crmitchelmore/pasta/releases/latest');
-  assert.equal(byFrom.get('/download')?.status, '302');
+  // Cloudflare ignores _redirects for worker routes; a stale /download rule would only mislead.
+  assert.equal(byFrom.has('/download'), false, '/download is served by _worker.js');
   assert.equal(byFrom.get('/github')?.to, 'https://github.com/crmitchelmore/pasta');
   assert.equal(byFrom.get('/releases')?.to, 'https://github.com/crmitchelmore/pasta/releases');
 });
@@ -111,6 +111,7 @@ test('_headers hardens every page and keeps the appcast fresh for Sparkle', () =
   assert.equal(global.get('x-content-type-options'), 'nosniff');
   assert.equal(global.get('x-frame-options'), 'DENY');
   assert.ok(global.has('referrer-policy'), 'Referrer-Policy on /*');
+  assert.equal(global.get('accept-ch'), 'Sec-CH-UA-Arch', 'the page must opt Chromium into sending its CPU architecture to /download');
 
   const appcast = blocks.get('/appcast.xml');
   assert.ok(appcast, '_headers must have an "/appcast.xml" block so Sparkle clients pick up releases promptly');

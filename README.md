@@ -26,7 +26,7 @@ brew install --cask pasta
 
 ### Download
 
-Download the latest Stable DMG from [Releases](https://github.com/crmitchelmore/pasta/releases/latest).
+Download Pasta from [pasta-app.com](https://pasta-app.com/download), which picks the build for your Mac. You can also choose the [Apple Silicon](https://pasta-app.com/download/apple-silicon) or [Intel](https://pasta-app.com/download/intel) build, or get the universal DMG from [Releases](https://github.com/crmitchelmore/pasta/releases/latest).
 
 ### Alpha testing
 
