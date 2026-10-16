@@ -38,8 +38,7 @@ struct AboutSettingsTab: View {
                         .accessibilityLabel("Pasta app icon")
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Pasta")
-                            .font(.title2.bold())
+                        AboutWordmark()
                         Text("Clipboard history for macOS")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -261,5 +260,25 @@ private struct SupportLinkRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// Keep extended-range rendering local to this small, already-neutral title.
+private struct AboutWordmark: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        if #available(macOS 26.0, *), colorScheme == .dark,
+           contrast == .standard, !reduceTransparency {
+            Text("Pasta")
+                .font(.title2.bold())
+                .foregroundStyle(Color.primary.exposureAdjust(log2(1.5)))
+                .allowedDynamicRange(.constrainedHigh)
+        } else {
+            Text("Pasta")
+                .font(.title2.bold())
+        }
     }
 }
