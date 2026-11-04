@@ -52,6 +52,10 @@ jobs:
       - name: Verify SwiftPM and Xcode dependency locks
         run: python3 scripts/ci-verify-dependency-locks.py
 
+      - name: Set up Ruby test dependencies on the dedicated runner
+        if: runner.environment == 'self-hosted'
+        run: gem install --user-install --no-document minitest:6.0.6 base64:0.3.0
+
       - name: Test CI and release gate failure handling
         run: |
           python3 -B -m unittest discover -s scripts/tests -p 'test_*.py' -v
