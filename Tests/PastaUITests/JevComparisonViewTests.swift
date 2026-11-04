@@ -37,20 +37,20 @@ final class JevComparisonViewTests: XCTestCase {
         if let path = ProcessInfo.processInfo.environment["JEV_PREVIEW_SNAPSHOT"] {
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: path))
         }
+    }
 
-        @MainActor
-        func testEveryAdditionalProviderCanBeSelectedWithoutDiscardingOtherReports() {
-            let original = ClipboardEntry(content: "Original text", contentType: .text)
-            let extras = [RemoteClassificationProvider.microsoftDecision, .openAI].map {
-                JevComparisonReport(generatedAt: Date(), requestedModel: $0.defaultModel,
-                                    total: 1, rows: [comparisonRow(for: original)], provider: $0)
-            }
-            let report = JevComparisonReport(generatedAt: Date(), total: 1, rows: [comparisonRow(for: original)]).including(extras)
-            for provider in [RemoteClassificationProvider.microsoftDecision, .openAI] {
-                let view = JevComparisonView(report: report, additionalProvider: provider)
-                XCTAssertEqual(view.additionalReport?.provider, provider)
-                XCTAssertEqual(view.report.additionalReports?.count, 2)
-            }
+    @MainActor
+    func testEveryAdditionalProviderCanBeSelectedWithoutDiscardingOtherReports() {
+        let original = ClipboardEntry(content: "Original text", contentType: .text)
+        let extras = [RemoteClassificationProvider.microsoftDecision, .openAI].map {
+            JevComparisonReport(generatedAt: Date(), requestedModel: $0.defaultModel,
+                                total: 1, rows: [comparisonRow(for: original)], provider: $0)
+        }
+        let report = JevComparisonReport(generatedAt: Date(), total: 1, rows: [comparisonRow(for: original)]).including(extras)
+        for provider in [RemoteClassificationProvider.microsoftDecision, .openAI] {
+            let view = JevComparisonView(report: report, additionalProvider: provider)
+            XCTAssertEqual(view.additionalReport?.provider, provider)
+            XCTAssertEqual(view.report.additionalReports?.count, 2)
         }
     }
 
