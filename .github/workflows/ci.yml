@@ -23,7 +23,8 @@ jobs:
   # silently breaks Sparkle auto-updates for every installed copy of the app.
   appcast-contract:
     name: Appcast & Cloudflare config contract
-    runs-on: ubuntu-latest
+    # Keep fork PR code on hosted runners; trusted jobs use the dedicated Linux host.
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","Linux","X64","omarchy-local"]' || '["ubuntu-latest"]') }}
     # Two bounded npm ci attempts (scripts/ci-npm-ci.sh, 180s each) must fit:
     # a stalled registry connection once pushed a plain npm ci past 5 minutes.
     timeout-minutes: 8
@@ -87,7 +88,8 @@ jobs:
   # runs when it can possibly be affected.
   landing-changes:
     name: Detect landing page changes
-    runs-on: ubuntu-latest
+    # Keep fork PR code on hosted runners; trusted jobs use the dedicated Linux host.
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","Linux","X64","omarchy-local"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -161,7 +163,8 @@ jobs:
   landing-live-probe:
     name: Landing page live probe (advisory)
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    # Keep fork PR code on hosted runners; trusted jobs use the dedicated Linux host.
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","Linux","X64","omarchy-local"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 10
     continue-on-error: true
     permissions:
@@ -494,7 +497,8 @@ jobs:
     name: CI gate
     needs: [test, ios-e2e, appcast-contract, landing-changes, landing-e2e]
     if: ${{ always() }}
-    runs-on: ubuntu-latest
+    # Keep fork PR code on hosted runners; trusted jobs use the dedicated Linux host.
+    runs-on: ${{ fromJSON((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && '["self-hosted","Linux","X64","omarchy-local"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 5
     permissions: {}
     steps:
