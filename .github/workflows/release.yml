@@ -14,13 +14,18 @@ env:
 jobs:
   build-and-release:
     name: Build, Sign, Notarize & Release
-    runs-on: pasta-local
+    runs-on: ${{ vars.PASTA_NATIVE_RUNNER || 'pasta-local' }}
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         fetch-depth: 0
         ref: ${{ inputs.manifest }}
+    - name: Select hosted Xcode
+      if: runner.environment != 'self-hosted'
+      uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90
+      with:
+        xcode-version: '26.3'
     - name: Load frozen release manifest
       env:
         MANIFEST: ${{ inputs.manifest }}

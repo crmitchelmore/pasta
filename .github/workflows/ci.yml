@@ -195,11 +195,17 @@ jobs:
 
   test:
     name: Build & Test
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'pasta-local' || 'macos-15' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (vars.PASTA_NATIVE_RUNNER || 'pasta-local') || 'macos-15' }}
     
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Select hosted Xcode
+        if: runner.environment != 'self-hosted'
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: '26.3'
       
       - name: Resolve Swift dependencies
         run: |
@@ -404,7 +410,7 @@ jobs:
   # upload. Change the script, not the steps, so the two cannot drift.
   ios-e2e:
     name: iOS E2E (XCUITest)
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'pasta-local' || 'macos-15' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (vars.PASTA_NATIVE_RUNNER || 'pasta-local') || 'macos-15' }}
     timeout-minutes: 45
     env:
       PROJECT: PastaIOS/PastaIOS.xcodeproj

@@ -10,6 +10,16 @@ DRIVER = ROOT / "scripts/ci-swift.sh"
 
 
 class SwiftBuildPathTests(unittest.TestCase):
+    def test_native_runner_override_preserves_untrusted_pr_routing(self):
+        workflows = ROOT / ".github/workflows"
+        ci = (workflows / "ci.yml").read_text()
+        trusted = "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
+        route = f"{trusted} && (vars.PASTA_NATIVE_RUNNER || 'pasta-local') || 'macos-15'"
+        self.assertEqual(ci.count(route), 2)
+        for name in ("release.yml", "release-ios.yml"):
+            self.assertIn("runs-on: ${{ vars.PASTA_NATIVE_RUNNER || 'pasta-local' }}",
+                          (workflows / name).read_text())
+
     def test_commands_preserve_pins_cache_architecture_and_guarded_scratch(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder).resolve()

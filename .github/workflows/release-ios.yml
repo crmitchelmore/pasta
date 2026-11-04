@@ -22,7 +22,7 @@ jobs:
     # The github context belongs to the caller in reusable runs, so only a
     # direct dispatch of this workflow has to come from the owner on main.
     if: github.workflow != 'Release iOS (TestFlight)' || (github.actor == github.repository_owner && github.ref == 'refs/heads/main')
-    runs-on: pasta-local
+    runs-on: ${{ vars.PASTA_NATIVE_RUNNER || 'pasta-local' }}
     timeout-minutes: 45
     env:
       DERIVED_DATA: .build/ios-derived
@@ -91,7 +91,7 @@ jobs:
   testflight:
     name: Archive, Export & Upload to TestFlight
     needs: preflight
-    runs-on: pasta-local
+    runs-on: ${{ vars.PASTA_NATIVE_RUNNER || 'pasta-local' }}
     timeout-minutes: 90
     steps:
     - name: Checkout code

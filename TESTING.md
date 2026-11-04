@@ -22,6 +22,10 @@ Packaging uses SwiftPM's `--show-bin-path`, not an assumed `.build/release`
 layout, and resolves resources and pinned Sparkle tools from those same builds.
 `scripts/tests/test_swift_build_paths.py` checks this contract; native signed
 launch and outside-world release checks are still required.
+An owner can temporarily set the repository variable `PASTA_NATIVE_RUNNER` to
+`macos-15` for CI and release workers when local capacity is unavailable, then
+delete it to restore `pasta-local`. Hosted jobs select Xcode 26.3 and retain all
+the same gates; untrusted pull requests always use GitHub-hosted runners.
 
 ## Quick Search history scope
 
