@@ -6,7 +6,7 @@ import XCTest
 
 final class DecisionModelSetupViewTests: XCTestCase {
     @MainActor
-    func testBothProviderSetupFormsRenderAtOnboardingWidth() throws {
+    func testAllProviderSetupFormsRenderAtOnboardingWidth() throws {
         for provider in RemoteClassificationProvider.allCases {
             let view = Form {
                 DecisionModelsSettingsContent(isOnboarding: true, provider: provider, readAPIKey: { nil })

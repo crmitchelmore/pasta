@@ -167,18 +167,47 @@ including before transport retries and after waiting for the sync gate.
 Live Microsoft connectivity still requires a
 real compatible deployment and key; mock transport tests do not establish it.
 
+### OpenAI
+
+Choose **OpenAI** in Settings → Detection or the optional macOS setup.
+The default connection is `https://api.openai.com/v1/responses` with
+`gpt-5.6-terra`; both endpoint and model are configurable. The model must support
+[Responses structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+OpenAI uses its own Keychain API key and validation/consent settings, separate
+from Jev and Microsoft. API billing is separate from ChatGPT subscriptions.
+Testing sends only the harmless connection-test sample and never enables uploads
+by itself. Primary, low-legacy-confidence fallback, confirmed comparison and
+confirmed history reclassification use the existing eligibility and stale-result
+guards. Images/file pastes and sensitive text without per-provider opt-in stay local.
+
+The adapter passes clipboard content as user data, sends shared type descriptions
+and custom labels as instructions, requires a strict single-choice JSON schema,
+and sets `store: false`. This disables response storage, not OpenAI's API abuse
+monitoring or other provider-side data policies. It requests no tools or browsing.
+Refusals, incomplete/malformed responses and unsupported choices fail explicitly,
+preserving the local classification; no confidence/probabilities are invented.
+HTTP 400 model/schema errors stop batches rather than repeatedly sending history.
+Comparison can display either additional provider via **Additional model**;
+JSON/CSV exports always retain all enabled provider results without clipboard text.
+
+Mock transport, persistence/E2E and offscreen UI tests cover OpenAI's schema,
+authentication, shared labels, isolation, opt-in, sensitive exclusions, retries,
+revoked in-flight authorization, malformed/refused output and multi-provider
+selection/exports. A live API connection still requires the user's own key and
+an explicit **Test Connection**; these tests do not establish live connectivity.
+
 ### Shared decision classifier types
 
-**Shared configuration → Shared classifier types** configures both models.
+**Shared configuration → Shared classifier types** configures all decision providers.
 Built-in type descriptions can be edited, and up to 32 named classifiers can be
 added with natural-language descriptions (no regex). Each custom label maps to
 an existing supported text type (not Unknown or File Path); its name appears in the item preview and
 comparison, while its mapped type controls existing filters, previews and sync.
 These are not new sidebar categories and are separate from legacy regex detectors.
 Definitions persist locally, use stable choice IDs, and are sent as System One
-criteria. The explicit Unknown/other choice remains last. Duplicate names/IDs,
+criteria or OpenAI structured-output choices. The explicit Unknown/other choice remains last. Duplicate names/IDs,
 empty or oversized descriptions and unsupported mappings are rejected.
-Changing shared rules disables both providers and invalidates their validation;
+Changing shared rules disables all providers and invalidates their validation;
 retest and explicitly enable each to resume. Old in-flight results cannot apply.
 History mutation preserves custom names in metadata across restart/sync and removes
 an old custom label when a later built-in decision replaces it.
