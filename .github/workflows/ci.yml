@@ -195,22 +195,28 @@ jobs:
 
   test:
     name: Build & Test
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'pasta-local' || 'macos-15' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (vars.PASTA_NATIVE_RUNNER || 'pasta-local') || 'macos-15' }}
     
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Select hosted Xcode
+        if: runner.environment != 'self-hosted'
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: '26.3'
       
       - name: Resolve Swift dependencies
         run: |
           python3 scripts/ci-verify-dependency-locks.py
-          swift package --cache-path "$RUNNER_TEMP/swiftpm-cache" resolve --force-resolved-versions
+          bash scripts/ci-swift.sh package resolve
       
       - name: Build
-        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c debug
+        run: bash scripts/ci-swift.sh build -c debug
       
       - name: Run tests
-        run: swift test --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions --parallel
+        run: bash scripts/ci-swift.sh test --parallel
 
       - name: Test release-notes generator
         run: node --test Tests/ReleaseNotesTests/*.test.mjs
@@ -222,7 +228,10 @@ jobs:
         run: python3 -m unittest discover -s scripts/tests -p 'test_macos_packaging.py'
       
       - name: Build release
-        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release
+        run: |
+          bash scripts/ci-swift.sh build -c release
+          echo "RELEASE_BIN_DIR=$(bash scripts/ci-swift.sh build -c release --show-bin-path)" >> "$GITHUB_ENV"
+          echo "SWIFTPM_ARTIFACTS_DIR=$(bash scripts/ci-swift.sh artifacts)" >> "$GITHUB_ENV"
       
       - name: Create test app bundle (mirrors release workflow)
         id: bundle
@@ -236,13 +245,13 @@ jobs:
           mkdir -p "$APP_DIR/Contents/Resources"
           
           # Copy binary
-          bash scripts/ci-prepare-macos-executable.sh .build/release/PastaApp
-          cp .build/release/PastaApp "$APP_DIR/Contents/MacOS/PastaApp"
-          python3 scripts/ci-stage-macos-resources.py .build/release "$APP_DIR" Resources/DMG/AppIcon.icns
+          bash scripts/ci-prepare-macos-executable.sh "$RELEASE_BIN_DIR/PastaApp"
+          cp "$RELEASE_BIN_DIR/PastaApp" "$APP_DIR/Contents/MacOS/PastaApp"
+          python3 scripts/ci-stage-macos-resources.py "$RELEASE_BIN_DIR" "$APP_DIR" Resources/DMG/AppIcon.icns
           echo "==> Copied binary"
           
           # Copy Sparkle framework (same as release.yml)
-          SPARKLE_PATH=$(find .build -name "Sparkle.framework" -type d | head -1)
+          SPARKLE_PATH=$(find "$SWIFTPM_ARTIFACTS_DIR" -name "Sparkle.framework" -type d -print -quit)
           if [ -z "$SPARKLE_PATH" ]; then
             echo "ERROR: Sparkle.framework not found!"
             exit 1
@@ -401,7 +410,7 @@ jobs:
   # upload. Change the script, not the steps, so the two cannot drift.
   ios-e2e:
     name: iOS E2E (XCUITest)
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'pasta-local' || 'macos-15' }}
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (vars.PASTA_NATIVE_RUNNER || 'pasta-local') || 'macos-15' }}
     timeout-minutes: 45
     env:
       PROJECT: PastaIOS/PastaIOS.xcodeproj

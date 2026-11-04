@@ -39,7 +39,7 @@ extension AppDelegate {
             return
         }
         guard !connections.isEmpty else {
-            showJevMessage(title: "No classifier enabled", message: "Configure, test and enable \(reclassify ? provider.title : "Jev or Microsoft Decision-1") in Settings → Detection first.")
+            showJevMessage(title: "No classifier enabled", message: "Configure, test and enable \(reclassify ? provider.title : "a decision model") in Settings → Detection first.")
             return
         }
 

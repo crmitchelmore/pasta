@@ -102,20 +102,22 @@ public struct QuickSearchView: View {
                                 resultsList
                             }
                         }
+                    }
 
-                        if !isPreviewVisible && !manager.results.isEmpty {
-                            Divider().opacity(0.3)
-                            HStack(spacing: 4) {
-                                Text("→")
-                                    .font(.system(.caption, design: .rounded).weight(.medium))
-                                Text("Preview")
-                                    .font(.caption)
+                    if !manager.isCommandMode {
+                        Divider().opacity(0.3)
+                        HStack(spacing: 8) {
+                            Text(manager.resultSummary)
+                                .help("Category counts are history totals, not query match counts. Search to find older items; use the full app to browse more results.")
+                            Spacer(minLength: 0)
+                            if !isPreviewVisible && !manager.results.isEmpty {
+                                Text("→ Preview")
                             }
-                            .foregroundStyle(.secondary.opacity(0.6))
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 4)
                         }
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
                     }
 
                     // Command feedback
@@ -354,7 +356,7 @@ public struct QuickSearchView: View {
                     title: "All",
                     icon: "tray.full",
                     isSelected: manager.selectedFilter == nil && !manager.showPinnedOnly,
-                    count: nil
+                    count: manager.totalCount
                 ) {
                     manager.showPinnedOnly = false
                     manager.selectedFilter = nil
@@ -385,6 +387,7 @@ public struct QuickSearchView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
         }
+        .help("Counts are history totals, not query match counts. Scroll horizontally for more categories.")
     }
 
     private var emptyState: some View {

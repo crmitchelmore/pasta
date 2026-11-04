@@ -14,13 +14,18 @@ env:
 jobs:
   build-and-release:
     name: Build, Sign, Notarize & Release
-    runs-on: pasta-local
+    runs-on: ${{ vars.PASTA_NATIVE_RUNNER || 'pasta-local' }}
     steps:
     - name: Checkout code
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
         fetch-depth: 0
         ref: ${{ inputs.manifest }}
+    - name: Select hosted Xcode
+      if: runner.environment != 'self-hosted'
+      uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90
+      with:
+        xcode-version: '26.3'
     - name: Load frozen release manifest
       env:
         MANIFEST: ${{ inputs.manifest }}
@@ -33,20 +38,26 @@ jobs:
     - name: Resolve Swift dependencies
       run: 'python3 scripts/ci-verify-dependency-locks.py
 
-        swift package --cache-path "$RUNNER_TEMP/swiftpm-cache" resolve --force-resolved-versions
+        bash scripts/ci-swift.sh package resolve
 
         '
     - name: Build release binary (arm64)
-      run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release --arch arm64
+      run: |
+        bash scripts/ci-swift.sh build -c release --arch arm64
+        echo "ARM64_BIN_DIR=$(bash scripts/ci-swift.sh build -c release --arch arm64 --show-bin-path)" >> "$GITHUB_ENV"
+        echo "SWIFTPM_ARTIFACTS_DIR=$(bash scripts/ci-swift.sh artifacts --arch arm64)" >> "$GITHUB_ENV"
+        echo "SPARKLE_SIGN_UPDATE=$(bash scripts/ci-swift.sh artifacts --arch arm64)/sparkle/Sparkle/bin/sign_update" >> "$GITHUB_ENV"
     - name: Build release binary (x86_64)
-      run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release --arch x86_64
+      run: |
+        bash scripts/ci-swift.sh build -c release --arch x86_64
+        echo "X86_64_BIN_DIR=$(bash scripts/ci-swift.sh build -c release --arch x86_64 --show-bin-path)" >> "$GITHUB_ENV"
     - name: Create universal binary
       run: |
         set -euo pipefail
         mkdir -p .build/universal
         lipo -create \
-          .build/arm64-apple-macosx/release/PastaApp \
-          .build/x86_64-apple-macosx/release/PastaApp \
+          "$ARM64_BIN_DIR/PastaApp" \
+          "$X86_64_BIN_DIR/PastaApp" \
           -output .build/universal/PastaApp
         bash scripts/ci-prepare-macos-executable.sh .build/universal/PastaApp
         file .build/universal/PastaApp
@@ -55,8 +66,8 @@ jobs:
         \nAPP_DIR=\"${BUILD_DIR}/${DMG_NAME}.app\"\n\necho \"==> Creating app bundle at $APP_DIR\"\nrm -rf \"$APP_DIR\"\n\
         mkdir -p \"$APP_DIR/Contents/MacOS\"\nmkdir -p \"$APP_DIR/Contents/Resources\"\nmkdir -p \"$APP_DIR/Contents/Frameworks\"\
         \n\n# Copy the universal binary (keep internal name as PastaApp)\ncp \".build/universal/${APP_NAME}\" \"$APP_DIR/Contents/MacOS/${APP_NAME}\"\
-        \n\n# Stage runtime resources once, with matching train artwork\npython3 scripts/ci-stage-macos-resources.py .build/arm64-apple-macosx/release \"$APP_DIR\" \"$ICON_PATH\"\n\n\
-        # Copy Sparkle framework\nSPARKLE_PATH=$(find .build -name \"Sparkle.framework\" -type d | head -1)\nif [ -n \"$SPARKLE_PATH\"\
+        \n\n# Stage runtime resources once, with matching train artwork\npython3 scripts/ci-stage-macos-resources.py \"$ARM64_BIN_DIR\" \"$APP_DIR\" \"$ICON_PATH\"\n\n\
+        # Copy Sparkle framework\nSPARKLE_PATH=$(find \"$SWIFTPM_ARTIFACTS_DIR\" -name \"Sparkle.framework\" -type d -print -quit)\nif [ -n \"$SPARKLE_PATH\"\
         \ ]; then\n  echo \"==> Copying Sparkle framework from $SPARKLE_PATH\"\n  cp -R \"$SPARKLE_PATH\" \"$APP_DIR/Contents/Frameworks/\"\
         \nelse\n  echo \"ERROR: Sparkle.framework not found!\"\n  exit 1\nfi\n\n# Fix rpath to find frameworks in Contents/Frameworks\n\
         echo \"==> Fixing rpath for Sparkle framework\"\ninstall_name_tool -add_rpath \"@executable_path/../Frameworks\" \"\

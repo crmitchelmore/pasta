@@ -13,8 +13,12 @@ final class JevComparisonViewTests: XCTestCase {
                                             latency: 0.08, jevModel: "Microsoft-Decision-1")
         let microsoft = JevComparisonReport(generatedAt: Date(), requestedModel: "microsoft-decision-1",
                                             total: 1, rows: [microsoftRow], provider: .microsoftDecision)
-        let report = JevComparisonReport(generatedAt: Date(), total: 1, rows: [comparisonRow(for: original)]).including([microsoft])
-        let view = JevComparisonView(report: report, originalEntries: [original.id: original], onCopy: { _ in })
+        let openAI = JevComparisonReport(generatedAt: Date(), requestedModel: "gpt-5.6-terra",
+                                         total: 1, rows: [comparisonRow(for: original)], provider: .openAI)
+        let report = JevComparisonReport(generatedAt: Date(), total: 1, rows: [comparisonRow(for: original)]).including([microsoft, openAI])
+        let comparison = JevComparisonView(report: report, originalEntries: [original.id: original], additionalProvider: .openAI, onCopy: { _ in })
+        XCTAssertEqual(comparison.additionalReport?.provider, .openAI)
+        let view = comparison
             .background(Color(nsColor: .windowBackgroundColor))
         _ = NSApplication.shared
         let window = NSWindow(
@@ -32,6 +36,21 @@ final class JevComparisonViewTests: XCTestCase {
         XCTAssertGreaterThan(bitmap.pixelsHigh, 0)
         if let path = ProcessInfo.processInfo.environment["JEV_PREVIEW_SNAPSHOT"] {
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: path))
+        }
+    }
+
+    @MainActor
+    func testEveryAdditionalProviderCanBeSelectedWithoutDiscardingOtherReports() {
+        let original = ClipboardEntry(content: "Original text", contentType: .text)
+        let extras = [RemoteClassificationProvider.microsoftDecision, .openAI].map {
+            JevComparisonReport(generatedAt: Date(), requestedModel: $0.defaultModel,
+                                total: 1, rows: [comparisonRow(for: original)], provider: $0)
+        }
+        let report = JevComparisonReport(generatedAt: Date(), total: 1, rows: [comparisonRow(for: original)]).including(extras)
+        for provider in [RemoteClassificationProvider.microsoftDecision, .openAI] {
+            let view = JevComparisonView(report: report, additionalProvider: provider)
+            XCTAssertEqual(view.additionalReport?.provider, provider)
+            XCTAssertEqual(view.report.additionalReports?.count, 2)
         }
     }
 

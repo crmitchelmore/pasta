@@ -31,8 +31,13 @@ echo "$PRIVATE_KEY_BASE64" > "$PRIVATE_KEY_FILE"
 echo "Private key written" >&2
 
 # Find Sparkle's sign_update tool
-SIGN_UPDATE=""
-if [ -f ".build/artifacts/sparkle/Sparkle/bin/sign_update" ]; then
+SIGN_UPDATE="${SPARKLE_SIGN_UPDATE:-}"
+if [ -n "$SIGN_UPDATE" ]; then
+    if [ ! -x "$SIGN_UPDATE" ]; then
+        echo "ERROR: configured Sparkle sign_update is missing or not executable: $SIGN_UPDATE" >&2
+        exit 1
+    fi
+elif [ -f ".build/artifacts/sparkle/Sparkle/bin/sign_update" ]; then
     SIGN_UPDATE=".build/artifacts/sparkle/Sparkle/bin/sign_update"
 elif command -v sign_update &> /dev/null; then
     SIGN_UPDATE="sign_update"

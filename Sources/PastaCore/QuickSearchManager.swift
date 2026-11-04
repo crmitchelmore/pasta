@@ -17,6 +17,8 @@ public final class QuickSearchManager: ObservableObject {
     @Published public var selectedIndex: Int = 0
     @Published public private(set) var availableFilters: [FilterInfo] = []
     @Published public private(set) var pinnedCount: Int = 0
+    @Published public private(set) var totalCount: Int? = nil
+    @Published public private(set) var isUsingLoadedHistory: Bool = true
     @Published public private(set) var isReady: Bool = false
     
     // Command mode state
@@ -34,12 +36,23 @@ public final class QuickSearchManager: ObservableObject {
     private var entriesSubscription: AnyCancellable?
     private var searchDebounceTask: Task<Void, Never>?
     private var searchTask: Task<Void, Never>?
-    private var pinnedCountTask: Task<Void, Never>?
+    private var countsTask: Task<Void, Never>?
     
     // Database reference for FTS5 search
     private var database: DatabaseManager?
     
-    private init() {}
+    init() {}
+
+    public var resultSummary: String {
+        if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return isUsingLoadedHistory
+                ? "Up to 50 recent items · loaded history only"
+                : "Up to 50 recent items · all history"
+        }
+        return isUsingLoadedHistory
+            ? "Up to 20 matches · loaded history only"
+            : "Up to 20 matches · all history"
+    }
     
     // MARK: - Public API
     
@@ -48,11 +61,14 @@ public final class QuickSearchManager: ObservableObject {
         PastaLogger.search.debug("QuickSearchManager.initialize called: initialEntries=\(initialEntries.count)")
         
         self.database = database
+        countsTask?.cancel()
+        totalCount = nil
+        pinnedCount = 0
+        availableFilters = []
+        isUsingLoadedHistory = database == nil
         
         // Load initial entries immediately (don't wait for publisher)
-        if !initialEntries.isEmpty {
-            updateEntries(initialEntries)
-        }
+        updateEntries(initialEntries)
         
         entriesSubscription = entriesPublisher
             .receive(on: DispatchQueue.main)
@@ -64,13 +80,16 @@ public final class QuickSearchManager: ObservableObject {
     
     /// Reset state for fresh search (call when showing quick search)
     public func prepareForSearch() {
+        searchDebounceTask?.cancel()
+        searchTask?.cancel()
         query = ""
         selectedFilter = nil
         showPinnedOnly = false
         selectedIndex = 0
         isCommandMode = false
         commandResults = []
-        results = Array(allEntries.prefix(50))
+        computeAvailableFilters()
+        updateResultsImmediate()
         PastaLogger.search.debug("prepareForSearch: allEntries=\(allEntries.count), results=\(results.count)")
     }
     
@@ -101,7 +120,6 @@ public final class QuickSearchManager: ObservableObject {
     // MARK: - Entry Updates
     
     private func updateEntries(_ entries: [ClipboardEntry]) {
-        let oldCount = allEntries.count
         allEntries = entries
         isReady = true
         PastaLogger.search.debug("Entries updated: \(entries.count) entries (FTS5 search ready)")
@@ -110,46 +128,55 @@ public final class QuickSearchManager: ObservableObject {
         computeAvailableFilters()
         
         // If showing results, refresh them
-        if query.isEmpty {
+        if isCommandMode {
+            return
+        } else if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             updateResultsImmediate()
-        } else if oldCount != entries.count {
+        } else {
             // Content changed, re-search
             performSearch()
         }
     }
     
     private func computeAvailableFilters() {
-        var counts: [ContentType: Int] = [:]
-        for entry in allEntries.prefix(1000) {
-            counts[entry.contentType, default: 0] += 1
-        }
-
-        // Pinned counts are typically tiny but pinned items are often older than
-        // the 1000-entry sample. Prefer the database for an accurate total; fall
-        // back to a full scan when the database isn't available (tests). Both
-        // run off the main actor: this is called on every entries publish.
-        pinnedCountTask?.cancel()
+        countsTask?.cancel()
         let database = database
         let snapshot = allEntries
-        pinnedCountTask = Task { [weak self] in
-            let count = await Task.detached(priority: .utility) { () -> Int in
-                if let database {
-                    do {
-                        return try database.pinnedCount()
-                    } catch {
-                        PastaLogger.search.error("pinnedCount() failed: \(PastaLogger.diagnosticDescription(error))")
+        countsTask = Task { [weak self] in
+            let result = await withCancellableDetachedTask(priority: .utility) {
+                Result {
+                    try Task.checkCancellation()
+                    if let database { return try database.quickSearchCounts() }
+                    var counts = QuickSearchCounts()
+                    for entry in snapshot {
+                        counts.types[entry.contentType, default: 0] += 1
+                        counts.total += 1
+                        if entry.isPinned { counts.pinned += 1 }
                     }
+                    return counts
                 }
-                return snapshot.reduce(0) { $0 + ($1.isPinned ? 1 : 0) }
-            }.value
-            guard !Task.isCancelled else { return }
-            self?.pinnedCount = count
+            }
+            guard !Task.isCancelled, let self else { return }
+            switch result {
+            case .success(let counts):
+                applyCounts(counts)
+            case .failure(let error):
+                PastaLogger.logError(error, logger: PastaLogger.search, context: "Quick Search history counts failed")
+                totalCount = nil
+                pinnedCount = 0
+                availableFilters = []
+            }
         }
+    }
 
-        availableFilters = counts
+    private func applyCounts(_ counts: QuickSearchCounts) {
+        totalCount = counts.total
+        pinnedCount = counts.pinned
+        availableFilters = counts.types
             .filter { $0.value > 0 }
-            .sorted { $0.value > $1.value }
-            .prefix(8)
+            .sorted {
+                $0.value == $1.value ? $0.key.rawValue < $1.key.rawValue : $0.value > $1.value
+            }
             .map { FilterInfo(type: $0.key, count: $0.value) }
     }
     
@@ -211,12 +238,44 @@ public final class QuickSearchManager: ObservableObject {
     }
     
     private func updateResultsImmediate() {
+        searchTask?.cancel()
         selectedIndex = 0
 
-        results = Array(allEntries.lazy
+        results = Array(allEntries.prefix(200).lazy
             .filter { !self.showPinnedOnly || $0.isPinned }
             .filter { self.selectedFilter == nil || $0.contentType == self.selectedFilter }
             .prefix(50))
+        isUsingLoadedHistory = true
+
+        let database = database
+        let snapshot = allEntries
+        let filter = selectedFilter
+        let pinned = showPinnedOnly
+        searchTask = Task { [weak self] in
+            let recent = await withCancellableDetachedTask(priority: .userInitiated) {
+                Result {
+                    try Task.checkCancellation()
+                    if let database {
+                        return try database.fetchRecent(contentType: filter, limit: 50, pinnedOnly: pinned)
+                    }
+                    return Array(snapshot.lazy
+                        .filter { !pinned || $0.isPinned }
+                        .filter { filter == nil || $0.contentType == filter }
+                        .prefix(50))
+                }
+            }
+            guard !Task.isCancelled, let self,
+                  query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  selectedFilter == filter, showPinnedOnly == pinned else { return }
+            switch recent {
+            case .success(let entries):
+                results = entries
+                selectedIndex = min(selectedIndex, max(0, entries.count - 1))
+                isUsingLoadedHistory = database == nil
+            case .failure(let error):
+                PastaLogger.logError(error, logger: PastaLogger.search, context: "Quick Search recent history failed")
+            }
+        }
     }
     
     private func performSearch() {
@@ -236,7 +295,7 @@ public final class QuickSearchManager: ObservableObject {
 
         searchTask?.cancel()
         searchTask = Task {
-            let searchResult = await withCancellableDetachedTask(priority: .userInitiated) { () -> [ClipboardEntry]? in
+            let searchResult = await withCancellableDetachedTask(priority: .userInitiated) { () -> (entries: [ClipboardEntry], loadedOnly: Bool)? in
                 // A superseded query must not keep the DB queue busy.
                 guard !Task.isCancelled else { return nil }
 
@@ -246,21 +305,22 @@ public final class QuickSearchManager: ObservableObject {
                         let matches = try dbSnapshot.searchFTS(query: querySnapshot, contentType: filterSnapshot, limit: 20, pinnedOnly: pinnedSnapshot)
                         let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
                         PastaLogger.search.debug("FTS5 search: \(matches.count) results in \(String(format: "%.1f", elapsed))ms")
-                        return matches
+                        return (matches, false)
                     } catch {
                         PastaLogger.search.error("FTS5 search failed: \(PastaLogger.diagnosticDescription(error))")
                     }
                 }
 
                 guard !Task.isCancelled else { return nil }
-                return Self.fallbackMatches(query: querySnapshot, entries: entriesSnapshot, filter: filterSnapshot, pinnedOnly: pinnedSnapshot)
+                return (Self.fallbackMatches(query: querySnapshot, entries: entriesSnapshot, filter: filterSnapshot, pinnedOnly: pinnedSnapshot), true)
             }
 
             guard !Task.isCancelled, let searchResult else { return }
             guard query.trimmingCharacters(in: .whitespacesAndNewlines) == querySnapshot else { return }
             guard selectedFilter == filterSnapshot else { return }
             guard showPinnedOnly == pinnedSnapshot else { return }
-            results = searchResult
+            results = searchResult.entries
+            isUsingLoadedHistory = searchResult.loadedOnly
         }
     }
 
