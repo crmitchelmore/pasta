@@ -15,6 +15,14 @@ two-device clipboard journey. Use this map when describing release confidence.
 | Sparkle release | Live feed/DMG verification checks metadata, signatures, notarization and launch; failure drafts the GitHub release. | No installed older app is driven through Sparkle's update UI and relaunch. Drafting does not undo already-downloaded copies. |
 | TestFlight | Processing must report `VALID`; rejection or unverified timeout fails. | Upload has already occurred. `VALID` is processing acceptance, not an installed-device journey or external tester approval. Timeout does not cancel processing. |
 
+Native CI and direct-release workers use `scripts/ci-swift.sh` to keep dependency
+pins, the package cache and scratch storage consistent. Guarded runners build
+inside their assigned storage; ARM/Intel builds have separate scratch roots.
+Packaging uses SwiftPM's `--show-bin-path`, not an assumed `.build/release`
+layout, and resolves resources and pinned Sparkle tools from those same builds.
+`scripts/tests/test_swift_build_paths.py` checks this contract; native signed
+launch and outside-world release checks are still required.
+
 ## Quick Search history scope
 
 Quick Search category chips (including All and Pinned) show cached full-database

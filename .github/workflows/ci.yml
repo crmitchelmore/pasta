@@ -204,13 +204,13 @@ jobs:
       - name: Resolve Swift dependencies
         run: |
           python3 scripts/ci-verify-dependency-locks.py
-          swift package --cache-path "$RUNNER_TEMP/swiftpm-cache" resolve --force-resolved-versions
+          bash scripts/ci-swift.sh package resolve
       
       - name: Build
-        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c debug
+        run: bash scripts/ci-swift.sh build -c debug
       
       - name: Run tests
-        run: swift test --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions --parallel
+        run: bash scripts/ci-swift.sh test --parallel
 
       - name: Test release-notes generator
         run: node --test Tests/ReleaseNotesTests/*.test.mjs
@@ -222,7 +222,10 @@ jobs:
         run: python3 -m unittest discover -s scripts/tests -p 'test_macos_packaging.py'
       
       - name: Build release
-        run: swift build --cache-path "$RUNNER_TEMP/swiftpm-cache" --force-resolved-versions -c release
+        run: |
+          bash scripts/ci-swift.sh build -c release
+          echo "RELEASE_BIN_DIR=$(bash scripts/ci-swift.sh build -c release --show-bin-path)" >> "$GITHUB_ENV"
+          echo "SWIFTPM_ARTIFACTS_DIR=$(bash scripts/ci-swift.sh artifacts)" >> "$GITHUB_ENV"
       
       - name: Create test app bundle (mirrors release workflow)
         id: bundle
@@ -236,13 +239,13 @@ jobs:
           mkdir -p "$APP_DIR/Contents/Resources"
           
           # Copy binary
-          bash scripts/ci-prepare-macos-executable.sh .build/release/PastaApp
-          cp .build/release/PastaApp "$APP_DIR/Contents/MacOS/PastaApp"
-          python3 scripts/ci-stage-macos-resources.py .build/release "$APP_DIR" Resources/DMG/AppIcon.icns
+          bash scripts/ci-prepare-macos-executable.sh "$RELEASE_BIN_DIR/PastaApp"
+          cp "$RELEASE_BIN_DIR/PastaApp" "$APP_DIR/Contents/MacOS/PastaApp"
+          python3 scripts/ci-stage-macos-resources.py "$RELEASE_BIN_DIR" "$APP_DIR" Resources/DMG/AppIcon.icns
           echo "==> Copied binary"
           
           # Copy Sparkle framework (same as release.yml)
-          SPARKLE_PATH=$(find .build -name "Sparkle.framework" -type d | head -1)
+          SPARKLE_PATH=$(find "$SWIFTPM_ARTIFACTS_DIR" -name "Sparkle.framework" -type d -print -quit)
           if [ -z "$SPARKLE_PATH" ]; then
             echo "ERROR: Sparkle.framework not found!"
             exit 1
