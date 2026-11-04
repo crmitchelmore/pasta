@@ -198,13 +198,16 @@ extension DatabaseManager {
 
     /// Newest-first head of the history. Ties on `timestamp` are broken by
     /// rowid so the order agrees with `fetchHistoryPage(after:limit:)`.
-    public func fetchRecent(contentType: ContentType?, limit: Int = 50) throws -> [ClipboardEntry] {
+    public func fetchRecent(contentType: ContentType?, limit: Int = 50, pinnedOnly: Bool = false) throws -> [ClipboardEntry] {
         try dbWriter.read { db in
             var request = ClipboardEntry
                 .order(Column("timestamp").desc, Column.rowID.desc)
 
             if let contentType {
                 request = request.filter(Column("contentType") == contentType.rawValue)
+            }
+            if pinnedOnly {
+                request = request.filter(Column("isPinned") == true)
             }
 
             return try request

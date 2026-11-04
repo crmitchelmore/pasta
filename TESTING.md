@@ -15,6 +15,26 @@ two-device clipboard journey. Use this map when describing release confidence.
 | Sparkle release | Live feed/DMG verification checks metadata, signatures, notarization and launch; failure drafts the GitHub release. | No installed older app is driven through Sparkle's update UI and relaunch. Drafting does not undo already-downloaded copies. |
 | TestFlight | Processing must report `VALID`; rejection or unverified timeout fails. | Upload has already occurred. `VALID` is processing acceptance, not an installed-device journey or external tester approval. Timeout does not cancel processing. |
 
+## Quick Search history scope
+
+Quick Search category chips (including All and Pinned) show cached full-database
+totals, independent of the current query or how much history has loaded into the
+main window. Every nonempty category is available in the horizontally scrollable
+bar. Off-main SQLite aggregation refreshes the cache whenever history publishes
+and when Quick Search opens, including writes through other database connections.
+This covers inserts, deletes, pin changes and reclassification without loading
+clipboard payloads or counting on each keystroke.
+The panel shows at most 50 recent items or 20 ranked search matches; its footer
+states those limits. Empty-query category and pin filters also read the full
+database with a 50-row limit. FTS ranking and debounce behavior are unchanged.
+If the database is unavailable, the footer explicitly says "loaded history only".
+
+`swift test --filter QuickSearchManagerTests` covers histories beyond 1,000
+entries with only 200 loaded, every nonempty category, same-size publications,
+external-connection writes, older category/pinned results, result limits and
+superseded fetches. These are service tests, not a visual or
+global-hotkey UI journey.
+
 ## Remote classification and comparison
 
 macOS onboarding offers decision-model setup immediately after Welcome. Existing
