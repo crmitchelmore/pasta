@@ -116,6 +116,17 @@ final class TailnetFilesTests: XCTestCase {
         let received = try reopened.finish(value)
         XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: received.filePaths[0])), Data([1, 2, 3]))
     }
+    func testReceivedFilesAndFoldersAreQuarantined() throws {
+        let files = try TailnetFiles(root: root.appendingPathComponent("holding"))
+        let value = manifest(path: "0/folder/file")
+        _ = try files.begin(value, limit: 10)
+        try files.appendChunk(Data([1, 2, 3]), index: 0, offset: 0, manifest: value)
+        let received = try files.finish(value)
+        let file = received.filePaths[0]
+        for path in [file, (file as NSString).deletingLastPathComponent] {
+            XCTAssertGreaterThan(getxattr(path, "com.apple.quarantine", nil, 0, 0, 0), 0, path)
+        }
+    }
     func testCompletedFileRenameRecoversBeforeReceiptCommit() throws {
         let files = try TailnetFiles(root: root.appendingPathComponent("holding"))
         let value = manifest()

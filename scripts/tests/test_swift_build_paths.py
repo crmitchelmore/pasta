@@ -67,3 +67,22 @@ class SwiftBuildPathTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("configured Sparkle sign_update is missing", result.stderr)
             self.assertNotIn("downloading", result.stderr)
+
+    def test_downloaded_signing_tool_must_match_pinned_checksum(self):
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            dmg = folder / "sample.dmg"
+            dmg.write_bytes(b"sample")
+            bin_dir = folder / "bin"
+            bin_dir.mkdir()
+            fake_curl = bin_dir / "curl"
+            fake_curl.write_text('#!/bin/bash\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && { printf tampered > "$2"; shift; }; shift; done\n')
+            fake_curl.chmod(0o755)
+            env = {k: v for k, v in os.environ.items() if k != "SPARKLE_SIGN_UPDATE"}
+            env["PATH"] = f"{bin_dir}:/usr/bin:/bin"
+            result = subprocess.run(
+                ["bash", str(ROOT / "scripts/generate-appcast.sh"), "1.11.0", "123", str(dmg), "test-key"],
+                cwd=folder, env=env, text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("checksum mismatch", result.stderr)
+            self.assertNotIn("Running sign_update", result.stderr)

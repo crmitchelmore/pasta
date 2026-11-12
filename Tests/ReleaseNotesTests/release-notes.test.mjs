@@ -139,4 +139,10 @@ test("Markdown notes are converted to safe Sparkle HTML", () => {
     assert.doesNotMatch(html, /## Overview/);
 });
 
+test("Sparkle HTML links and text cannot break out of attributes", () => {
+    const html = markdownToHTML(`- See https://example.com/a?b=1&c=2" onmouseover="x' and it's done\n`);
+    assert.match(html, /<a href="https:\/\/example\.com\/a\?b=1&amp;c=2">https:\/\/example\.com\/a\?b=1&amp;c=2<\/a>&quot; onmouseover=&quot;x&#39; and it&#39;s done/);
+    assert.doesNotMatch(html, /" onmouseover=/);
+});
+
 
