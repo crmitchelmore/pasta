@@ -419,10 +419,17 @@ final class PastaIOSUITests: PastaUITestCase {
         XCTAssertEqual(control.value as? String, enabled ? "0" : "1", "Journey must start in the opposite consent state", file: file, line: line)
         // SwiftUI may give the switch a full-row frame including its label.
         // The trailing edge is the actual switch thumb on this English UI.
+        let target = enabled ? "1" : "0"
+        let original = enabled ? "0" : "1"
         control.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-        let changed = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", enabled ? "1" : "0"), object: control
-        )
+        // A tap landing while the list is still decelerating from a reveal
+        // swipe only stops the scroll. Retap solely if the state is unchanged,
+        // so a slow toggle can never be flipped back.
+        let quick = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", target), object: control)
+        if XCTWaiter().wait(for: [quick], timeout: 2) != .completed, control.value as? String == original {
+            control.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        }
+        let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", target), object: control)
         XCTAssertEqual(XCTWaiter().wait(for: [changed], timeout: Self.uiTimeout), .completed,
                        "Tapping consent must visibly change the switch", file: file, line: line)
     }
