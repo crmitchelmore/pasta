@@ -297,7 +297,7 @@ If a restricted entitlement is in the binary but not in the provisioning profile
 Xcode adds this automatically, but manual `codesign` does not. Without it, CloudKit fails at runtime with `CKError 8 "Missing Entitlement"`. Format: `TeamID.BundleID` (e.g. `8X4ZN58TYH.com.pasta.clipboard`).
 
 ### Rule 4: ALWAYS launch-test the signed binary
-Both CI and release workflows MUST launch the signed bundle with `scripts/ci-launch-smoke.sh`, which waits for the app's `PASTA_CI_READY` marker and then requires a clean exit on SIGTERM. This is the ONLY way to catch:
+Both CI (every main push, and PRs routed to the full lane) and release workflows MUST launch the signed bundle with `scripts/ci-launch-smoke.sh`, which waits for the app's `PASTA_CI_READY` marker and then requires a clean exit on SIGTERM. This is the ONLY way to catch:
 - AMFI SIGKILL from restricted entitlements
 - dyld crashes from framework signing issues
 - Missing framework bundles

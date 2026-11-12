@@ -120,7 +120,9 @@ Only schema definitions were copied. No Stable user data was migrated.
 
 ## Validation and recovery
 
-Native macOS/iOS E2E, appcast contract and applicable browser CI remain mandatory.
+Native macOS/iOS E2E, appcast contract and applicable browser CI remain mandatory
+for the exact commit. They always run on main after merge, while PRs get the fast
+gate (see `AGENTS.md`, Release gates), so a red main never allocates an Alpha.
 Release archives also run signing, notarisation, launch and external download
 checks. GitHub, Pages and Homebrew publication is not atomic: if post-publication
 verification fails, the release is drafted and the failed workflow identifies the

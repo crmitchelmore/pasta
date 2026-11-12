@@ -1,8 +1,9 @@
 # Testing PastaIOS
 
 The iOS companion app has an end-to-end XCUITest suite, `PastaIOSUITests`, that
-drives the real app on an iPhone simulator. It runs in CI on every push and pull
-request (`ios-e2e` job in `.github/workflows/ci.yml`) to detect launch, navigation, capture, persistence, and search regressions.
+drives the real app on an iPhone simulator. It runs in CI on every push to `main`
+and on pull requests that touch `PastaIOS/**`, packaging paths or carry the `ci:full` label
+(`ios-e2e` job in `.github/workflows/ci.yml`), to detect launch, navigation, capture, persistence, and search regressions.
 Passing these tests supports those paths; it does not prove every production
 journey. See [the cross-surface coverage map](../TESTING.md).
 

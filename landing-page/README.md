@@ -101,6 +101,9 @@ appcast whenever `landing-page/**` changes on `main`.
 - **Landing page live probe (advisory)** — pushes to `main` and manual
   dispatch only; `continue-on-error`, so it can never block a merge.
 
+The native suites (`Build & Test`, iOS XCUITests) live in the same workflow; see
+`AGENTS.md` for which run on PRs and which run only after merge.
+
 ## Structure
 
 ```
