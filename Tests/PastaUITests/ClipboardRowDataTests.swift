@@ -3,58 +3,36 @@ import PastaCore
 @testable import PastaUI
 
 final class ClipboardRowDataTests: XCTestCase {
-    func testMixedClassificationPreservesCodeAndAppearsInSharedRowMetadata() throws {
+    func testRowDataDerivesBoundedMaskedPreviewsAndStableHeaders() throws {
         let metadata = try ContentComposition.metadata(nil, content: #"{"url":"https://example.com"}"#,
             values: [(.url, "https://example.com")], analysisTruncated: false)
-        let row = ClipboardRowData(from: ClipboardEntry(content: "", contentType: .code, metadata: metadata))
-        XCTAssertEqual(row.contentType, .code)
-        XCTAssertEqual(row.classificationTitle, "Mixed \u{00b7} Code")
-        XCTAssertEqual(row.classificationBadge, "MIXED \u{00b7} CODE")
-        XCTAssertEqual(row.quickSearchMetadataSegments.first, row.classificationTitle)
-    }
+        let mixed = ClipboardRowData(from: ClipboardEntry(content: "", contentType: .code, metadata: metadata))
+        XCTAssertEqual(mixed.contentType, .code)
+        XCTAssertEqual(mixed.classificationTitle, "Mixed \u{00b7} Code")
+        XCTAssertEqual(mixed.classificationBadge, "MIXED \u{00b7} CODE")
+        XCTAssertEqual(mixed.quickSearchMetadataSegments.first, mixed.classificationTitle)
 
-    func testContentLengthUsesUTF8Bytes() {
         // utf8.count is O(1) for native strings; grapheme counting is not.
-        let entry = ClipboardEntry(content: "héllo", contentType: .text)
-        let row = ClipboardRowData(from: entry)
-        XCTAssertEqual(row.contentLength, "héllo".utf8.count)
-    }
+        XCTAssertEqual(ClipboardRowData(from: ClipboardEntry(content: "héllo", contentType: .text)).contentLength, "héllo".utf8.count)
 
-    func testPreviewTextTrimsAndCaps() {
-        let entry = ClipboardEntry(
-            content: "  \n" + String(repeating: "a", count: 500) + "\n ",
-            contentType: .text
-        )
-        let row = ClipboardRowData(from: entry)
-        XCTAssertEqual(row.previewText.count, 300)
-        XCTAssertTrue(row.previewText.allSatisfy { $0 == "a" })
-    }
+        let long = ClipboardRowData(from: ClipboardEntry(
+            content: "  \n" + String(repeating: "a", count: 500) + "\n ", contentType: .text))
+        XCTAssertEqual(long.previewText.count, 300)
+        XCTAssertTrue(long.previewText.allSatisfy { $0 == "a" })
 
-    func testCreditCardPreviewMasksAllButLastFour() {
-        let entry = ClipboardEntry(content: "4111 1111 1111 1234", contentType: .creditCard)
-        let row = ClipboardRowData(from: entry)
-        XCTAssertFalse(row.previewText.contains("4111"))
-        XCTAssertTrue(row.previewText.hasSuffix("1234"))
-    }
+        let card = ClipboardRowData(from: ClipboardEntry(content: "4111 1111 1111 1234", contentType: .creditCard))
+        XCTAssertFalse(card.previewText.contains("4111"))
+        XCTAssertTrue(card.previewText.hasSuffix("1234"))
 
-    func testHeaderRowsAreMarkedAsHeaders() {
+        let multiLine = ClipboardRowData(from: ClipboardEntry(content: "line one\nline two", contentType: .text))
+        XCTAssertEqual(multiLine.singleLinePreview, "line one line two")
+        XCTAssertFalse(multiLine.isHeader)
+
+        // HighPerformanceListView diffs on ids; an unstable header id forces a full reload.
         let header = ClipboardRowData.header("Pinned")
         XCTAssertTrue(header.isHeader)
         XCTAssertEqual(header.sectionHeader, "Pinned")
-
-        let normal = ClipboardRowData(from: ClipboardEntry(content: "x", contentType: .text))
-        XCTAssertFalse(normal.isHeader)
-    }
-
-    func testHeaderIDsAreStableAcrossBuilds() {
-        // HighPerformanceListView diffs on ids; an unstable header id forces a full reload.
-        XCTAssertEqual(ClipboardRowData.header("Pinned").id, ClipboardRowData.header("Pinned").id)
-        XCTAssertNotEqual(ClipboardRowData.header("Pinned").id, ClipboardRowData.header("History").id)
-    }
-
-    func testSingleLinePreviewCollapsesNewlines() {
-        let entry = ClipboardEntry(content: "line one\nline two", contentType: .text)
-        let row = ClipboardRowData(from: entry)
-        XCTAssertEqual(row.singleLinePreview, "line one line two")
+        XCTAssertEqual(header.id, ClipboardRowData.header("Pinned").id)
+        XCTAssertNotEqual(header.id, ClipboardRowData.header("History").id)
     }
 }
