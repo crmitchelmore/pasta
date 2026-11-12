@@ -1,7 +1,10 @@
 import XCTest
 
-/// End-to-end coverage of the PastaIOS companion app on a simulator with no
-/// iCloud account and an empty database. Run with:
+/// End-to-end journeys through the PastaIOS companion app on a simulator with
+/// no iCloud account. Each journey starts from an empty database and
+/// pasteboard; launches are slow, so every test chains several user-visible
+/// checks and relaunches instead of paying for a fresh launch per assertion.
+/// Run with:
 ///
 ///     xcodebuild test -project PastaIOS/PastaIOS.xcodeproj -scheme PastaIOS \
 ///       -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
@@ -10,101 +13,44 @@ import XCTest
 /// See `PastaIOS/TESTING.md`.
 final class PastaIOSUITests: PastaUITestCase {
 
-    // MARK: - Launch
+    // MARK: - Launch, onboarding and empty history
 
-    /// The one test that must catch a launch crash: the process has to reach
-    /// the main tab UI and still be in the foreground. A Swift runtime trap
-    /// during `AppState.initialise` (database migration, CloudKit, clipboard
-    /// capture) terminates the process before the tab bar exists, and XCTest
-    /// attaches the crash report to the result bundle.
-    func testLaunchesWithoutCrashing() {
-        launchApp()
+    /// The launch-crash guard. A Swift runtime trap during
+    /// `AppState.initialise` (database migration, CloudKit, clipboard capture)
+    /// terminates the process before onboarding or the tab bar exists, and
+    /// XCTest attaches the crash report to the result bundle. The journey then
+    /// proves the empty install is exactly empty, the Search field is usable
+    /// at once (#74), the activation pipeline survives background/foreground,
+    /// and completed onboarding survives a relaunch.
+    func testFreshLaunchOnboardingEmptyHistoryAndLifecycle() {
+        launchApp(skipOnboarding: false)
+
+        let title = element("onboarding.title")
+        XCTAssertTrue(
+            title.waitForExistence(timeout: Self.launchTimeout),
+            "Onboarding did not appear on first launch (app state: \(app.state.rawValue))"
+        )
+        XCTAssertEqual(title.label, "Welcome to Pasta", "First launch must show the welcome flow, not the replay")
+        XCTAssertFalse(tabBar.exists, "Tab bar visible while onboarding is showing")
+        tapOnboardingPrimaryButton()
+
         waitForMainUI()
-
-        // The loading placeholder must have been replaced by real content.
+        XCTAssertFalse(title.exists, "Onboarding still visible after Get Started")
+        XCTAssertFalse(element("whatsNew.list").exists, "What's New sheet shown on a fresh install")
         XCTAssertTrue(
             waitForDisappearance(of: element("loading.view"), timeout: Self.launchTimeout),
             "Loading view is still visible; AppState.initialise never finished"
         )
         XCTAssertTrue(element("history.list").exists, "History list is not the root content after launch")
-        XCTAssertEqual(app.state, .runningForeground)
-    }
-
-    /// The app must survive being backgrounded and re-activated, which
-    /// re-runs the activation pipeline (sync + clipboard capture).
-    func testSurvivesBackgroundAndForeground() {
-        launchApp()
-        waitForMainUI()
-
-        XCUIDevice.shared.press(.home)
-        XCTAssertTrue(
-            app.wait(for: .runningBackground, timeout: Self.uiTimeout),
-            "App did not move to the background"
-        )
-
-        app.activate()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: Self.uiTimeout), "App did not return to the foreground")
-        XCTAssertTrue(tabBar.waitForExistence(timeout: Self.uiTimeout), "Tab bar missing after re-activation")
-    }
-
-    // MARK: - Tabs
-
-    func testHistoryTabShowsListAndEmptyState() {
-        launchApp()
-        waitForMainUI()
-
-        openTab("History", expecting: "history.list")
-        XCTAssertTrue(app.navigationBars["Clipboard History"].waitForExistence(timeout: Self.uiTimeout))
-
         XCTAssertTrue(element("history.emptyState").waitForExistence(timeout: Self.uiTimeout))
         XCTAssertFalse(element("history.row").exists, "Fresh install unexpectedly contains history")
-        openTab("Settings", expecting: "settings.list")
-        XCTAssertEqual(element("settings.entryCount").label, "0")
-    }
 
-    func testSearchTabIsReachable() {
-        launchApp()
-        waitForMainUI()
-
+        // Regression for #74: the search field must be visible as soon as the
+        // Search tab opens (`.navigationBarDrawer(displayMode: .always)`).
         openTab("Search", expecting: "search.list")
-        XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: Self.uiTimeout))
-        XCTAssertTrue(element("search.emptyPrompt").waitForExistence(timeout: Self.uiTimeout))
-    }
-
-    func testSettingsTabIsReachable() {
-        launchApp()
-        waitForMainUI()
-
-        openTab("Settings", expecting: "settings.list")
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: Self.uiTimeout))
-    }
-
-    func testCanCycleThroughAllTabs() {
-        launchApp()
-        waitForMainUI()
-
-        openTab("Search", expecting: "search.list")
-        openTab("Settings", expecting: "settings.list")
-        openTab("History", expecting: "history.list")
-        XCTAssertEqual(app.state, .runningForeground)
-    }
-
-    // MARK: - Search
-
-    /// Regression for #74: the search field must be visible as soon as the
-    /// Search tab opens (`.navigationBarDrawer(displayMode: .always)`), with
-    /// no scrolling needed to reveal it.
-    func testSearchFieldIsVisibleImmediatelyWithoutScrolling() {
-        launchApp()
-        waitForMainUI()
-        openTab("Search", expecting: "search.list")
-
         let searchField = app.searchFields.firstMatch
         XCTAssertTrue(searchField.waitForExistence(timeout: Self.uiTimeout), "Search field never appeared")
         XCTAssertTrue(searchField.isHittable, "Search field exists but is not hittable without scrolling")
-
-        // The field must sit in the navigation-bar drawer at the top of the
-        // screen, not off-screen or somewhere the user has to scroll to.
         let window = app.windows.firstMatch.frame
         let field = searchField.frame
         XCTAssertGreaterThan(field.height, 0)
@@ -114,49 +60,354 @@ final class PastaIOSUITests: PastaUITestCase {
             window.minY + window.height * 0.4,
             "Search field is not in the top part of the screen: \(field) in \(window)"
         )
-        XCTAssertTrue(element("search.emptyPrompt").exists, "List content missing beneath the search field")
+        XCTAssertTrue(element("search.emptyPrompt").exists, "Empty search must show its prompt")
+
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertEqual(element("settings.entryCount").label, "0")
+        // Completed onboarding is not permission to upload clipboard history.
+        XCTAssertTrue(element("settings.iCloudStatus").label.contains("Off"))
+        let version = element("settings.version")
+        revealSettingsRow(version)
+        XCTAssertTrue(version.waitForExistence(timeout: Self.uiTimeout), "Version row missing")
+        XCTAssertFalse(version.label.isEmpty, "Version row is blank")
+
+        // Backgrounding and re-activating re-runs sync + clipboard capture.
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: Self.uiTimeout), "App did not move to the background")
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: Self.uiTimeout), "App did not return to the foreground")
+        XCTAssertTrue(tabBar.waitForExistence(timeout: Self.uiTimeout), "Tab bar missing after re-activation")
+
+        // Relaunch without the skip hook: completed onboarding must persist.
+        relaunch(skipOnboarding: false)
+        XCTAssertFalse(element("onboarding.title").exists, "Onboarding re-appeared after completing it")
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertEqual(element("settings.entryCount").label, "0", "An empty install must stay empty across relaunch")
+
+        // Replaying the walkthrough presents it and returns to Settings.
+        let replay = element("settings.replayWalkthrough")
+        revealSettingsRow(replay)
+        replay.tap()
+        let walkthrough = element("onboarding.title")
+        XCTAssertTrue(walkthrough.waitForExistence(timeout: Self.uiTimeout), "Walkthrough sheet did not appear")
+        XCTAssertEqual(walkthrough.label, "Pasta Walkthrough", "Replay must not restart first-run onboarding")
+        tapOnboardingPrimaryButton()
+        XCTAssertTrue(waitForDisappearance(of: walkthrough), "Walkthrough sheet did not dismiss")
+        XCTAssertTrue(element("settings.list").exists, "Settings list gone after dismissing the walkthrough")
+        XCTAssertTrue(tabButton("Settings").isSelected, "Settings tab lost selection after the sheet")
     }
 
-    func testSearchExcludesNonmatchingEntriesAndClearsToPrompt() {
-        let token = "PastaSearchKnown\(UUID().uuidString.prefix(8))"
-        launchApp(pasteboard: "Known clipboard content \(token)")
+    // MARK: - Capture, detail, search and persistence
+
+    /// Pasteboard text at activation is captured exactly once, opens in
+    /// detail, is found by FTS search while unrelated queries return nothing,
+    /// and survives termination. The relaunch puts unrelated text on the
+    /// pasteboard, so the first entry can only come back from the on-disk
+    /// database, not by recapturing the fixture.
+    func testCaptureDetailSearchAndPersistenceAcrossRelaunch() {
+        let token = "PastaJourney\(UUID().uuidString.prefix(8))"
+        let content = "Captured clipboard content \(token)"
+        launchApp(pasteboard: content)
         waitForMainUI()
+
+        openTab("History", expecting: "history.list")
+        let row = app.staticTexts[content].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: Self.uiTimeout), "Captured clipboard entry not shown in History")
+        XCTAssertFalse(element("history.emptyState").exists, "Empty state shown although an entry was captured")
+
+        row.tap()
+        let detailBar = app.navigationBars["Entry"]
+        XCTAssertTrue(detailBar.waitForExistence(timeout: Self.uiTimeout), "Entry detail screen did not open")
+        XCTAssertTrue(app.staticTexts[content].firstMatch.waitForExistence(timeout: Self.uiTimeout),
+                      "Detail must display the captured content")
+        let back = detailBar.buttons.element(boundBy: 0)
+        XCTAssertTrue(back.waitForExistence(timeout: Self.uiTimeout), "No back button on the detail screen")
+        back.tap()
+        XCTAssertTrue(app.navigationBars["Clipboard History"].waitForExistence(timeout: Self.uiTimeout),
+                      "Back did not return to the History list")
+
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertEqual(element("settings.entryCount").label, "1", "One clipboard capture must produce exactly one stored entry")
+
         openTab("Search", expecting: "search.list")
-
-        let searchField = app.searchFields.firstMatch
-        XCTAssertTrue(searchField.waitForExistence(timeout: Self.uiTimeout))
-        searchField.tap()
-        searchField.typeText(token)
-        XCTAssertTrue(element("search.row").waitForExistence(timeout: Self.uiTimeout), "Known query must return the captured entry first")
-
+        let searchField = search(for: token)
+        XCTAssertTrue(element("search.row").waitForExistence(timeout: Self.uiTimeout), "Known query must return the captured entry")
         // Start from a populated result set so the no-results assertion cannot
         // pass against the initial empty UI before the async search completes.
         searchField.typeText(" zzqxnosuchentry\(UUID().uuidString.prefix(8))")
         XCTAssertTrue(element("search.noResults").waitForExistence(timeout: Self.uiTimeout), "Unmatched query must show no results")
         XCTAssertTrue(waitForDisappearance(of: element("search.row")), "Search retained an unrelated result")
-        XCTAssertEqual(app.state, .runningForeground)
-
         searchField.buttons.firstMatch.tap()
-        XCTAssertTrue(element("search.emptyPrompt").waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertTrue(element("search.emptyPrompt").waitForExistence(timeout: Self.uiTimeout), "Clearing must return to the prompt")
         XCTAssertFalse(element("search.row").exists)
-    }
 
-    func testSearchFindsACapturedClipboardEntry() {
-        let token = "PastaSearchToken\(UUID().uuidString.prefix(8))"
-        launchApp(pasteboard: "Searchable clipboard text \(token)")
-        waitForMainUI()
+        relaunch(pasteboard: "Unrelated clipboard replacement")
+        XCTAssertTrue(app.staticTexts[content].waitForExistence(timeout: Self.uiTimeout), "Captured history was lost across relaunch")
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertEqual(element("settings.entryCount").label, "2", "Relaunch must retain the first entry and capture the replacement once")
         openTab("Search", expecting: "search.list")
-
-        let searchField = app.searchFields.firstMatch
-        XCTAssertTrue(searchField.waitForExistence(timeout: Self.uiTimeout))
-        searchField.tap()
-        searchField.typeText(token)
-
-        let match = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", token)).firstMatch
-        XCTAssertTrue(match.waitForExistence(timeout: Self.uiTimeout), "Search did not return the captured entry")
+        search(for: token)
+        let match = app.staticTexts[content]
+        XCTAssertTrue(match.waitForExistence(timeout: Self.uiTimeout), "Persisted entry is absent from FTS search")
+        match.tap()
+        XCTAssertTrue(app.navigationBars["Entry"].waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertTrue(app.staticTexts[content].exists, "Detail must display the exact persisted content")
     }
 
-    // MARK: - Settings
+    // MARK: - Sync settings
+
+    /// Diagnostics and Reset Sync both work without consent or an iCloud
+    /// account, never leak clipboard contents, never replace the pasteboard,
+    /// never grant consent and never delete local history.
+    func testSyncDiagnosticsAndResetKeepOfflineHistoryWithoutGrantingConsent() {
+        let privateContent = "PrivateDiagnosticHistory\(UUID().uuidString.prefix(8))"
+        launchApp(pasteboard: privateContent)
+        waitForMainUI()
+        openTab("Settings", expecting: "settings.list")
+
+        let diagnostics = element("settings.syncDiagnostics")
+        revealSettingsRow(diagnostics)
+        XCTAssertTrue(diagnostics.isHittable, "Diagnostics must remain available without iCloud sync consent")
+        diagnostics.tap()
+        let report = element("syncDiagnostics.report")
+        XCTAssertTrue(report.waitForExistence(timeout: Self.uiTimeout), "Diagnostics report missing in the unprovisioned simulator")
+        let copy = app.buttons["syncDiagnostics.copy"].firstMatch
+        waitUntilEnabled(copy, "Diagnostics collection never finished")
+        XCTAssertTrue(report.label.contains("iCloud.com.pasta.ios"), "Report must identify the shared CloudKit container")
+        XCTAssertFalse(report.label.contains(privateContent), "Diagnostics must exclude clipboard contents")
+        XCTAssertTrue(copy.isHittable, "Copy Report must be reachable without scrolling through the report")
+        let refresh = app.buttons["syncDiagnostics.refresh"].firstMatch
+        XCTAssertTrue(refresh.isHittable)
+        refresh.tap()
+        waitUntilEnabled(copy, "Diagnostics refresh never finished")
+        XCTAssertFalse(report.label.contains(privateContent))
+        let done = app.buttons["syncDiagnostics.done"].firstMatch
+        XCTAssertTrue(done.isHittable)
+        done.tap()
+        XCTAssertTrue(waitForDisappearance(of: done), "Done must dismiss diagnostics")
+
+        let reset = element("settings.resetSync")
+        revealSettingsRow(reset, scrollUp: false)
+        XCTAssertTrue(reset.isHittable, "Reset Sync must be reachable by scrolling")
+        reset.tap()
+        let confirmation = app.alerts["Reset iCloud Sync?"].firstMatch
+        XCTAssertTrue(confirmation.waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertTrue(confirmation.staticTexts[
+            "Your local history and iCloud data are kept. Pasta will download iCloud history again when sync is enabled and connected."
+        ].exists, "Reset must explain its effect before confirming")
+        confirmation.buttons["Cancel"].tap()
+        XCTAssertTrue(waitForDisappearance(of: confirmation))
+        XCTAssertFalse(element("settings.syncFeedback").exists, "Cancelling must not claim a reset")
+
+        reset.tap()
+        XCTAssertTrue(confirmation.waitForExistence(timeout: Self.uiTimeout))
+        // SwiftUI exposes nested accessibility buttons for this alert action.
+        // Scope to its identifier and choose one representation of the action.
+        let confirmReset = confirmation.buttons["settings.confirmResetSync"].firstMatch
+        XCTAssertTrue(confirmReset.waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertTrue(confirmReset.isHittable, "Reset confirmation must be actionable")
+        confirmReset.tap()
+        XCTAssertTrue(waitForDisappearance(of: confirmation))
+        let feedback = element("settings.syncFeedback")
+        revealSettingsRow(feedback, scrollUp: false)
+        XCTAssertTrue(feedback.waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertEqual(feedback.label, "Sync reset. Local history kept. Enable iCloud Sync to download your history again.")
+        XCTAssertFalse(feedback.label.contains("Sync complete"), "A local-only reset is not a successful cloud sync")
+        assertEntryCount("1", "Reset must keep local history")
+
+        // Relaunching recaptures the pasteboard: a second entry would expose
+        // an accidental report copy or clipboard replacement.
+        relaunch()
+        openTab("History", expecting: "history.list")
+        XCTAssertTrue(app.staticTexts[privateContent].firstMatch.waitForExistence(timeout: Self.uiTimeout),
+                      "Reset and diagnostics must keep persisted clipboard history")
+        openTab("Settings", expecting: "settings.list")
+        assertConsent(false, "Reset and diagnostics must not grant sync consent")
+        assertEntryCount("1", "Diagnostics must retain history and leave the pasteboard unchanged")
+    }
+
+    /// Sync starts only with explicit consent. A failed retry in the
+    /// unprovisioned simulator gives a visible next action and keeps offline
+    /// history; consent and its withdrawal both persist across relaunch.
+    func testSyncConsentRetryAndWithdrawalPersistWithoutDeletingHistory() {
+        let token = "OfflineRecovery\(UUID().uuidString.prefix(8))"
+        launchApp(pasteboard: token)
+        waitForMainUI()
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertTrue(element("settings.iCloudStatus").label.contains("Off"))
+        XCTAssertFalse(element("settings.syncNow").isEnabled, "Sync requires explicit consent")
+        XCTAssertTrue(element("settings.iCloudConsentExplanation").exists, "Consent must be explained before it is given")
+        XCTAssertTrue(element("settings.iCloudGuidance").waitForExistence(timeout: Self.uiTimeout),
+                      "Unavailable iCloud must explain how to recover")
+        assertEntryCount("1", "One clipboard capture must produce exactly one stored entry")
+
+        setSyncConsent(true)
+        let syncNow = element("settings.syncNow")
+        revealSettingsRow(syncNow)
+        waitUntilEnabled(syncNow, "Account check never finished after consent")
+        syncNow.tap()
+        waitUntilEnabled(element("settings.syncNow"), "Sync retry never finished")
+        let failure = element("settings.syncError")
+        XCTAssertTrue(failure.waitForExistence(timeout: Self.uiTimeout), "Failed retry must give a visible next action")
+        XCTAssertTrue(failure.label.contains("update"), "The unprovisioned simulator must explain which action to take")
+        XCTAssertFalse(failure.label.contains("Sync complete"))
+        assertEntryCount("1", "Retry must retain offline clipboard history")
+
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: Self.uiTimeout))
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: Self.uiTimeout))
+        openTab("History", expecting: "history.list")
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", token))
+            .firstMatch.waitForExistence(timeout: Self.uiTimeout), "Retry and re-activation must keep offline history")
+
+        relaunch()
+        openTab("Settings", expecting: "settings.list")
+        assertConsent(true, "Consent must persist across relaunch")
+        assertEntryCount("1", "Offline history must survive relaunch after retries")
+        setSyncConsent(false)
+        XCTAssertTrue(element("settings.iCloudStatus").label.contains("Off"))
+        XCTAssertFalse(element("settings.syncNow").isEnabled, "Withdrawn consent must disable Sync Now")
+
+        relaunch()
+        openTab("Settings", expecting: "settings.list")
+        assertConsent(false, "Withdrawn consent must persist across relaunch")
+        assertEntryCount("1", "Withdrawing consent must not delete history")
+    }
+
+    // MARK: - Release notes
+
+    // Release-note journeys use real persisted defaults and bundled history.
+    // Version/build overrides avoid coupling tests to CI's archive numbering.
+
+    /// Upgrading from the legacy version-only marker presents the notes; they
+    /// are acknowledged only on dismissal (not by killing the app), and
+    /// Settings can replay them, navigate to earlier versions and dismiss.
+    func testReleaseNotesUpgradeAcknowledgesOnlyAfterDismissalAndReplaysFromSettings() {
+        app.launchEnvironment["PASTA_UI_TEST_VERSION"] = "1.5.18"
+        app.launchEnvironment["PASTA_UI_TEST_BUILD"] = "140"
+        app.launchEnvironment["PASTA_UI_TEST_PREVIOUS_VERSION"] = "1.5.17"
+        launchApp(skipOnboarding: false)
+        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.launchTimeout))
+        XCTAssertEqual(element("whatsNew.installedVersion").label, "Version 1.5.18 (140)")
+        XCTAssertEqual(element("whatsNew.summary").label, "More reliable clipboard history shared from your Mac.")
+
+        // Killing the app with notes still open must not consume the update.
+        app.launchEnvironment["PASTA_UI_TEST_PREVIOUS_VERSION"] = nil
+        relaunch(skipOnboarding: false, waitForMain: false)
+        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.launchTimeout))
+        app.buttons["whatsNew.done"].firstMatch.tap()
+        XCTAssertTrue(waitForDisappearance(of: element("whatsNew.list")))
+
+        relaunch(skipOnboarding: false)
+        XCTAssertFalse(element("whatsNew.list").exists, "Dismissed notes must stay acknowledged")
+
+        openTab("Settings", expecting: "settings.list")
+        let whatsNew = element("settings.whatsNew")
+        revealSettingsRow(whatsNew)
+        whatsNew.tap()
+        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.uiTimeout), "What's New sheet did not appear")
+        // A toolbar Button surfaces its identifier on both the toolbar item and
+        // the button, so narrow to the button type and take the first match.
+        let done = app.buttons["whatsNew.done"].firstMatch
+        XCTAssertTrue(done.waitForExistence(timeout: Self.uiTimeout), "Done button missing on What's New")
+        done.tap()
+        XCTAssertTrue(waitForDisappearance(of: element("whatsNew.list")), "What's New sheet did not dismiss")
+        XCTAssertTrue(element("settings.list").exists, "Settings list gone after dismissing What's New")
+
+        whatsNew.tap()
+        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.uiTimeout))
+        let earlier = element("whatsNew.history.1.5.17:version")
+        if !earlier.isHittable { element("whatsNew.list").swipeUp() }
+        earlier.tap()
+        XCTAssertTrue(element("whatsNew.detail").waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertEqual(element("whatsNew.summary").label, "More private diagnostics.")
+    }
+
+    /// A new build of an acknowledged marketing version presents its notes,
+    /// swipe dismissal acknowledges them, and a later version without bundled
+    /// notes says so explicitly instead of relabelling older copy.
+    func testNewBuildSwipeDismissalPersistsAndMissingNotesAreExplicit() {
+        app.launchEnvironment["PASTA_UI_TEST_VERSION"] = "1.5.18"
+        app.launchEnvironment["PASTA_UI_TEST_BUILD"] = "140"
+        launchApp()
+        waitForMainUI()
+        XCTAssertFalse(element("whatsNew.list").exists, "Acknowledged build must not present its notes")
+
+        app.launchEnvironment["PASTA_UI_TEST_BUILD"] = "141"
+        relaunch(skipOnboarding: false, waitForMain: false)
+        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.launchTimeout))
+        XCTAssertEqual(element("whatsNew.installedVersion").label, "Version 1.5.18 (141)")
+        // Start outside the list and drag across the window. A swipe confined
+        // to the navigation bar can end before the sheet dismissal threshold.
+        let bar = app.navigationBars["What’s New"].firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: Self.uiTimeout), "What's New navigation bar missing")
+        XCTAssertTrue(bar.isHittable, "What's New navigation bar must be ready for the dismissal gesture")
+        let dragStart = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let dragEnd = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85))
+        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
+        XCTAssertTrue(waitForDisappearance(of: element("whatsNew.list")),
+                      "Dragging the What's New sheet down must dismiss it")
+
+        relaunch(skipOnboarding: false)
+        XCTAssertFalse(element("whatsNew.list").exists, "Swipe dismissal must acknowledge the build")
+
+        app.launchEnvironment["PASTA_UI_TEST_VERSION"] = "9.0.0"
+        app.launchEnvironment["PASTA_UI_TEST_BUILD"] = "999"
+        relaunch(skipOnboarding: false, waitForMain: false)
+        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.launchTimeout))
+        XCTAssertEqual(element("whatsNew.installedVersion").label, "Version 9.0.0 (999)")
+        XCTAssertTrue(element("whatsNew.unavailable").exists, "Missing notes must be explicit")
+        XCTAssertFalse(element("whatsNew.summary").exists, "Missing notes must not relabel older copy")
+    }
+
+    // MARK: - Helpers
+
+    /// Terminates and relaunches on the persisted database and defaults.
+    private func relaunch(
+        skipOnboarding: Bool = true,
+        pasteboard: String? = nil,
+        waitForMain: Bool = true,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        app.terminate()
+        launchApp(skipOnboarding: skipOnboarding, pasteboard: pasteboard, resetState: false)
+        if waitForMain { waitForMainUI(file: file, line: line) }
+    }
+
+    private func tapOnboardingPrimaryButton(file: StaticString = #filePath, line: UInt = #line) {
+        let button = element("onboarding.primaryButton")
+        XCTAssertTrue(button.waitForExistence(timeout: Self.uiTimeout), "Onboarding primary button missing", file: file, line: line)
+        if !button.isHittable { app.swipeUp() }
+        button.tap()
+    }
+
+    @discardableResult
+    private func search(for text: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: Self.uiTimeout), "Search field missing", file: file, line: line)
+        field.tap()
+        field.typeText(text)
+        return field
+    }
+
+    private func waitUntilEnabled(_ element: XCUIElement, _ message: String, file: StaticString = #filePath, line: UInt = #line) {
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: element)
+        XCTAssertEqual(XCTWaiter().wait(for: [enabled], timeout: Self.uiTimeout), .completed, message, file: file, line: line)
+    }
+
+    private func assertEntryCount(_ expected: String, _ message: String, file: StaticString = #filePath, line: UInt = #line) {
+        let count = element("settings.entryCount")
+        revealSettingsRow(count)
+        XCTAssertEqual(count.label, expected, message, file: file, line: line)
+    }
+
+    private func assertConsent(_ enabled: Bool, _ message: String, file: StaticString = #filePath, line: UInt = #line) {
+        let control = app.switches["settings.iCloudConsent"].firstMatch
+        revealSettingsRow(control, scrollUp: false)
+        XCTAssertEqual(control.value as? String, enabled ? "1" : "0", message, file: file, line: line)
+    }
 
     /// Tap the native switch, not the text/container SwiftUI also exposes.
     /// Verify the visible state before testing persistence or starting a retry.
@@ -182,424 +433,5 @@ final class PastaIOSUITests: PastaUITestCase {
             if row.exists && row.isHittable { return }
             if scrollUp { list.swipeUp() } else { list.swipeDown() }
         }
-    }
-
-
-    func testSyncConsentIsExplicitAndWithdrawalPersistsWithoutDeletingHistory() {
-        launchApp(pasteboard: "Private until consent")
-        waitForMainUI()
-        openTab("Settings", expecting: "settings.list")
-        XCTAssertTrue(element("settings.iCloudStatus").label.contains("Off"))
-        XCTAssertFalse(element("settings.syncNow").isEnabled)
-        XCTAssertTrue(element("settings.iCloudConsentExplanation").exists)
-        XCTAssertEqual(element("settings.entryCount").label, "1")
-        setSyncConsent(true)
-        app.terminate()
-        launchApp(resetState: false)
-        waitForMainUI()
-        openTab("Settings", expecting: "settings.list")
-        XCTAssertEqual(app.switches["settings.iCloudConsent"].firstMatch.value as? String, "1")
-        setSyncConsent(false)
-        XCTAssertTrue(element("settings.iCloudStatus").label.contains("Off"))
-        XCTAssertFalse(element("settings.syncNow").isEnabled)
-        app.terminate()
-        launchApp(resetState: false)
-        waitForMainUI()
-        openTab("Settings", expecting: "settings.list")
-        XCTAssertEqual(app.switches["settings.iCloudConsent"].firstMatch.value as? String, "0")
-        XCTAssertEqual(element("settings.entryCount").label, "1")
-    }
-
-    func testUnavailableSyncRetryPreservesOfflineHistory() {
-        let token = "OfflineRecovery\(UUID().uuidString.prefix(8))"
-        launchApp(pasteboard: token)
-        waitForMainUI()
-        openTab("Settings", expecting: "settings.list")
-        XCTAssertTrue(element("settings.iCloudGuidance").waitForExistence(timeout: Self.uiTimeout),
-                      "Unavailable iCloud must explain how to recover")
-        XCTAssertEqual(element("settings.entryCount").label, "1")
-        XCTAssertFalse(element("settings.syncNow").isEnabled, "Sync requires explicit consent")
-        setSyncConsent(true)
-        let syncNow = element("settings.syncNow")
-        revealSettingsRow(syncNow)
-        let accountCheckFinished = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "enabled == true"), object: syncNow
-        )
-        XCTAssertEqual(XCTWaiter().wait(for: [accountCheckFinished], timeout: Self.uiTimeout), .completed)
-        syncNow.tap()
-        let retryFinished = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "enabled == true"), object: element("settings.syncNow")
-        )
-        XCTAssertEqual(XCTWaiter().wait(for: [retryFinished], timeout: Self.uiTimeout), .completed)
-        let failure = element("settings.syncError")
-        XCTAssertTrue(failure.waitForExistence(timeout: Self.uiTimeout), "Failed retry must give a visible next action")
-        XCTAssertTrue(failure.label.contains("update"), "The unprovisioned simulator must explain which action to take")
-        XCTAssertFalse(failure.label.contains("Sync complete"))
-        revealSettingsRow(element("settings.entryCount"))
-        XCTAssertEqual(element("settings.entryCount").label, "1", "Retry must retain offline clipboard history")
-
-        XCUIDevice.shared.press(.home)
-        XCTAssertTrue(app.wait(for: .runningBackground, timeout: Self.uiTimeout))
-        app.activate()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: Self.uiTimeout))
-        openTab("History", expecting: "history.list")
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", token))
-            .firstMatch.waitForExistence(timeout: Self.uiTimeout))
-
-        app.terminate()
-        launchApp(resetState: false)
-        waitForMainUI()
-        openTab("Settings", expecting: "settings.list")
-        XCTAssertEqual(element("settings.entryCount").label, "1", "Offline history must survive relaunch after retries")
-    }
-
-    func testResetExplainsItsEffectAndReportsResultWithoutDeletingOfflineHistory() {
-        let content = "Keep this history after reset"
-        launchApp(pasteboard: content)
-        waitForMainUI()
-        openTab("Settings", expecting: "settings.list")
-        let reset = element("settings.resetSync")
-        revealSettingsRow(reset)
-        reset.tap()
-        let confirmation = app.alerts["Reset iCloud Sync?"].firstMatch
-        XCTAssertTrue(confirmation.waitForExistence(timeout: Self.uiTimeout))
-        XCTAssertTrue(confirmation.staticTexts[
-            "Your local history and iCloud data are kept. Pasta will download iCloud history again when sync is enabled and connected."
-        ].exists)
-        confirmation.buttons["Cancel"].tap()
-        XCTAssertTrue(waitForDisappearance(of: confirmation))
-        XCTAssertFalse(element("settings.syncFeedback").exists, "Cancelling must not claim a reset")
-
-        reset.tap()
-        XCTAssertTrue(confirmation.waitForExistence(timeout: Self.uiTimeout))
-        // SwiftUI exposes nested accessibility buttons for this alert action.
-        // Scope to its identifier and choose one representation of the action.
-        let confirmReset = confirmation.buttons["settings.confirmResetSync"].firstMatch
-        XCTAssertTrue(confirmReset.waitForExistence(timeout: Self.uiTimeout))
-        XCTAssertTrue(confirmReset.isHittable, "Reset confirmation must be actionable")
-        confirmReset.tap()
-        XCTAssertTrue(waitForDisappearance(of: confirmation))
-        let feedback = element("settings.syncFeedback")
-        revealSettingsRow(feedback, scrollUp: false)
-        XCTAssertTrue(feedback.waitForExistence(timeout: Self.uiTimeout))
-        XCTAssertEqual(feedback.label, "Sync reset. Local history kept. Enable iCloud Sync to download your history again.")
-        XCTAssertFalse(feedback.label.contains("Sync complete"), "A local-only reset is not a successful cloud sync")
-        revealSettingsRow(element("settings.entryCount"))
-        XCTAssertEqual(element("settings.entryCount").label, "1")
-
-        app.terminate()
-        launchApp(resetState: false)
-        waitForMainUI()
-        openTab("History", expecting: "history.list")
-        XCTAssertTrue(app.staticTexts[content].firstMatch.waitForExistence(timeout: Self.uiTimeout), "Reset must keep persisted clipboard history")
-        openTab("Settings", expecting: "settings.list")
-        XCTAssertEqual(app.switches["settings.iCloudConsent"].firstMatch.value as? String, "0", "Reset must not grant sync consent")
-    }
-
-    func testSyncDiagnosticsWorksOfflineAndKeepsHistoryAndConsentUnchanged() {
-        let privateContent = "PrivateDiagnosticHistory\(UUID().uuidString.prefix(8))"
-        launchApp(pasteboard: privateContent)
-        waitForMainUI()
-        openTab("Settings", expecting: "settings.list")
-        let diagnostics = element("settings.syncDiagnostics")
-        revealSettingsRow(diagnostics)
-        XCTAssertTrue(diagnostics.isHittable, "Diagnostics must remain available without iCloud sync consent")
-        diagnostics.tap()
-
-        let report = element("syncDiagnostics.report")
-        XCTAssertTrue(report.waitForExistence(timeout: Self.uiTimeout), "Diagnostics report missing in the unprovisioned simulator")
-        let copy = app.buttons["syncDiagnostics.copy"].firstMatch
-        let collectionFinished = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "enabled == true"), object: copy
-        )
-        XCTAssertEqual(XCTWaiter().wait(for: [collectionFinished], timeout: Self.uiTimeout), .completed)
-        XCTAssertTrue(report.label.contains("iCloud.com.pasta.ios"), "Report must identify the shared CloudKit container")
-        XCTAssertFalse(report.label.contains(privateContent), "Diagnostics must exclude clipboard contents")
-        XCTAssertTrue(copy.isHittable, "Copy Report must be reachable without scrolling through the report")
-        let refresh = app.buttons["syncDiagnostics.refresh"].firstMatch
-        XCTAssertTrue(refresh.isHittable)
-        refresh.tap()
-        let refreshFinished = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "enabled == true"), object: copy
-        )
-        XCTAssertEqual(XCTWaiter().wait(for: [refreshFinished], timeout: Self.uiTimeout), .completed)
-        XCTAssertFalse(report.label.contains(privateContent))
-
-        let done = app.buttons["syncDiagnostics.done"].firstMatch
-        XCTAssertTrue(done.isHittable)
-        done.tap()
-        XCTAssertTrue(waitForDisappearance(of: done), "Done must dismiss diagnostics")
-
-        // Reopening captures any new pasteboard text. A second entry would
-        // expose an accidental report copy or clipboard replacement on open.
-        app.terminate()
-        launchApp(resetState: false)
-        waitForMainUI()
-        openTab("History", expecting: "history.list")
-        XCTAssertTrue(app.staticTexts[privateContent].firstMatch.waitForExistence(timeout: Self.uiTimeout))
-        openTab("Settings", expecting: "settings.list")
-        XCTAssertEqual(app.switches["settings.iCloudConsent"].firstMatch.value as? String, "0", "Diagnostics must not grant sync consent")
-        revealSettingsRow(element("settings.entryCount"))
-        XCTAssertEqual(element("settings.entryCount").label, "1", "Diagnostics must retain history and leave the pasteboard unchanged")
-    }
-
-    func testSettingsRendersItsSections() {
-        launchApp()
-        waitForMainUI()
-        openTab("Settings", expecting: "settings.list")
-
-        XCTAssertTrue(app.staticTexts["Sync"].waitForExistence(timeout: Self.uiTimeout), "Sync section header missing")
-        XCTAssertTrue(element("settings.iCloudStatus").exists, "iCloud status row missing")
-        XCTAssertTrue(element("settings.entryCount").exists, "Entries row missing")
-        XCTAssertTrue(app.buttons["Sync Now"].exists, "Sync Now button missing")
-        XCTAssertTrue(element("settings.replayWalkthrough").exists, "Replay Walkthrough missing")
-        XCTAssertTrue(element("settings.whatsNew").exists, "What's New missing")
-
-        // Each row must be brought into view independently on small screens.
-        let reset = element("settings.resetSync")
-        revealSettingsRow(reset, scrollUp: false)
-        XCTAssertTrue(reset.exists, "Reset Sync button missing")
-        XCTAssertTrue(reset.isHittable, "Reset Sync must be reachable by scrolling")
-        let version = element("settings.version")
-        revealSettingsRow(version)
-        XCTAssertTrue(version.waitForExistence(timeout: Self.uiTimeout), "Version row missing")
-        XCTAssertFalse(version.label.isEmpty, "Version row is blank")
-
-        // Completed onboarding is not permission to upload clipboard history.
-        revealSettingsRow(element("settings.iCloudStatus"), scrollUp: false)
-        XCTAssertTrue(element("settings.iCloudStatus").label.contains("Off"))
-        XCTAssertNotNil(Int(element("settings.entryCount").label))
-    }
-
-    /// The harmless "setting" that round-trips: replaying the walkthrough
-    /// presents the onboarding sheet and dismissing it returns to Settings.
-    func testReplayWalkthroughRoundTrips() {
-        launchApp()
-        waitForMainUI()
-        openTab("Settings", expecting: "settings.list")
-
-        element("settings.replayWalkthrough").tap()
-        let title = element("onboarding.title")
-        XCTAssertTrue(title.waitForExistence(timeout: Self.uiTimeout), "Walkthrough sheet did not appear")
-        XCTAssertEqual(title.label, "Pasta Walkthrough")
-
-        let done = element("onboarding.primaryButton")
-        XCTAssertTrue(done.waitForExistence(timeout: Self.uiTimeout))
-        XCTAssertEqual(done.label, "Done")
-        if !done.isHittable { app.swipeUp() }
-        done.tap()
-
-        XCTAssertTrue(waitForDisappearance(of: title), "Walkthrough sheet did not dismiss")
-        XCTAssertTrue(element("settings.list").exists, "Settings list gone after dismissing the walkthrough")
-        XCTAssertTrue(tabButton("Settings").isSelected, "Settings tab lost selection after the sheet")
-    }
-
-    func testWhatsNewSheetRoundTrips() {
-        launchApp()
-        waitForMainUI()
-        openTab("Settings", expecting: "settings.list")
-
-        element("settings.whatsNew").tap()
-        let list = element("whatsNew.list")
-        XCTAssertTrue(list.waitForExistence(timeout: Self.uiTimeout), "What's New sheet did not appear")
-
-        // A toolbar Button surfaces its identifier on both the toolbar item and
-        // the button, so narrow to the button type and take the first match.
-        let done = app.buttons["whatsNew.done"].firstMatch
-        XCTAssertTrue(done.waitForExistence(timeout: Self.uiTimeout), "Done button missing on What's New")
-        done.tap()
-        XCTAssertTrue(waitForDisappearance(of: list), "What's New sheet did not dismiss")
-        XCTAssertTrue(element("settings.list").exists)
-    }
-
-    // Release-note journeys use real persisted defaults and bundled history.
-    // Version/build overrides avoid coupling tests to CI's archive numbering.
-    func testReleaseNotesUpgradeAcknowledgesOnlyAfterDismissalAndReplays() {
-        app.launchEnvironment["PASTA_UI_TEST_VERSION"] = "1.5.18"
-        app.launchEnvironment["PASTA_UI_TEST_BUILD"] = "140"
-        app.launchEnvironment["PASTA_UI_TEST_PREVIOUS_VERSION"] = "1.5.17"
-        launchApp(skipOnboarding: false)
-        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.launchTimeout))
-        XCTAssertEqual(element("whatsNew.installedVersion").label, "Version 1.5.18 (140)")
-        XCTAssertEqual(element("whatsNew.summary").label, "More reliable clipboard history shared from your Mac.")
-
-        // Killing the app with notes still open must not consume the update.
-        app.terminate()
-        app.launchEnvironment["PASTA_UI_TEST_PREVIOUS_VERSION"] = nil
-        launchApp(skipOnboarding: false, resetState: false)
-        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.launchTimeout))
-        app.buttons["whatsNew.done"].firstMatch.tap()
-        XCTAssertTrue(waitForDisappearance(of: element("whatsNew.list")))
-        app.terminate()
-        launchApp(skipOnboarding: false, resetState: false)
-        waitForMainUI()
-        XCTAssertFalse(element("whatsNew.list").exists)
-
-        openTab("Settings", expecting: "settings.list")
-        element("settings.whatsNew").tap()
-        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.uiTimeout))
-        let earlier = element("whatsNew.history.1.5.17:version")
-        if !earlier.isHittable { element("whatsNew.list").swipeUp() }
-        earlier.tap()
-        XCTAssertTrue(element("whatsNew.detail").waitForExistence(timeout: Self.uiTimeout))
-        XCTAssertEqual(element("whatsNew.summary").label, "More private diagnostics.")
-    }
-
-    func testSameMarketingVersionNewBuildPresentsAndSwipeDismissalPersists() {
-        app.launchEnvironment["PASTA_UI_TEST_VERSION"] = "1.5.18"
-        app.launchEnvironment["PASTA_UI_TEST_BUILD"] = "140"
-        launchApp()
-        waitForMainUI()
-        app.terminate()
-        app.launchEnvironment["PASTA_UI_TEST_BUILD"] = "141"
-        launchApp(skipOnboarding: false, resetState: false)
-        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.launchTimeout))
-        XCTAssertEqual(element("whatsNew.installedVersion").label, "Version 1.5.18 (141)")
-        // Start outside the list and drag across the window. A swipe confined
-        // to the navigation bar can end before the sheet dismissal threshold.
-        let bar = app.navigationBars["What’s New"].firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: Self.uiTimeout), "What's New navigation bar missing")
-        XCTAssertTrue(bar.isHittable, "What's New navigation bar must be ready for the dismissal gesture")
-        let dragStart = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        let dragEnd = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85))
-        dragStart.press(forDuration: 0.05, thenDragTo: dragEnd)
-        XCTAssertTrue(waitForDisappearance(of: element("whatsNew.list")),
-                      "Dragging the What's New sheet down must dismiss it")
-        app.terminate()
-        launchApp(skipOnboarding: false, resetState: false)
-        waitForMainUI()
-        XCTAssertFalse(element("whatsNew.list").exists)
-    }
-
-    func testMissingInstalledNotesAreExplicitAndNeverRelabelOlderCopy() {
-        app.launchEnvironment["PASTA_UI_TEST_VERSION"] = "9.0.0"
-        app.launchEnvironment["PASTA_UI_TEST_BUILD"] = "999"
-        app.launchEnvironment["PASTA_UI_TEST_PREVIOUS_VERSION"] = "1.5.18"
-        launchApp(skipOnboarding: false)
-        XCTAssertTrue(element("whatsNew.list").waitForExistence(timeout: Self.launchTimeout))
-        XCTAssertEqual(element("whatsNew.installedVersion").label, "Version 9.0.0 (999)")
-        XCTAssertTrue(element("whatsNew.unavailable").exists)
-        XCTAssertFalse(element("whatsNew.summary").exists)
-    }
-
-    // MARK: - Onboarding
-
-    func testFirstLaunchShowsOnboardingAndGetStartedReachesMainUI() {
-        launchApp(skipOnboarding: false)
-
-        let title = element("onboarding.title")
-        XCTAssertTrue(title.waitForExistence(timeout: Self.launchTimeout), "Onboarding did not appear on first launch")
-        XCTAssertEqual(title.label, "Welcome to Pasta")
-        XCTAssertFalse(tabBar.exists, "Tab bar visible while onboarding is showing")
-
-        let getStarted = element("onboarding.primaryButton")
-        XCTAssertTrue(getStarted.exists)
-        XCTAssertEqual(getStarted.label, "Continue on This iPhone")
-        if !getStarted.isHittable { app.swipeUp() }
-        getStarted.tap()
-
-        waitForMainUI()
-        XCTAssertFalse(title.exists, "Onboarding still visible after Get Started")
-    }
-
-    func testOnboardingCompletionPersistsAcrossRelaunch() {
-        launchApp(skipOnboarding: false)
-        let getStarted = element("onboarding.primaryButton")
-        XCTAssertTrue(getStarted.waitForExistence(timeout: Self.launchTimeout))
-        if !getStarted.isHittable { app.swipeUp() }
-        getStarted.tap()
-        waitForMainUI()
-
-        // Relaunch WITHOUT the reset hook: the completed flag must survive.
-        app.terminate()
-        let relaunched = XCUIApplication()
-        relaunched.launchArguments = ["-uiTesting"]
-        relaunched.launchEnvironment["PASTA_UI_TEST_RESET"] = "0"
-        relaunched.launchEnvironment["PASTA_UI_TEST_SKIP_ONBOARDING"] = "0"
-        relaunched.launch()
-        app = relaunched
-
-        waitForMainUI()
-        XCTAssertFalse(element("onboarding.title").exists, "Onboarding re-appeared after completing it")
-    }
-
-    func testSkipOnboardingHookLandsOnMainUI() {
-        launchApp(skipOnboarding: true)
-        waitForMainUI()
-        XCTAssertFalse(element("onboarding.title").exists, "Onboarding shown despite the skip hook")
-        XCTAssertFalse(element("whatsNew.list").exists, "What's New sheet shown on a fresh install")
-    }
-
-    // MARK: - Clipboard capture
-
-    /// `AppState.captureCurrentClipboardIfNeeded` runs on activation: the text
-    /// on the pasteboard must show up as the newest History entry.
-    func testCapturesPasteboardIntoHistoryOnActivation() {
-        let token = "PastaClipboard\(UUID().uuidString.prefix(8))"
-        let content = "UI test clipboard entry \(token)"
-        launchApp(pasteboard: content)
-        waitForMainUI()
-
-        openTab("History", expecting: "history.list")
-        let row = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", token)).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: Self.uiTimeout), "Captured clipboard entry not shown in History")
-        XCTAssertFalse(element("history.emptyState").exists, "Empty state shown although an entry was captured")
-
-        // The Settings entry count must agree with the list.
-        openTab("Settings", expecting: "settings.list")
-        let count = Int(element("settings.entryCount").label) ?? -1
-        XCTAssertEqual(count, 1, "One clipboard capture must produce exactly one stored entry")
-    }
-
-    /// Relaunch with unrelated clipboard content: the first entry can only
-    /// survive via the app's on-disk database, not by recapturing the fixture.
-    func testCapturedHistoryPersistsAndRemainsSearchableAfterRelaunch() {
-        let token = "PastaPersisted\(UUID().uuidString.prefix(8))"
-        let content = "Persisted clipboard content \(token)"
-        launchApp(pasteboard: content)
-        waitForMainUI()
-        XCTAssertTrue(app.staticTexts[content].waitForExistence(timeout: Self.uiTimeout))
-
-        app.terminate()
-        app = XCUIApplication()
-        launchApp(pasteboard: "Unrelated clipboard replacement", resetState: false)
-        waitForMainUI()
-        XCTAssertTrue(app.staticTexts[content].waitForExistence(timeout: Self.uiTimeout), "Captured history was lost across relaunch")
-
-        openTab("Settings", expecting: "settings.list")
-        XCTAssertEqual(element("settings.entryCount").label, "2", "Relaunch must retain the first entry and capture the replacement once")
-        openTab("Search", expecting: "search.list")
-        let searchField = app.searchFields.firstMatch
-        XCTAssertTrue(searchField.waitForExistence(timeout: Self.uiTimeout))
-        searchField.tap()
-        searchField.typeText(token)
-        let match = app.staticTexts[content]
-        XCTAssertTrue(match.waitForExistence(timeout: Self.uiTimeout), "Persisted entry is absent from FTS search")
-        match.tap()
-        XCTAssertTrue(app.navigationBars["Entry"].waitForExistence(timeout: Self.uiTimeout))
-        XCTAssertTrue(app.staticTexts[content].exists, "Detail must display the exact persisted content")
-    }
-
-    /// Tapping the captured entry opens its detail screen and back returns to
-    /// the list, exercising the row -> detail navigation path.
-    func testOpeningACapturedEntryShowsDetail() {
-        let token = "PastaDetail\(UUID().uuidString.prefix(8))"
-        launchApp(pasteboard: "Detail view clipboard entry \(token)")
-        waitForMainUI()
-
-        let row = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", token)).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: Self.uiTimeout))
-        row.tap()
-
-        // The detail view shows the full content and a back button.
-        let detailBar = app.navigationBars["Entry"]
-        XCTAssertTrue(detailBar.waitForExistence(timeout: Self.uiTimeout), "Entry detail screen did not open")
-        let detailText = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", token))
-        XCTAssertTrue(detailText.firstMatch.waitForExistence(timeout: Self.uiTimeout))
-        let back = detailBar.buttons.element(boundBy: 0)
-        XCTAssertTrue(back.waitForExistence(timeout: Self.uiTimeout), "No back button on the detail screen")
-        back.tap()
-        XCTAssertTrue(app.navigationBars["Clipboard History"].waitForExistence(timeout: Self.uiTimeout))
-        XCTAssertEqual(app.state, .runningForeground)
     }
 }

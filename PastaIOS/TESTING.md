@@ -34,7 +34,7 @@ xcodebuild build-for-testing -project PastaIOS/PastaIOS.xcodeproj -scheme PastaI
 # Run a single test
 xcodebuild test -project PastaIOS/PastaIOS.xcodeproj -scheme PastaIOS \
   -destination 'platform=iOS Simulator,name=iPhone 17,OS=latest' \
-  -only-testing:PastaIOSUITests/PastaIOSUITests/testLaunchesWithoutCrashing \
+  -only-testing:PastaIOSUITests/PastaIOSUITests/testFreshLaunchOnboardingEmptyHistoryAndLifecycle \
   CODE_SIGNING_ALLOWED=NO
 ```
 
@@ -58,28 +58,21 @@ open .build/ios-e2e/PastaIOSUITests.xcresult   # full report in Xcode, incl. cra
 When a test fails in CI the job uploads an `ios-e2e-diagnostics` artifact with
 the `.xcresult`, any `PastaIOS*` crash reports from the runner and the
 simulator, and a `log show` capture of the app process. A launch crash shows up
-as `testLaunchesWithoutCrashing` failing with the app state, plus an `.ips`
+as `testFreshLaunchOnboardingEmptyHistoryAndLifecycle` failing with the app state, plus an `.ips`
 crash report whose `exception`/`termination` fields name the trap.
 
 ## What is covered
 
+Each test is one journey, so a launch costs coverage rather than a single assertion.
+
 | Test | Checks |
 | --- | --- |
-| `testLaunchesWithoutCrashing` | App reaches the tab bar within 15 s, loading view goes away, process stays in the foreground. **This is the launch-crash guard.** |
-| `testSurvivesBackgroundAndForeground` | Home, then re-activate: the activation pipeline (sync + clipboard capture) does not crash. |
-| `testHistoryTabShowsListAndEmptyState` | Fresh History shows the empty state, no rows, and an exact Settings count of zero. |
-| `testSearchTabIsReachable`, `testSettingsTabIsReachable`, `testCanCycleThroughAllTabs` | Each tab is selectable and shows its top-level element. |
-| `testSearchFieldIsVisibleImmediatelyWithoutScrolling` | Regression for #74: the search field is hittable in the top part of the screen as soon as the tab opens. |
-| `testSearchExcludesNonmatchingEntriesAndClearsToPrompt` | Find a seeded entry, append an unmatched term, require that result to disappear, then clear to the prompt. |
-| `testSearchFindsACapturedClipboardEntry` | FTS search finds an entry captured from the pasteboard. |
-| `testSettingsRendersItsSections` | Sync/Help/About/Reset sections render; iCloud reads "Unavailable" with no account. |
-| `testReplayWalkthroughRoundTrips`, `testWhatsNewSheetRoundTrips` | Settings actions present a sheet and dismissing it returns to Settings. |
-| `testFirstLaunchShowsOnboardingAndGetStartedReachesMainUI` | First launch shows onboarding; Get Started reaches the main UI. |
-| `testOnboardingCompletionPersistsAcrossRelaunch` | Completed onboarding survives a relaunch. |
-| `testSkipOnboardingHookLandsOnMainUI` | The skip hook lands on the main UI with no What's New sheet. |
-| `testCapturesPasteboardIntoHistoryOnActivation` | Text on the pasteboard at activation appears in History; Settings count is exactly one. |
-| `testCapturedHistoryPersistsAndRemainsSearchableAfterRelaunch` | Capture, terminate, relaunch with unrelated clipboard text, then search and open the original persisted entry; exactly two entries exist. |
-| `testOpeningACapturedEntryShowsDetail` | Row -> detail -> back navigation. |
+| `testFreshLaunchOnboardingEmptyHistoryAndLifecycle` | **The launch-crash guard**: the first launch shows onboarding and Get Started reaches the tab bar. The fresh History is exactly empty, and the Search field is hittable as soon as the tab opens (#74). Completing onboarding does not grant sync consent. The app survives background/foreground, completed onboarding persists across a relaunch, and the replayed walkthrough returns to Settings. |
+| `testCaptureDetailSearchAndPersistenceAcrossRelaunch` | Pasteboard text at activation is captured exactly once, opens in detail and back, is found by FTS search, and an unmatched term returns no results. After terminating and relaunching with unrelated clipboard text, the original entry is still found and exactly two entries exist. |
+| `testSyncDiagnosticsAndResetKeepOfflineHistoryWithoutGrantingConsent` | Diagnostics and Reset Sync work without consent or an iCloud account. They never leak clipboard contents, replace the pasteboard, grant consent or delete local history. |
+| `testSyncConsentRetryAndWithdrawalPersistWithoutDeletingHistory` | Sync starts only with explicit consent. A failed retry in the unprovisioned simulator shows a next action and keeps offline history. Consent and its withdrawal both persist across a relaunch. |
+| `testReleaseNotesUpgradeAcknowledgesOnlyAfterDismissalAndReplaysFromSettings` | Upgrading from the legacy version-only marker presents the notes. They are acknowledged only on dismissal, not by killing the app. Settings replays them, navigates to earlier versions and dismisses. |
+| `testNewBuildSwipeDismissalPersistsAndMissingNotesAreExplicit` | A new build of an acknowledged version presents its notes, and swipe dismissal acknowledges them. A later version without bundled notes says so explicitly. |
 
 ## Launch hooks
 
