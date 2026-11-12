@@ -20,10 +20,11 @@ FILE_SIZE=$(stat -f%z "$DMG_PATH" 2>/dev/null || stat --format=%s "$DMG_PATH")
 PUB_DATE=$(date -R)
 DMG_NAME=$(basename "$DMG_PATH")
 
-# Create temp file for private key
-PRIVATE_KEY_FILE=$(mktemp)
-# Ensure private key is cleaned up on exit
-trap 'rm -f "$PRIVATE_KEY_FILE"' EXIT
+# Private scratch directory for the key, signing output and any downloaded tools
+WORK_DIR=$(mktemp -d)
+PRIVATE_KEY_FILE="$WORK_DIR/private-key"
+# Ensure private key and scratch files are cleaned up on exit
+trap 'rm -rf "$WORK_DIR"' EXIT
 
 # The Sparkle private key is a base64-encoded string
 # sign_update expects the raw string, NOT base64-decoded bytes
@@ -44,8 +45,19 @@ elif command -v sign_update &> /dev/null; then
 else
     echo "Warning: sign_update not found, downloading Sparkle tools..." >&2
     SPARKLE_VERSION="2.8.1"
-    curl -sL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" | tar xJ -C /tmp
-    SIGN_UPDATE="/tmp/bin/sign_update"
+    # SHA-256 of the official Sparkle-2.8.1.tar.xz release asset (matches GitHub's published asset digest).
+    SPARKLE_SHA256="5cddb7695674ef7704268f38eccaee80e3accbf19e61c1689efff5b6116d85be"
+    SPARKLE_ARCHIVE="$WORK_DIR/Sparkle-${SPARKLE_VERSION}.tar.xz"
+    curl -fsSL --proto '=https' -o "$SPARKLE_ARCHIVE" \
+        "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+    ACTUAL_SHA256=$(shasum -a 256 "$SPARKLE_ARCHIVE" | awk '{print $1}')
+    if [ "$ACTUAL_SHA256" != "$SPARKLE_SHA256" ]; then
+        echo "ERROR: Sparkle ${SPARKLE_VERSION} archive checksum mismatch (expected $SPARKLE_SHA256, got $ACTUAL_SHA256)" >&2
+        exit 1
+    fi
+    mkdir "$WORK_DIR/sparkle"
+    tar xJf "$SPARKLE_ARCHIVE" -C "$WORK_DIR/sparkle"
+    SIGN_UPDATE="$WORK_DIR/sparkle/bin/sign_update"
 fi
 
 # Generate EdDSA signature
@@ -54,15 +66,15 @@ echo "SIGN_UPDATE path: $SIGN_UPDATE" >&2
 
 # Run sign_update and capture output
 set +e
-"$SIGN_UPDATE" --ed-key-file "$PRIVATE_KEY_FILE" "$DMG_PATH" > /tmp/sign_output.txt 2>&1
+"$SIGN_UPDATE" --ed-key-file "$PRIVATE_KEY_FILE" "$DMG_PATH" > "$WORK_DIR/sign_output.txt" 2>&1
 SIGN_EXIT_CODE=$?
 set -e
 
 echo "sign_update exit code: $SIGN_EXIT_CODE" >&2
 echo "sign_update output:" >&2
-cat /tmp/sign_output.txt >&2
+cat "$WORK_DIR/sign_output.txt" >&2
 
-SIGNATURE=$(grep "sparkle:edSignature" /tmp/sign_output.txt | sed 's/.*sparkle:edSignature="\([^"]*\)".*/\1/' || true)
+SIGNATURE=$(grep "sparkle:edSignature" "$WORK_DIR/sign_output.txt" | sed 's/.*sparkle:edSignature="\([^"]*\)".*/\1/' || true)
 
 if [ -z "$SIGNATURE" ]; then
     echo "Error: Failed to generate signature" >&2
