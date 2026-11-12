@@ -1,0 +1,43 @@
+# Post-merge breakage responder. PRs run the fast gate; the full native suites
+# run on main after merge (ci.yml), so a red main is possible. This workflow
+# gives it an owner: scripts/ci-red-main.mjs opens or updates one "CI failing
+# on main" issue naming the failed jobs and the suspect PRs since the last
+# green run, comments once on each suspect PR, and closes the issue when a later
+# main run is green. It never reruns, reverts or pushes: Alpha already refuses
+# a red run, ci-merge-after-release.mjs blocks other merges until main is green,
+# and a revert goes through the same PR gates as any change.
+name: Main CI responder
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: read          # read the run's jobs and recent main runs
+  contents: read         # compare the failing commit with the last green one
+  issues: write          # manage only this responder's incident issue
+  pull-requests: write   # comment on suspect PRs
+
+concurrency:
+  group: main-ci-responder
+  cancel-in-progress: false
+
+jobs:
+  respond:
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          sparse-checkout: scripts
+      - name: Route the main CI outcome to its owner
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { reportMainCI } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/ci-red-main.mjs`);
+            const outcome = await reportMainCI({ github, ...context.repo, run: context.payload.workflow_run });
+            core.notice(`Main CI ${context.payload.workflow_run.conclusion} at ${context.payload.workflow_run.head_sha}: ${outcome}`);
