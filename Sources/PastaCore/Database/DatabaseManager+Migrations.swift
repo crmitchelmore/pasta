@@ -299,7 +299,8 @@ extension DatabaseManager {
         // FTS triggers and sync never see them. A NULL vector marks an entry
         // that was deliberately skipped (empty, image, or private for a remote
         // provider) so it is not retried. Rows are discarded when the entry
-        // goes away, or rebuilt when its content, type or the index key change.
+        // goes away, or rebuilt when the index key or any input to the
+        // document or its privacy eligibility changes.
         migrator.registerMigration("addSemanticEmbeddings") { db in
             try db.execute(sql: """
                 CREATE TABLE semantic_embeddings (
@@ -307,6 +308,10 @@ extension DatabaseManager {
                     indexKey TEXT NOT NULL,
                     contentHash TEXT NOT NULL,
                     contentType TEXT NOT NULL,
+                    contentTypeMask INTEGER NOT NULL,
+                    sourceApp TEXT,
+                    cloudSyncAllowed BOOLEAN NOT NULL,
+                    receivedViaTailnet BOOLEAN NOT NULL,
                     vector BLOB
                 );
                 CREATE TRIGGER semantic_embeddings_entry_deleted AFTER DELETE ON clipboard_entries BEGIN

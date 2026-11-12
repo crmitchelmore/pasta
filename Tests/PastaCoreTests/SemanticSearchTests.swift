@@ -110,6 +110,34 @@ final class SemanticSearchTests: XCTestCase {
         XCTAssertEqual(try database.saveSemanticEmbeddings([SemanticEmbeddingRecord(candidate: pending[0], vector: [1, 1])], indexKey: "k2"), 0)
     }
 
+    func testEligibilityChangesWithoutNewTextRequeueEntries() throws {
+        let database = try DatabaseManager.inMemory()
+        let entry = ClipboardEntry(content: "meeting notes token abc", contentType: .text)
+        try database.insert(entry)
+        let sensitiveMask = ContentTypeMask(.apiKey)!.rawValue
+        try database.dbWriter.write { try $0.execute(sql: "UPDATE clipboard_entries SET contentTypeMask = ?", arguments: [sensitiveMask]) }
+
+        let skipped = try XCTUnwrap(database.pendingSemanticCandidates(indexKey: "k", limit: 10).first)
+        XCTAssertNil(SemanticSearchService.documentText(for: skipped, configuration: SemanticSearchConfiguration(provider: .openAI)))
+        try database.saveSemanticEmbeddings([SemanticEmbeddingRecord(candidate: skipped, vector: nil)], indexKey: "k")
+        XCTAssertEqual(try database.pendingSemanticCandidates(indexKey: "k", limit: 10), [])
+
+        // Reparse clears the detection: the skip marker is no longer current.
+        try database.dbWriter.write { try $0.execute(sql: "UPDATE clipboard_entries SET contentTypeMask = 0") }
+        let eligible = try XCTUnwrap(database.pendingSemanticCandidates(indexKey: "k", limit: 10).first)
+        XCTAssertNotNil(SemanticSearchService.documentText(for: eligible, configuration: SemanticSearchConfiguration(provider: .openAI)))
+        try database.saveSemanticEmbeddings([SemanticEmbeddingRecord(candidate: eligible, vector: [1, 0])], indexKey: "k")
+        XCTAssertEqual(try database.semanticIndexCounts(indexKey: "k").indexed, 1)
+
+        // Withdrawing iCloud permission retires the vector until re-checked.
+        try database.dbWriter.write { try $0.execute(sql: "UPDATE clipboard_entries SET cloudSyncAllowed = 0") }
+        XCTAssertEqual(try database.fetchSemanticVectors(indexKey: "k").count, 0)
+        XCTAssertEqual(try database.pendingSemanticCandidates(indexKey: "k", limit: 10).first?.allowsCloudUpload, false)
+
+        try database.dbWriter.write { try $0.execute(sql: "UPDATE clipboard_entries SET cloudSyncAllowed = 1, sourceApp = 'com.apple.Notes'") }
+        XCTAssertEqual(try database.pendingSemanticCandidates(indexKey: "k", limit: 10).count, 1, "Source app is part of the document")
+    }
+
     func testFetchEntriesKeepsRequestedOrderAndDropsMissingIDs() throws {
         let database = try DatabaseManager.inMemory()
         let a = ClipboardEntry(content: "a", contentType: .text)
@@ -197,6 +225,16 @@ final class SemanticSearchTests: XCTestCase {
         XCTAssertNil(configuration.endpointURL, "Plain HTTP is only allowed to loopback hosts")
         configuration.endpoint = "http://127.0.0.1:1234/v1/embeddings"
         XCTAssertNotNil(configuration.endpointURL)
+        XCTAssertTrue(configuration.isOnDevice)
+        configuration.endpoint = "http://127.clipboard.example/v1/embeddings"
+        XCTAssertNil(configuration.endpointURL, "Hostnames that merely start with 127. are not loopback")
+        configuration.endpoint = "https://127.clipboard.example/v1/embeddings"
+        XCTAssertFalse(configuration.isOnDevice, "Remote privacy exclusions still apply")
+        XCTAssertTrue(SemanticSearchConfiguration.isLoopback(host: "127.42.0.9"))
+        XCTAssertTrue(SemanticSearchConfiguration.isLoopback(host: "[::1]"))
+        XCTAssertTrue(SemanticSearchConfiguration.isLoopback(host: "0:0:0:0:0:0:0:1"))
+        XCTAssertFalse(SemanticSearchConfiguration.isLoopback(host: "127.0.0.1.nip.io"))
+        XCTAssertFalse(SemanticSearchConfiguration.isLoopback(host: "128.0.0.1"))
 
         SemanticSearchConfiguration.invalidateValidation(defaults: defaults)
         XCTAssertFalse(SemanticSearchConfiguration.load(defaults: defaults).isEnabled)
@@ -209,6 +247,13 @@ final class SemanticSearchTests: XCTestCase {
         XCTAssertEqual(small.requestedDimensions, 512)
         XCTAssertNil(SemanticSearchConfiguration(provider: .openAICompatible).requestedDimensions)
         XCTAssertEqual(Set([small.indexKey, large.indexKey, azure.indexKey]).count, 3)
+
+        let ollama = SemanticSearchConfiguration(provider: .openAICompatible, endpoint: "http://localhost:11434/v1/embeddings", model: "embed")
+        let lmStudio = SemanticSearchConfiguration(provider: .openAICompatible, endpoint: "http://localhost:1234/v1/embeddings", model: "embed")
+        let proxied = SemanticSearchConfiguration(provider: .openAICompatible, endpoint: "http://localhost:11434/other/v1/embeddings", model: "embed")
+        let trailingSlash = SemanticSearchConfiguration(provider: .openAICompatible, endpoint: "http://LOCALHOST:11434/v1/embeddings/", model: "embed")
+        XCTAssertEqual(Set([ollama.indexKey, lmStudio.indexKey, proxied.indexKey]).count, 3, "Services on one host keep separate vectors")
+        XCTAssertEqual(ollama.indexKey, trailingSlash.indexKey)
     }
 
     // MARK: - Client
@@ -341,6 +386,42 @@ final class SemanticSearchTests: XCTestCase {
         XCTAssertNotNil(status.lastError)
         XCTAssertNil(status.retryAt, "Configuration errors wait for a settings change")
         XCTAssertEqual(embedder.callCount, 1)
+
+        // New clips arriving must not retry the rejected key.
+        await service.scheduleIndexing()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(embedder.callCount, 1)
+        let stillPaused = await service.currentStatus()
+        XCTAssertFalse(stillPaused.isIndexing)
+
+        // A settings change lifts the pause.
+        await service.reloadConfiguration()
+        for _ in 0..<300 where embedder.callCount < 2 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTAssertEqual(embedder.callCount, 2)
+    }
+
+    func testDisablingCancelsQueriesWaitingOnTheProvider() async throws {
+        let database = try DatabaseManager.inMemory()
+        try database.insert(ClipboardEntry(content: "hello", contentType: .text))
+        let embedder = BagOfWordsEmbedder(blockingQuery: "slow query")
+        let service = try makeActiveService(database: database, embedder: embedder)
+        await service.reloadConfiguration()
+        try await waitForIndexing(service, indexed: 1, skipped: 0)
+
+        let search = Task { await service.search(query: "slow query", limit: 5) }
+        for _ in 0..<300 where !embedder.allInputs.contains("slow query") {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        var disabled = SemanticSearchConfiguration.load(defaults: defaults)
+        disabled.isEnabled = false
+        disabled.save(defaults: defaults)
+        await service.reloadConfiguration()
+
+        let results = await search.value
+        XCTAssertEqual(results, [])
+        XCTAssertTrue(embedder.wasCancelled, "The pending provider request is cancelled, so it cannot retry")
     }
 
     // MARK: - Helpers
@@ -381,7 +462,8 @@ final class SemanticSearchTests: XCTestCase {
             sourceApp: nil,
             contentHash: content,
             contentTypeMask: mask ?? ContentTypeMask(type) ?? [],
-            allowsCloudUpload: allowsCloudUpload
+            cloudSyncAllowed: allowsCloudUpload,
+            receivedViaTailnet: false
         )
     }
 
@@ -396,14 +478,19 @@ final class BagOfWordsEmbedder: TextEmbedding, @unchecked Sendable {
     private let lock = NSLock()
     private var inputs: [String] = []
     private var calls = 0
+    private var cancelled = false
     private let error: Error?
+    private let blockingQuery: String?
 
-    init(error: Error? = nil) {
+    /// `blockingQuery` is never answered: embedding it waits until cancelled.
+    init(error: Error? = nil, blockingQuery: String? = nil) {
         self.error = error
+        self.blockingQuery = blockingQuery
     }
 
     var allInputs: [String] { lock.withLock { inputs } }
     var callCount: Int { lock.withLock { calls } }
+    var wasCancelled: Bool { lock.withLock { cancelled } }
 
     func embed(_ texts: [String]) async throws -> [[Float]] {
         lock.withLock {
@@ -411,6 +498,14 @@ final class BagOfWordsEmbedder: TextEmbedding, @unchecked Sendable {
             inputs += texts
         }
         if let error { throw error }
+        if let blockingQuery, texts == [blockingQuery] {
+            do {
+                try await Task.sleep(nanoseconds: 60_000_000_000)
+            } catch {
+                lock.withLock { cancelled = true }
+                throw error
+            }
+        }
         return texts.map(Self.vector(for:))
     }
 

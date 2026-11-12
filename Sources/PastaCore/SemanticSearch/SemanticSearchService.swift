@@ -48,6 +48,13 @@ public actor SemanticSearchService {
     private var indexingTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
     private var needsAnotherPass = false
+    /// Identifies the current indexing worker, so a cancelled worker that
+    /// resumes late cannot clear or pause its replacement.
+    private var indexingGeneration = 0
+    /// Set after an error that only a settings change can fix.
+    private var isPausedForConfiguration = false
+    /// In-flight query embeddings, cancelled when settings change.
+    private var queryOperations: [UUID: Task<[[Float]], Error>] = [:]
     private var queryCache: [String: [Float]] = [:]
     private var queryCacheOrder: [String] = []
 
@@ -78,6 +85,8 @@ public actor SemanticSearchService {
         configuration = loaded
         retryTask?.cancel()
         retryTask = nil
+        isPausedForConfiguration = false
+        cancelQueryOperations()
         status.retryAt = nil
         status.lastError = nil
 
@@ -112,14 +121,16 @@ public actor SemanticSearchService {
 
     /// Embeds any entries missing from the index. Safe to call often.
     public func scheduleIndexing() {
-        guard embedder != nil, retryTask == nil else { return }
+        guard embedder != nil, retryTask == nil, !isPausedForConfiguration else { return }
         if indexingTask != nil {
             needsAnotherPass = true
             return
         }
         status.isIndexing = true
+        indexingGeneration += 1
+        let generation = indexingGeneration
         indexingTask = Task { [weak self] in
-            await self?.runIndexing()
+            await self?.runIndexing(generation: generation)
         }
     }
 
@@ -152,16 +163,26 @@ public actor SemanticSearchService {
         if let cached = queryCache[cacheKey] {
             queryVector = cached
         } else {
+            let operationID = UUID()
+            let operation = Task { try await embedder.embed([trimmed]) }
+            queryOperations[operationID] = operation
+            defer { queryOperations[operationID] = nil }
             do {
-                guard let vector = try await embedder.embed([trimmed]).first else { return [] }
+                let vectors = try await withTaskCancellationHandler {
+                    try await operation.value
+                } onCancel: {
+                    operation.cancel()
+                }
+                guard let vector = vectors.first else { return [] }
                 queryVector = vector
             } catch is CancellationError {
                 return []
             } catch {
+                guard !operation.isCancelled else { return [] }
                 PastaLogger.logError(error, logger: PastaLogger.search, context: "Semantic query embedding failed")
                 return []
             }
-            guard configuration.indexKey == indexKey else { return [] }
+            guard !operation.isCancelled, self.embedder != nil, configuration.indexKey == indexKey else { return [] }
             cacheQuery(cacheKey, vector: queryVector)
         }
         guard !Task.isCancelled else { return [] }
@@ -209,10 +230,12 @@ public actor SemanticSearchService {
 
     // MARK: - Indexing
 
-    private func runIndexing() async {
+    private func runIndexing(generation: Int) async {
         defer {
-            indexingTask = nil
-            status.isIndexing = false
+            if generation == indexingGeneration {
+                indexingTask = nil
+                status.isIndexing = false
+            }
         }
         repeat {
             needsAnotherPass = false
@@ -224,7 +247,7 @@ public actor SemanticSearchService {
                 do {
                     candidates = try database.pendingSemanticCandidates(indexKey: indexKey, limit: Self.indexingBatchSize)
                 } catch {
-                    pause(after: error)
+                    pause(after: error, generation: generation)
                     return
                 }
                 guard !candidates.isEmpty else { break }
@@ -246,11 +269,11 @@ public actor SemanticSearchService {
                     } catch is CancellationError {
                         return
                     } catch {
-                        pause(after: error)
+                        pause(after: error, generation: generation)
                         return
                     }
                     guard vectors.count == toEmbed.count else {
-                        pause(after: SemanticSearchError.invalidResponse("wrong number of embeddings."))
+                        pause(after: SemanticSearchError.invalidResponse("wrong number of embeddings."), generation: generation)
                         return
                     }
                 }
@@ -263,7 +286,7 @@ public actor SemanticSearchService {
                 do {
                     written = try database.saveSemanticEmbeddings(records, indexKey: indexKey)
                 } catch {
-                    pause(after: error)
+                    pause(after: error, generation: generation)
                     return
                 }
                 for record in records {
@@ -281,6 +304,7 @@ public actor SemanticSearchService {
             }
         } while needsAnotherPass && !Task.isCancelled
 
+        guard !Task.isCancelled, generation == indexingGeneration else { return }
         refreshCounts()
         if status.counts.indexed != index.count, let key = loadedIndexKey {
             loadIndex(indexKey: key)
@@ -304,10 +328,14 @@ public actor SemanticSearchService {
         ))
     }
 
-    private func pause(after error: Error) {
+    private func pause(after error: Error, generation: Int) {
+        guard !Task.isCancelled, generation == indexingGeneration else { return }
         PastaLogger.logError(error, logger: PastaLogger.search, context: "Semantic indexing paused")
         status.lastError = error.localizedDescription
-        if (error as? SemanticSearchError)?.requiresConfigurationChange == true { return }
+        if (error as? SemanticSearchError)?.requiresConfigurationChange == true {
+            isPausedForConfiguration = true
+            return
+        }
         let retryAt = Date().addingTimeInterval(Self.retryDelay)
         status.retryAt = retryAt
         retryTask = Task { [weak self] in
@@ -349,6 +377,11 @@ public actor SemanticSearchService {
         if queryCacheOrder.count > Self.queryCacheLimit {
             queryCache.removeValue(forKey: queryCacheOrder.removeFirst())
         }
+    }
+
+    private func cancelQueryOperations() {
+        for operation in queryOperations.values { operation.cancel() }
+        queryOperations.removeAll()
     }
 
     private func clearQueryCache() {

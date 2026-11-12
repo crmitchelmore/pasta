@@ -297,10 +297,9 @@ struct SemanticSearchSettingsTab: View {
                 guard !Task.isCancelled, configuration == snapshot else { return }
                 snapshot.recordSuccessfulValidation(apiKey: key)
                 isValidated = true
-                configuration.isEnabled = true
                 persist()
                 testSucceeded = true
-                message = "Connected: \(snapshot.effectiveModel) returns \(dimensions)-dimension vectors. Semantic search is on."
+                message = "Connected: \(snapshot.effectiveModel) returns \(dimensions)-dimension vectors. Turn on Search by meaning to start indexing."
             } catch {
                 guard !Task.isCancelled else { return }
                 show(error)

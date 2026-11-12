@@ -12,9 +12,14 @@ public struct SemanticEmbeddingCandidate: Sendable, Equatable {
     public let sourceApp: String?
     public let contentHash: String
     public let contentTypeMask: ContentTypeMask
+    let cloudSyncAllowed: Bool
+    let receivedViaTailnet: Bool
+
     /// False for entries that must never reach a remote provider: those kept
     /// off iCloud, file paths, and anything received over Tailnet.
-    public let allowsCloudUpload: Bool
+    public var allowsCloudUpload: Bool {
+        cloudSyncAllowed && !receivedViaTailnet && contentType != .filePath
+    }
 }
 
 public struct SemanticEmbeddingRecord: Sendable, Equatable {
@@ -22,6 +27,10 @@ public struct SemanticEmbeddingRecord: Sendable, Equatable {
     let storageID: String
     public let contentHash: String
     public let contentType: ContentType
+    let contentTypeMask: ContentTypeMask
+    let sourceApp: String?
+    let cloudSyncAllowed: Bool
+    let receivedViaTailnet: Bool
     /// `nil` records an entry deliberately left out of the index.
     public let vector: [Float]?
 
@@ -30,6 +39,10 @@ public struct SemanticEmbeddingRecord: Sendable, Equatable {
         self.storageID = candidate.storageID
         self.contentHash = candidate.contentHash
         self.contentType = candidate.contentType
+        self.contentTypeMask = candidate.contentTypeMask
+        self.sourceApp = candidate.sourceApp
+        self.cloudSyncAllowed = candidate.cloudSyncAllowed
+        self.receivedViaTailnet = candidate.receivedViaTailnet
         self.vector = vector
     }
 }
@@ -53,6 +66,15 @@ extension DatabaseManager {
     /// embeds the head of an entry.
     static let semanticCandidateContentCharacters = SemanticDocument.maxContentCharacters * 2
 
+    /// True when row `s` was built from entry `e` as it is now: same text,
+    /// type, detections, source app and sharing policy. Any change to these
+    /// can alter the document or whether the entry may be sent at all.
+    static let semanticRowIsCurrentSQL = """
+        s.contentHash = e.contentHash AND s.contentType = e.contentType
+          AND s.contentTypeMask = e.contentTypeMask AND s.sourceApp IS e.sourceApp
+          AND s.cloudSyncAllowed = e.cloudSyncAllowed AND s.receivedViaTailnet = e.receivedViaTailnet
+        """
+
     /// Most recent primary entries with no current vector under `indexKey`.
     public func pendingSemanticCandidates(indexKey: String, limit: Int) throws -> [SemanticEmbeddingCandidate] {
         try dbWriter.read { db in
@@ -62,15 +84,13 @@ extension DatabaseManager {
                 FROM clipboard_entries e
                 LEFT JOIN semantic_embeddings s ON s.entryId = e.id
                 WHERE e.parentEntryId IS NULL
-                  AND (s.entryId IS NULL OR s.indexKey != ? OR s.contentHash != e.contentHash OR s.contentType != e.contentType)
+                  AND (s.entryId IS NULL OR s.indexKey != ? OR NOT (\(Self.semanticRowIsCurrentSQL)))
                 ORDER BY e.timestamp DESC
                 LIMIT ?
                 """, arguments: [Self.semanticCandidateContentCharacters, indexKey, limit])
             return rows.compactMap { row -> SemanticEmbeddingCandidate? in
                 guard let idString: String = row["id"], let id = UUID(uuidString: idString) else { return nil }
                 let type = ContentType(rawValue: row["contentType"] ?? "") ?? .unknown
-                let cloudSyncAllowed: Bool = row["cloudSyncAllowed"] ?? true
-                let receivedViaTailnet: Bool = row["receivedViaTailnet"] ?? false
                 return SemanticEmbeddingCandidate(
                     id: id,
                     storageID: idString,
@@ -79,7 +99,8 @@ extension DatabaseManager {
                     sourceApp: row["sourceApp"],
                     contentHash: row["contentHash"] ?? "",
                     contentTypeMask: ContentTypeMask(rawValue: row["contentTypeMask"] ?? 0),
-                    allowsCloudUpload: cloudSyncAllowed && !receivedViaTailnet && type != .filePath
+                    cloudSyncAllowed: row["cloudSyncAllowed"] ?? true,
+                    receivedViaTailnet: row["receivedViaTailnet"] ?? false
                 )
             }
         }
@@ -96,9 +117,13 @@ extension DatabaseManager {
             for record in records {
                 let id = record.storageID
                 try db.execute(sql: """
-                    INSERT OR REPLACE INTO semantic_embeddings (entryId, indexKey, contentHash, contentType, vector)
-                    SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM clipboard_entries WHERE id = ?)
+                    INSERT OR REPLACE INTO semantic_embeddings
+                        (entryId, indexKey, contentHash, contentType, contentTypeMask, sourceApp,
+                         cloudSyncAllowed, receivedViaTailnet, vector)
+                    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM clipboard_entries WHERE id = ?)
                     """, arguments: [id, indexKey, record.contentHash, record.contentType.rawValue,
+                                     record.contentTypeMask.rawValue, record.sourceApp,
+                                     record.cloudSyncAllowed, record.receivedViaTailnet,
                                      record.vector.map(VectorMath.data(from:)), id])
                 written += db.changesCount
             }
@@ -113,7 +138,7 @@ extension DatabaseManager {
                 SELECT s.entryId, s.vector FROM semantic_embeddings s
                 JOIN clipboard_entries e ON e.id = s.entryId
                 WHERE s.indexKey = ? AND s.vector IS NOT NULL
-                  AND s.contentHash = e.contentHash AND s.contentType = e.contentType
+                  AND \(Self.semanticRowIsCurrentSQL)
                 """, arguments: [indexKey])
             var result: [(id: UUID, vector: [Float])] = []
             while let row = try cursor.next() {
@@ -132,10 +157,10 @@ extension DatabaseManager {
                     (SELECT COUNT(*) FROM clipboard_entries WHERE parentEntryId IS NULL) AS total,
                     (SELECT COUNT(*) FROM semantic_embeddings s JOIN clipboard_entries e ON e.id = s.entryId
                        WHERE s.indexKey = ? AND s.vector IS NOT NULL
-                         AND s.contentHash = e.contentHash AND s.contentType = e.contentType) AS indexed,
+                         AND \(Self.semanticRowIsCurrentSQL)) AS indexed,
                     (SELECT COUNT(*) FROM semantic_embeddings s JOIN clipboard_entries e ON e.id = s.entryId
                        WHERE s.indexKey = ? AND s.vector IS NULL
-                         AND s.contentHash = e.contentHash AND s.contentType = e.contentType) AS skipped
+                         AND \(Self.semanticRowIsCurrentSQL)) AS skipped
                 """, arguments: [indexKey, indexKey])
             return SemanticIndexCounts(indexed: row?["indexed"] ?? 0, skipped: row?["skipped"] ?? 0, total: row?["total"] ?? 0)
         }

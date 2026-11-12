@@ -229,9 +229,21 @@ public struct SemanticSearchConfiguration: Sendable, Equatable {
     /// Identifies the vector space stored vectors belong to. Vectors under a
     /// different key are discarded and rebuilt.
     public var indexKey: String {
-        let host = endpointURL?.host?.lowercased() ?? "invalid"
         let dimensions = requestedDimensions.map(String.init) ?? "native"
-        return "\(provider.rawValue)|\(host)|\(effectiveModel)|\(dimensions)|doc\(Self.documentVersion)"
+        return "\(provider.rawValue)|\(endpointIdentity)|\(effectiveModel)|\(dimensions)|doc\(Self.documentVersion)"
+    }
+
+    /// Scheme, host, port and path of the endpoint, so two services on one
+    /// host never share vectors.
+    var endpointIdentity: String {
+        guard let url = endpointURL, let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased() else {
+            return "invalid"
+        }
+        let port = url.port ?? (scheme == "https" ? 443 : 80)
+        var path = url.path
+        while path.hasSuffix("/") { path.removeLast() }
+        let query = url.query.map { "?\($0)" } ?? ""
+        return "\(scheme)://\(host):\(port)\(path)\(query)"
     }
 
     public func isValidated(apiKey: String?, defaults: UserDefaults = .standard) -> Bool {
@@ -260,9 +272,20 @@ public struct SemanticSearchConfiguration: Sendable, Equatable {
         return ClipboardEntry.sha256Hex(values.map { "\($0.utf8.count):\($0)" }.joined())
     }
 
+    /// `localhost`, or a literal loopback address (127.0.0.0/8 or ::1).
+    /// Names that merely look numeric, such as `127.example.com`, are not.
     static func isLoopback(host: String) -> Bool {
         let normalized = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        return normalized == "localhost" || normalized == "::1" || normalized.hasPrefix("127.")
+        if normalized == "localhost" { return true }
+        var ipv4 = in_addr()
+        if inet_pton(AF_INET, normalized, &ipv4) == 1 {
+            return UInt32(bigEndian: ipv4.s_addr) >> 24 == 127
+        }
+        var ipv6 = in6_addr()
+        if inet_pton(AF_INET6, normalized, &ipv6) == 1 {
+            return withUnsafeBytes(of: &ipv6) { bytes in bytes.dropLast().allSatisfy { $0 == 0 } && bytes.last == 1 }
+        }
+        return false
     }
 
     private static func nonEmpty(_ value: String?) -> String? {

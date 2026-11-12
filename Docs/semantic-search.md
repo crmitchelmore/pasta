@@ -29,10 +29,14 @@ can.
      `nomic-embed-text`. Nothing leaves the Mac.
    Keys are stored in the device-only login Keychain. The feature can only be
    switched on after **Save and Test** succeeds for the exact provider,
-   endpoint, model and key.
+   endpoint, model and key. A successful test does not turn it on; nothing is
+   indexed until you switch on **Search by meaning**. Plain HTTP is accepted
+   only for `localhost` or a literal loopback address (127.0.0.0/8, `::1`).
 3. **Index.** Vectors are stored in the `semantic_embeddings` table, keyed by
-   entry, content hash and an *index key* (provider, host, model, dimensions,
-   document version). Changing any of those rebuilds the index. Indexing runs in
+   entry and an *index key* (provider, endpoint URL, model, dimensions,
+   document version). Changing the key rebuilds the index; changing an
+   entry's text, type, detections, source app or sharing settings re-checks
+   and re-embeds that entry. Indexing runs in
    the background, newest first, in batches of 32, and pauses on errors
    (configuration errors wait for a settings change; others retry after a
    minute).

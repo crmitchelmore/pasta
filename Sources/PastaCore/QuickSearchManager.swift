@@ -354,8 +354,15 @@ public final class QuickSearchManager: ObservableObject {
               self.query.trimmingCharacters(in: .whitespacesAndNewlines) == query,
               selectedFilter == filter, showPinnedOnly == pinnedOnly else { return }
 
+        // Literal-match detection scans entry content; keep it off the main actor.
+        let merged = await withCancellableDetachedTask(priority: .userInitiated) {
+            HybridSearchRanking.merge(keyword: keyword, semantic: semantic, query: query, limit: 20)
+        }
+        guard !Task.isCancelled,
+              self.query.trimmingCharacters(in: .whitespacesAndNewlines) == query,
+              selectedFilter == filter, showPinnedOnly == pinnedOnly else { return }
+
         let keywordIDs = Set(keyword.map(\.id))
-        let merged = HybridSearchRanking.merge(keyword: keyword, semantic: semantic, query: query, limit: 20)
         let selectedID = selectedEntry?.id
         results = merged
         semanticMatchIDs = Set(merged.lazy.map(\.id).filter { !keywordIDs.contains($0) })
