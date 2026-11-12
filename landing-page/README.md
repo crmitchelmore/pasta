@@ -52,7 +52,7 @@ Or just open `index.html` in your browser.
 ## Testing
 
 Everything here runs on Linux/macOS in well under a minute and — apart from
-the advisory live probe — needs **no network access**. Requires Node 20+.
+the advisory live probe — needs **no network access**. Requires Node 22.12+.
 
 ```bash
 cd landing-page

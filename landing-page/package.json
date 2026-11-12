@@ -5,7 +5,7 @@
   "description": "Static landing page for pasta-app.com plus its e2e / contract test suite",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "serve": "node tests/support/static-server.mjs",
@@ -17,9 +17,9 @@
     "report": "playwright show-report"
   },
   "devDependencies": {
-    "@axe-core/playwright": "4.13.0",
-    "@playwright/test": "1.63.0",
-    "@types/node": "26.6.4",
-    "fast-xml-parser": "5.11.2"
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.65.0",
+    "@types/node": "26.6.6",
+    "fast-xml-parser": "5.12.0"
   }
 }
