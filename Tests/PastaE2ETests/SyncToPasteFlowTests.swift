@@ -1,4 +1,5 @@
 import AppKit
+import CloudKit
 import Foundation
 import XCTest
 import PastaSync
@@ -21,6 +22,18 @@ final class SyncToPasteFlowTests: XCTestCase {
             timestamp: Date(timeIntervalSince1970: 1_000), isPinned: true
         )
         try database!.insert(local)
+
+        // With sync disabled CloudKit is never touched and the local row is not acknowledged.
+        let disabled = SyncManager(containerIdentifier: "iCloud.com.pasta.e2e", syncEnabled: false)
+        do {
+            try await disabled.pushEntry(local)
+            try database!.markSynced(ids: [local.id])
+            XCTFail("Unavailable CloudKit must not acknowledge an upload")
+        } catch {
+            XCTAssertEqual((error as? CKError)?.code, .notAuthenticated)
+        }
+        XCTAssertEqual(try database!.syncedCount(), 0)
+
         let remote = SyncJourneyRemote(batches: [
             SyncChangeBatch(modified: [downloaded], deleted: [], token: Data([1])),
             SyncChangeBatch(modified: [updated], deleted: [], token: Data([2])),

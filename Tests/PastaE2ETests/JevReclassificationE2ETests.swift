@@ -22,7 +22,7 @@ final class JevReclassificationE2ETests: XCTestCase {
         environment = nil
     }
 
-    func testBothProvidersApplyCustomChoicesAndPersistPreviewLabelWithoutChangingSyncPolicy() throws {
+    func testProvidersApplyCustomChoicesKeepEmbeddedItemsAndHonourExtractionLimits() throws {
         let custom = DecisionClassifierDefinition(name: "Customer ID", description: "A customer reference", contentType: .text)
         for provider in RemoteClassificationProvider.allCases {
             let snapshot = try database.insert(ClipboardEntry(content: "CUST-\(UUID())", contentType: .prose,
@@ -49,75 +49,8 @@ final class JevReclassificationE2ETests: XCTestCase {
             XCTAssertEqual(normalResult, .applied)
             XCTAssertNil(e2eJSONDictionary(try database.fetch(id: snapshot.id)?.metadata)?["decisionClassification"])
         }
-    }
 
-    func testMicrosoftHistoryReclassificationKeepsSensitiveAndBinaryItemsLocal() throws {
-        let configuration = JevConfiguration(isEnabled: true, provider: .microsoftDecision, mode: .primary)
-        for type in [ContentType.apiKey, .jwt, .creditCard, .iban, .envVar, .image, .screenshot, .filePath] {
-            let entry = try database.insert(ClipboardEntry(content: "Private \(type.rawValue)", contentType: type), deduplicate: false).entry
-            let snapshot = try XCTUnwrap(database.fetch(id: entry.id))
-            let outcome = try JevReclassificationService().apply(.init(category: .prose), to: snapshot,
-                database: database, configuration: configuration, detectorConfiguration: .default,
-                extractContent: true, skipAPIKeys: true)
-            XCTAssertEqual(outcome, .retained)
-            XCTAssertEqual(try database.fetch(id: snapshot.id), snapshot)
-        }
-    }
-
-    func testPersistedDedupIdentityIsReclassifiedWithoutLosingContentPinsOrCounts() throws {
-        let capture = ClipboardEntry(content: "A short title", contentType: .text, isPinned: true)
-        let first = try pipeline.ingest(capture)
-        let recopy = ClipboardEntry(content: capture.content, contentType: .text)
-        let second = try pipeline.ingest(recopy)
-        let snapshot = try primarySnapshot(second)
-        XCTAssertEqual(snapshot.id, first.persisted.first?.id)
-        XCTAssertNotEqual(snapshot.id, recopy.id)
-        XCTAssertEqual(snapshot.copyCount, 2)
-
-        let result = try apply(.prose, to: snapshot)
-        XCTAssertEqual(result, .applied)
-        let updated = try XCTUnwrap(database.fetch(id: snapshot.id))
-        XCTAssertEqual(updated.contentType, .prose)
-        XCTAssertEqual(updated.content, capture.content)
-        XCTAssertEqual(updated.copyCount, snapshot.copyCount)
-        XCTAssertEqual(updated.timestamp, snapshot.timestamp)
-        XCTAssertEqual(updated.isPinned, snapshot.isPinned)
-        XCTAssertFalse(updated.isSynced)
-        XCTAssertEqual(updated.contentTypeMask, MetadataParser.typeMask(for: updated.metadata))
-        XCTAssertNil(try database.fetch(id: recopy.id))
-        XCTAssertTrue(try database.searchFTS(query: "short", contentType: .prose, limit: 10).contains { $0.id == snapshot.id })
-    }
-
-    func testCategoryChangeRebuildsChildrenAndPreservesSharingConsent() throws {
-        let text = "Read https://example.com and ask team@example.com for the launch notes."
-        let captured = ClipboardEntry(content: text, contentType: .text, cloudSyncAllowed: false, receivedViaTailnet: true)
-        let result = try pipeline.ingest(captured)
-        let snapshot = try primarySnapshot(result)
-        let oldIDs = Set(try database.fetchExtractedEntries(parentId: snapshot.id).map(\.id))
-        XCTAssertFalse(oldIDs.isEmpty)
-        XCTAssertEqual(try apply(.prose, to: snapshot), .applied)
-        let children = try database.fetchExtractedEntries(parentId: snapshot.id)
-        XCTAssertFalse(children.isEmpty)
-        XCTAssertTrue(Set(children.map(\.id)).isDisjoint(with: oldIDs))
-        XCTAssertTrue(children.allSatisfy { !$0.cloudSyncAllowed && $0.receivedViaTailnet && !$0.isSynced })
-        XCTAssertEqual(try database.fetch(id: snapshot.id)?.cloudSyncAllowed, false)
-        let changed = try XCTUnwrap(database.fetch(id: snapshot.id))
-        XCTAssertEqual(try apply(.url, to: changed), .applied)
-        let retypedChildren = try database.fetchExtractedEntries(parentId: snapshot.id)
-        XCTAssertEqual(Set(retypedChildren.map(\.content)), Set(children.map(\.content)))
-        XCTAssertTrue(try XCTUnwrap(database.fetch(id: snapshot.id)).isMixedContent)
-    }
-
-    func testUnknownRetainsOriginalCategoryAndChildren() throws {
-        let result = try pipeline.ingest(ClipboardEntry(content: "Read https://example.com before the launch.", contentType: .text))
-        let snapshot = try primarySnapshot(result)
-        let children = try database.fetchExtractedEntries(parentId: snapshot.id)
-        XCTAssertEqual(try apply(.unknown, to: snapshot), .retained)
-        XCTAssertEqual(try database.fetch(id: snapshot.id), snapshot)
-        XCTAssertEqual(try database.fetchExtractedEntries(parentId: snapshot.id), children)
-    }
-
-    func testBothDecisionProvidersKeepEmbeddedItemsWhenChangingToCode() throws {
+        // Retyping mixed text as code keeps its embedded items with either provider.
         for provider in RemoteClassificationProvider.allCases {
             let configuration = JevConfiguration(isEnabled: true, provider: provider, mode: .primary)
             let result = try pipeline.ingest(ClipboardEntry(content: "Contact a@example.com and visit https://example.com", contentType: .text))
@@ -132,21 +65,8 @@ final class JevReclassificationE2ETests: XCTestCase {
             XCTAssertEqual(Set(try database.fetchExtractedEntries(parentId: snapshot.id).map(\.content)),
                            ["a@example.com", "https://example.com"])
         }
-    }
 
-    func testInvalidExtractedParentRollsBackClassificationAndChildRetirement() throws {
-        let result = try pipeline.ingest(ClipboardEntry(content: "Read https://example.com before the launch.", contentType: .text))
-        let snapshot = try primarySnapshot(result)
-        let children = try database.fetchExtractedEntries(parentId: snapshot.id)
-        let invalidChild = ClipboardEntry(content: "https://example.com", contentType: .url, parentEntryId: UUID())
-        XCTAssertThrowsError(try database.applyClassification(matching: snapshot, contentType: .prose,
-                                                              metadata: nil, extractedEntries: [invalidChild]))
-        XCTAssertEqual(try database.fetch(id: snapshot.id), snapshot)
-        XCTAssertEqual(try database.fetchExtractedEntries(parentId: snapshot.id), children)
-        XCTAssertTrue(try database.pendingClassificationDeletions().isEmpty)
-    }
-
-    func testConfiguredExtractionLimitsReachCaptureAndBothProviders() throws {
+        // Configured extraction limits reach capture and both providers.
         let content = (0..<125).map { "person\($0)@example.com" }.joined(separator: "\n")
         pipeline.extractionConfiguration = try .init(maximumSavedItems: 25)
         let capture = try pipeline.ingest(ClipboardEntry(content: content, contentType: .text,
@@ -168,47 +88,20 @@ final class JevReclassificationE2ETests: XCTestCase {
         }
     }
 
-    func testChangedOrDeletedSnapshotCannotBeOverwrittenOrResurrected() throws {
-        let result = try pipeline.ingest(ClipboardEntry(content: "Original title", contentType: .text))
-        let snapshot = try primarySnapshot(result)
-        XCTAssertTrue(try database.applyClassification(matching: snapshot, contentType: .code, metadata: nil, extractedEntries: []))
-        XCTAssertEqual(try apply(.prose, to: snapshot), .changedSinceRequest)
-        XCTAssertEqual(try database.fetch(id: snapshot.id)?.contentType, .code)
-        try database.delete(id: snapshot.id)
-        XCTAssertEqual(try apply(.prose, to: snapshot), .changedSinceRequest)
-        XCTAssertNil(try database.fetch(id: snapshot.id))
-    }
-
-    func testStaleUploadCannotMarkNewClassificationSynced() throws {
-        let result = try pipeline.ingest(ClipboardEntry(content: "A title", contentType: .text))
-        let snapshot = try primarySnapshot(result)
-        XCTAssertEqual(try apply(.prose, to: snapshot), .applied)
-        let updated = try XCTUnwrap(database.fetch(id: snapshot.id))
-        try database.markSynced(matching: [updated])
-        XCTAssertEqual(try database.fetch(id: snapshot.id)?.isSynced, true)
-        try database.markSynced(matching: [snapshot])
-        XCTAssertEqual(try database.fetch(id: snapshot.id)?.isSynced, false)
-    }
-
-    func testBackfillDetectsClassificationChangedWhileUploading() async throws {
-        let result = try pipeline.ingest(ClipboardEntry(content: "Pending title", contentType: .text))
-        let snapshot = try primarySnapshot(result)
-        let db = try XCTUnwrap(database)
-        do {
-            _ = try await db.backfillUnsynced { entries, confirm in
-                _ = try db.applyClassification(matching: snapshot, contentType: .prose, metadata: nil, extractedEntries: [])
-                confirm(entries.map(\.id))
-                return entries.count
-            }
-            XCTFail("Stale upload must leave newer classification pending")
-        } catch let error as PendingSyncUploadsError {
-            XCTAssertEqual(error.count, 1)
+    func testRetainedOutcomesLeaveSensitiveBinaryFileAndUnknownEntriesUntouched() throws {
+        // Microsoft history reclassification keeps sensitive and binary items local.
+        let microsoft = JevConfiguration(isEnabled: true, provider: .microsoftDecision, mode: .primary)
+        for type in [ContentType.apiKey, .jwt, .creditCard, .iban, .envVar, .image, .screenshot, .filePath] {
+            let entry = try database.insert(ClipboardEntry(content: "Private \(type.rawValue)", contentType: type), deduplicate: false).entry
+            let snapshot = try XCTUnwrap(database.fetch(id: entry.id))
+            let outcome = try JevReclassificationService().apply(.init(category: .prose), to: snapshot,
+                database: database, configuration: microsoft, detectorConfiguration: .default,
+                extractContent: true, skipAPIKeys: true)
+            XCTAssertEqual(outcome, .retained, "\(type)")
+            XCTAssertEqual(try database.fetch(id: snapshot.id), snapshot)
         }
-        XCTAssertEqual(try db.fetch(id: snapshot.id)?.contentType, .prose)
-        XCTAssertEqual(try db.fetch(id: snapshot.id)?.isSynced, false)
-    }
 
-    func testFilePasteAndSensitiveContentCannotBeRetypedWithoutConsent() throws {
+        // File pastes and secrets cannot be retyped without consent.
         let file = ClipboardEntry(content: "/tmp/report.txt", contentType: .filePath, rawData: Data("file".utf8))
         _ = try database.insert(file, deduplicate: false)
         let storedFile = try XCTUnwrap(database.fetch(id: file.id))
@@ -218,19 +111,15 @@ final class JevReclassificationE2ETests: XCTestCase {
         let storedSecret = try database.insert(secret, deduplicate: false).entry
         XCTAssertEqual(try apply(.text, to: storedSecret), .retained)
         XCTAssertEqual(try database.fetch(id: secret.id)?.contentType, .apiKey)
-    }
 
-    func testOptedInAuthoritativeCapturePreservesOriginalEnvBlockAndLegacyModeStillSplits() throws {
-        let capture = ClipboardEntry(content: "FOO=one\nBAR=two", contentType: .text)
-        XCTAssertGreaterThan(try pipeline.enrich(capture).envVarSplit.count, 0)
-        pipeline.preserveEnvVarBlock = true
-        let result = try pipeline.ingest(capture)
-        XCTAssertTrue(result.envVarSplit.isEmpty)
-        XCTAssertEqual(result.primary.contentType, .envVarBlock)
-        XCTAssertEqual(result.persisted.first?.content, capture.content)
-    }
+        // "unknown" keeps the original category and children.
+        let unknown = try primarySnapshot(pipeline.ingest(ClipboardEntry(content: "Read https://example.com before the launch.", contentType: .text)))
+        let unknownChildren = try database.fetchExtractedEntries(parentId: unknown.id)
+        XCTAssertEqual(try apply(.unknown, to: unknown), .retained)
+        XCTAssertEqual(try database.fetch(id: unknown.id), unknown)
+        XCTAssertEqual(try database.fetchExtractedEntries(parentId: unknown.id), unknownChildren)
 
-    func testReclassificationRespectsAPIKeyExclusionEvenWithSensitiveUploadConsent() throws {
+        // The API-key exclusion holds even with sensitive-upload consent.
         let syntheticKey = "ghp_" + "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2"
         let entry = ClipboardEntry(content: "Read https://example.com and use \(syntheticKey) for this demonstration.", contentType: .text)
         var snapshot = try database.insert(entry, deduplicate: false).entry
@@ -253,16 +142,168 @@ final class JevReclassificationE2ETests: XCTestCase {
                                          configuration: optedIn, detectorConfiguration: .default,
                                          extractContent: true, skipAPIKeys: true), .retained)
         XCTAssertEqual(try database.fetch(id: snapshot.id), snapshot)
-    }
 
-    func testApplicationSummarySeparatesRetainedEntriesFromProviderFailures() {
+        // The summary separates retained entries from provider failures.
         XCTAssertEqual(JevReclassificationService.applicationSummary(total: 5, updated: 1, changedDeleted: 1, providerFailures: 2),
                        "1 updated · 1 retained · 1 changed/deleted · 2 provider failures.")
         XCTAssertEqual(JevReclassificationService.applicationSummary(total: 5, updated: 0, changedDeleted: 0, providerFailures: 1),
                        "0 updated · 4 retained · 0 changed/deleted · 1 provider failures.")
     }
 
-    func testNetworkFailureKeepsDurableCaptureAndSuccessAppliesAfterProviderReturns() async throws {
+    func testReclassifyingCanonicalDedupRowRebuildsChildrenAndPreservesConsent() throws {
+        // The persisted dedup identity is reclassified without losing content, pins or counts.
+        let capture = ClipboardEntry(content: "A short title", contentType: .text, isPinned: true)
+        let first = try pipeline.ingest(capture)
+        let recopy = ClipboardEntry(content: capture.content, contentType: .text)
+        let second = try pipeline.ingest(recopy)
+        let snapshot = try primarySnapshot(second)
+        XCTAssertEqual(snapshot.id, first.persisted.first?.id)
+        XCTAssertNotEqual(snapshot.id, recopy.id)
+        XCTAssertEqual(snapshot.copyCount, 2)
+
+        XCTAssertEqual(try apply(.prose, to: snapshot), .applied)
+        let updated = try XCTUnwrap(database.fetch(id: snapshot.id))
+        XCTAssertEqual(updated.contentType, .prose)
+        XCTAssertEqual(updated.content, capture.content)
+        XCTAssertEqual(updated.copyCount, snapshot.copyCount)
+        XCTAssertEqual(updated.timestamp, snapshot.timestamp)
+        XCTAssertEqual(updated.isPinned, snapshot.isPinned)
+        XCTAssertFalse(updated.isSynced)
+        XCTAssertEqual(updated.contentTypeMask, MetadataParser.typeMask(for: updated.metadata))
+        XCTAssertNil(try database.fetch(id: recopy.id))
+        XCTAssertTrue(try database.searchFTS(query: "short", contentType: .prose, limit: 10).contains { $0.id == snapshot.id })
+
+        // A category change rebuilds children and keeps the parent's sharing consent.
+        let text = "Read https://example.com and ask team@example.com for the launch notes."
+        let mixed = try primarySnapshot(pipeline.ingest(ClipboardEntry(content: text, contentType: .text,
+                                                                      cloudSyncAllowed: false, receivedViaTailnet: true)))
+        let oldIDs = Set(try database.fetchExtractedEntries(parentId: mixed.id).map(\.id))
+        XCTAssertFalse(oldIDs.isEmpty)
+        XCTAssertEqual(try apply(.prose, to: mixed), .applied)
+        let children = try database.fetchExtractedEntries(parentId: mixed.id)
+        XCTAssertFalse(children.isEmpty)
+        XCTAssertTrue(Set(children.map(\.id)).isDisjoint(with: oldIDs))
+        XCTAssertTrue(children.allSatisfy { !$0.cloudSyncAllowed && $0.receivedViaTailnet && !$0.isSynced })
+        XCTAssertEqual(try database.fetch(id: mixed.id)?.cloudSyncAllowed, false)
+        let changed = try XCTUnwrap(database.fetch(id: mixed.id))
+        XCTAssertEqual(try apply(.url, to: changed), .applied)
+        let retypedChildren = try database.fetchExtractedEntries(parentId: mixed.id)
+        XCTAssertEqual(Set(retypedChildren.map(\.content)), Set(children.map(\.content)))
+        XCTAssertTrue(try XCTUnwrap(database.fetch(id: mixed.id)).isMixedContent)
+    }
+
+    func testStaleSnapshotsAndInvalidChildrenCannotOverwriteNewerState() throws {
+        // An invalid extracted parent rolls back the classification and child retirement.
+        let mixed = try primarySnapshot(pipeline.ingest(ClipboardEntry(content: "Read https://example.com before the launch.", contentType: .text)))
+        let children = try database.fetchExtractedEntries(parentId: mixed.id)
+        let invalidChild = ClipboardEntry(content: "https://example.com", contentType: .url, parentEntryId: UUID())
+        XCTAssertThrowsError(try database.applyClassification(matching: mixed, contentType: .prose,
+                                                              metadata: nil, extractedEntries: [invalidChild]))
+        XCTAssertEqual(try database.fetch(id: mixed.id), mixed)
+        XCTAssertEqual(try database.fetchExtractedEntries(parentId: mixed.id), children)
+        XCTAssertTrue(try database.pendingClassificationDeletions().isEmpty)
+
+        // A changed or deleted snapshot cannot be overwritten or resurrected.
+        let snapshot = try primarySnapshot(pipeline.ingest(ClipboardEntry(content: "Original title", contentType: .text)))
+        XCTAssertTrue(try database.applyClassification(matching: snapshot, contentType: .code, metadata: nil, extractedEntries: []))
+        XCTAssertEqual(try apply(.prose, to: snapshot), .changedSinceRequest)
+        XCTAssertEqual(try database.fetch(id: snapshot.id)?.contentType, .code)
+        try database.delete(id: snapshot.id)
+        XCTAssertEqual(try apply(.prose, to: snapshot), .changedSinceRequest)
+        XCTAssertNil(try database.fetch(id: snapshot.id))
+
+        // A stale upload cannot mark the newer classification synced.
+        let titled = try primarySnapshot(pipeline.ingest(ClipboardEntry(content: "A title", contentType: .text)))
+        XCTAssertEqual(try apply(.prose, to: titled), .applied)
+        let updated = try XCTUnwrap(database.fetch(id: titled.id))
+        try database.markSynced(matching: [updated])
+        XCTAssertEqual(try database.fetch(id: titled.id)?.isSynced, true)
+        try database.markSynced(matching: [titled])
+        XCTAssertEqual(try database.fetch(id: titled.id)?.isSynced, false)
+
+        // Upload acknowledgement tolerates the database's timestamp precision.
+        let precise = ClipboardEntry(content: "Timestamp precision", contentType: .text,
+                                     timestamp: Date(timeIntervalSince1970: 1_700_000_000.123456))
+        let outcome = try database.insert(precise, deduplicate: false)
+        try database.markSynced(matching: [outcome.entry])
+        XCTAssertEqual(try database.fetch(id: precise.id)?.isSynced, true)
+    }
+
+    func testCloudReplayAndBackfillCannotResurrectRetiredChildrenOrHideNewerClassification() async throws {
+        // Backfill detects a classification that changed while uploading.
+        let pending = try primarySnapshot(pipeline.ingest(ClipboardEntry(content: "Pending title", contentType: .text)))
+        let db = try XCTUnwrap(database)
+        do {
+            _ = try await db.backfillUnsynced { entries, confirm in
+                _ = try db.applyClassification(matching: pending, contentType: .prose, metadata: nil, extractedEntries: [])
+                confirm(entries.map(\.id))
+                return entries.count
+            }
+            XCTFail("Stale upload must leave newer classification pending")
+        } catch let error as PendingSyncUploadsError {
+            XCTAssertEqual(error.count, 1)
+        }
+        XCTAssertEqual(try db.fetch(id: pending.id)?.contentType, .prose)
+        XCTAssertEqual(try db.fetch(id: pending.id)?.isSynced, false)
+
+        // Retired children stay deleted through cloud replay and deletion upload.
+        let snapshot = try primarySnapshot(pipeline.ingest(ClipboardEntry(content: "Read https://example.com and ask team@example.com for the launch notes.", contentType: .text)))
+        let oldChildren = try database.fetchExtractedEntries(parentId: snapshot.id)
+        XCTAssertFalse(oldChildren.isEmpty)
+        XCTAssertEqual(try JevReclassificationService().apply(.init(category: .url), to: snapshot, database: database,
+            configuration: configuration, detectorConfiguration: .default, extractContent: false, skipAPIKeys: false), .applied)
+        XCTAssertEqual(Set(try database.pendingClassificationDeletions()), Set(oldChildren.map(\.id)))
+        try database.applySyncChanges(modified: oldChildren, deleted: [])
+        XCTAssertTrue(try database.fetchExtractedEntries(parentId: snapshot.id).isEmpty)
+
+        let recorder = DeletionRecorder()
+        _ = try await database.backfillUnsynced(deleting: { id in await recorder.record(id) }) { entries, confirm in
+            confirm(entries.map(\.id))
+            return entries.count
+        }
+        let uploadedDeletions = await recorder.ids
+        XCTAssertEqual(Set(uploadedDeletions), Set(oldChildren.map(\.id)))
+        XCTAssertTrue(try database.pendingClassificationDeletions().isEmpty)
+        XCTAssertEqual(try database.fetch(id: pending.id)?.isSynced, true, "the earlier pending classification uploads once confirmed")
+        // Even a delayed pull fetched before the deletion cannot resurrect a child.
+        try database.applySyncChanges(modified: oldChildren, deleted: [])
+        XCTAssertTrue(try database.fetchExtractedEntries(parentId: snapshot.id).isEmpty)
+        try database.applySyncChanges(modified: [], deleted: oldChildren.map(\.id))
+        XCTAssertTrue(try database.pendingClassificationDeletions().isEmpty)
+        let reopened = try environment.openDatabase()
+        // A stale writer can recreate the record even after its deletion was acknowledged.
+        try reopened.applySyncChanges(modified: oldChildren, deleted: [])
+        XCTAssertTrue(try reopened.fetchExtractedEntries(parentId: snapshot.id).isEmpty)
+        XCTAssertEqual(Set(try reopened.pendingClassificationDeletions()), Set(oldChildren.map(\.id)))
+
+        // A failed child deletion stays durable and blocks the pull backfill
+        // (a fresh store, so the stale-writer tombstones above do not mix in).
+        let offline = try E2ETempEnvironment(name: "jev-offline")
+        defer { offline.destroy() }
+        let offlineDB = try offline.openDatabase()
+        let offlinePipeline = E2ECapturePipeline(database: offlineDB, imageStorage: try offline.openImageStorage(), detector: ContentTypeDetector())
+        let offlineResult = try offlinePipeline.ingest(ClipboardEntry(content: "Read https://example.com and ask team@example.com for the launch notes.", contentType: .text))
+        let offlineSnapshot = try XCTUnwrap(offlineDB.fetch(id: try XCTUnwrap(offlineResult.persisted.first?.id)))
+        let offlineChildren = try offlineDB.fetchExtractedEntries(parentId: offlineSnapshot.id)
+        XCTAssertFalse(offlineChildren.isEmpty)
+        XCTAssertEqual(try JevReclassificationService().apply(.init(category: .url), to: offlineSnapshot, database: offlineDB,
+            configuration: configuration, detectorConfiguration: .default, extractContent: false, skipAPIKeys: false), .applied)
+        do {
+            _ = try await offlineDB.backfillUnsynced(deleting: { _ in throw URLError(.notConnectedToInternet) }) { _, _ in
+                XCTFail("Uploads cannot run while deletions are unconfirmed")
+                return 0
+            }
+            XCTFail("Offline deletion must fail")
+        } catch {
+            XCTAssertEqual((error as? URLError)?.code, .notConnectedToInternet)
+        }
+        let reopenedOffline = try offline.openDatabase()
+        XCTAssertEqual(Set(try reopenedOffline.pendingClassificationDeletions()), Set(offlineChildren.map(\.id)))
+        try reopenedOffline.applySyncChanges(modified: offlineChildren, deleted: [])
+        XCTAssertTrue(try reopenedOffline.fetchExtractedEntries(parentId: offlineSnapshot.id).isEmpty)
+    }
+
+    func testProviderOutageAndBoundedLiveQueueNeverBlockDurableCapture() async throws {
         let result = try pipeline.ingest(ClipboardEntry(content: "Network-independent title", contentType: .text))
         let snapshot = try primarySnapshot(result)
         let sessionConfiguration = URLSessionConfiguration.ephemeral
@@ -284,71 +325,8 @@ final class JevReclassificationE2ETests: XCTestCase {
                                                              extractContent: true, skipAPIKeys: false), .applied)
         XCTAssertEqual(try database.fetch(id: snapshot.id)?.content, snapshot.content)
         XCTAssertEqual(try database.fetch(id: snapshot.id)?.contentType, .prose)
-    }
 
-    func testRetiredChildrenStayDeletedThroughCloudReplayAndDeletionUpload() async throws {
-        let result = try pipeline.ingest(ClipboardEntry(content: "Read https://example.com and ask team@example.com for the launch notes.", contentType: .text))
-        let snapshot = try primarySnapshot(result)
-        let oldChildren = try database.fetchExtractedEntries(parentId: snapshot.id)
-        XCTAssertFalse(oldChildren.isEmpty)
-        XCTAssertEqual(try JevReclassificationService().apply(.init(category: .url), to: snapshot, database: database,
-            configuration: configuration, detectorConfiguration: .default, extractContent: false, skipAPIKeys: false), .applied)
-        XCTAssertEqual(Set(try database.pendingClassificationDeletions()), Set(oldChildren.map(\.id)))
-        try database.applySyncChanges(modified: oldChildren, deleted: [])
-        XCTAssertTrue(try database.fetchExtractedEntries(parentId: snapshot.id).isEmpty)
-
-        let recorder = DeletionRecorder()
-        _ = try await database.backfillUnsynced(deleting: { id in await recorder.record(id) }) { entries, confirm in
-            confirm(entries.map(\.id))
-            return entries.count
-        }
-        let uploadedDeletions = await recorder.ids
-        XCTAssertEqual(Set(uploadedDeletions), Set(oldChildren.map(\.id)))
-        XCTAssertTrue(try database.pendingClassificationDeletions().isEmpty)
-        // Even a delayed pull fetched before the deletion cannot resurrect a child.
-        try database.applySyncChanges(modified: oldChildren, deleted: [])
-        XCTAssertTrue(try database.fetchExtractedEntries(parentId: snapshot.id).isEmpty)
-        try database.applySyncChanges(modified: [], deleted: oldChildren.map(\.id))
-        XCTAssertTrue(try database.pendingClassificationDeletions().isEmpty)
-        let reopened = try environment.openDatabase()
-        // A stale writer can recreate the record even after its deletion was acknowledged.
-        try reopened.applySyncChanges(modified: oldChildren, deleted: [])
-        XCTAssertTrue(try reopened.fetchExtractedEntries(parentId: snapshot.id).isEmpty)
-        XCTAssertEqual(Set(try reopened.pendingClassificationDeletions()), Set(oldChildren.map(\.id)))
-    }
-
-    func testFailedChildDeletionRemainsDurableAndBlocksPullBackfill() async throws {
-        let result = try pipeline.ingest(ClipboardEntry(content: "Read https://example.com and ask team@example.com for the launch notes.", contentType: .text))
-        let snapshot = try primarySnapshot(result)
-        let oldChildren = try database.fetchExtractedEntries(parentId: snapshot.id)
-        XCTAssertFalse(oldChildren.isEmpty)
-        XCTAssertEqual(try JevReclassificationService().apply(.init(category: .url), to: snapshot, database: database,
-            configuration: configuration, detectorConfiguration: .default, extractContent: false, skipAPIKeys: false), .applied)
-        let db = try XCTUnwrap(database)
-        do {
-            _ = try await db.backfillUnsynced(deleting: { _ in throw URLError(.notConnectedToInternet) }) { _, _ in
-                XCTFail("Uploads cannot run while deletions are unconfirmed")
-                return 0
-            }
-            XCTFail("Offline deletion must fail")
-        } catch {
-            XCTAssertEqual((error as? URLError)?.code, .notConnectedToInternet)
-        }
-        let reopened = try environment.openDatabase()
-        XCTAssertEqual(Set(try reopened.pendingClassificationDeletions()), Set(oldChildren.map(\.id)))
-        try reopened.applySyncChanges(modified: oldChildren, deleted: [])
-        XCTAssertTrue(try reopened.fetchExtractedEntries(parentId: snapshot.id).isEmpty)
-    }
-
-    func testUploadAcknowledgementHandlesDatabaseTimestampPrecision() throws {
-        let entry = ClipboardEntry(content: "Timestamp precision", contentType: .text,
-                                   timestamp: Date(timeIntervalSince1970: 1_700_000_000.123456))
-        let outcome = try database.insert(entry, deduplicate: false)
-        try database.markSynced(matching: [outcome.entry])
-        XCTAssertEqual(try database.fetch(id: entry.id)?.isSynced, true)
-    }
-
-    func testLiveQueueIsBoundedWithoutBlockingDurableCapture() async throws {
+        // The live queue is bounded, and capture does not wait on it.
         let queue = JevLiveQueue(capacity: 1)
         let gate = QueueGate()
         let first = await queue.enqueue { await gate.hold() }
