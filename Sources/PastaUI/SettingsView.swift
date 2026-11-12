@@ -26,7 +26,7 @@ public struct SettingsView: View {
     }
 
     private enum Layout {
-        static let settingsWidth: CGFloat = 760
+        static let settingsWidth: CGFloat = 840
         static let settingsHeight: CGFloat = 560
     }
 
@@ -58,6 +58,7 @@ public struct SettingsView: View {
     private let syncNow: (@MainActor () async throws -> Void)?
     private let syncedCount: (() -> Int)?
     private let syncDiagnosticReport: (@MainActor () async -> String)?
+    private let semanticSearch: SemanticSearchService?
 
     public init(
         syncManager: SyncManager? = nil,
@@ -66,6 +67,7 @@ public struct SettingsView: View {
         resetSync: (@MainActor () throws -> Void)? = nil,
         syncedCount: (() -> Int)? = nil,
         syncDiagnosticReport: (@MainActor () async -> String)? = nil,
+        semanticSearch: SemanticSearchService? = nil,
         openWalkthrough: (() -> Void)? = nil,
         checkForUpdates: (() -> Void)? = nil,
         automaticallyChecksForUpdates: Binding<Bool>? = nil
@@ -76,6 +78,7 @@ public struct SettingsView: View {
         self.resetSync = resetSync
         self.syncedCount = syncedCount
         self.syncDiagnosticReport = syncDiagnosticReport
+        self.semanticSearch = semanticSearch
         self.openWalkthrough = openWalkthrough
         self.checkForUpdates = checkForUpdates
         self.automaticallyChecksForUpdates = automaticallyChecksForUpdates
@@ -117,6 +120,12 @@ public struct SettingsView: View {
                     Label("Detection", systemImage: "line.3.horizontal.decrease.circle")
                 }
                 .tag(SettingsTab.detection)
+
+            SemanticSearchSettingsTab(service: semanticSearch)
+                .tabItem {
+                    Label("Search", systemImage: "sparkle.magnifyingglass")
+                }
+                .tag(SettingsTab.search)
 
             StorageSettingsTab(
                 retentionDays: $retentionDays,
@@ -163,7 +172,7 @@ public struct SettingsView: View {
             }
             .tag(SettingsTab.about)
         }
-        // Wide enough for all eight tab items; keep in sync with the tab count so
+        // Wide enough for all nine tab items; keep in sync with the tab count so
         // the macOS tab bar never overflows.
         .frame(width: Layout.settingsWidth, height: Layout.settingsHeight)
         .padding(.top, 8)
@@ -172,7 +181,7 @@ public struct SettingsView: View {
     }
 
     private enum SettingsTab: Hashable {
-        case general, clipboard, detection, storage, iCloud, tailnet, snippets, about
+        case general, clipboard, detection, search, storage, iCloud, tailnet, snippets, about
     }
 }
 

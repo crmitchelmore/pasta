@@ -183,6 +183,48 @@ final class QuickSearchManagerTests: XCTestCase {
         XCTAssertTrue(manager.results.isEmpty)
     }
 
+    func testSemanticMatchesJoinKeywordResultsAfterTypingSettles() async throws {
+        let suiteName = "QuickSearchSemantic.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let configuration = SemanticSearchConfiguration(isEnabled: true, provider: .openAI)
+        configuration.save(defaults: defaults)
+        configuration.recordSuccessfulValidation(apiKey: "sk-test", defaults: defaults)
+
+        let database = try DatabaseManager.inMemory()
+        let serial = ClipboardEntry(content: "F4GXK2J1HG7Q", contentType: .text, timestamp: Date(timeIntervalSince1970: 1), sourceApp: "Continuity")
+        let unrelated = ["Let's grab lunch on Friday", "Remember to water the plants", "let total = items.reduce(0, +)"].enumerated().map {
+            ClipboardEntry(content: $0.element, contentType: .prose, timestamp: Date(timeIntervalSince1970: Double(2 + $0.offset)))
+        }
+        try database.insertBatch([serial] + unrelated)
+
+        let semantic = SemanticSearchService(database: database, defaults: defaults, keyProvider: { _ in "sk-test" },
+                                             embedderFactory: { _, _ in BagOfWordsEmbedder() })
+        await semantic.reloadConfiguration()
+        for _ in 0..<300 {
+            let status = await semantic.currentStatus()
+            if !status.isIndexing, status.counts.indexed == 4 { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let publisher = PassthroughSubject<[ClipboardEntry], Never>()
+        let manager = QuickSearchManager()
+        manager.initialize(entriesPublisher: publisher.eraseToAnyPublisher(), database: database, semanticSearch: semantic)
+        manager.prepareForSearch()
+        manager.query = "apple watch serial number"
+        manager.searchQueryChanged()
+
+        try await waitUntil { manager.semanticMatchIDs.contains(serial.id) }
+        XCTAssertEqual(manager.results.first?.id, serial.id, "No keyword matches, so the serial is found by meaning alone")
+        XCTAssertEqual(manager.semanticMatchIDs, Set(manager.results.map(\.id)))
+        XCTAssertTrue(manager.resultSummary.contains("related by meaning"), manager.resultSummary)
+
+        manager.selectedFilter = .prose
+        manager.searchQueryChanged()
+        try await Task.sleep(nanoseconds: HybridSearchRanking.semanticDebounceNanoseconds + 200_000_000)
+        XCTAssertFalse(manager.results.contains { $0.id == serial.id }, "Semantic matches respect the active filter")
+    }
+
     private func waitUntil(
         file: StaticString = #filePath,
         line: UInt = #line,

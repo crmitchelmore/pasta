@@ -10,9 +10,10 @@ A blazing-fast, local-first clipboard history manager for macOS with intelligent
 - **Smart Detection** — Auto-categorizes emails, JWTs, code, URLs, env vars, and more
 - **Detection Rules** — Tune detector strictness, override regex patterns, and add custom detectors
 - **Ultra-Fast Search** — Full-text search with fuzzy matching
+- **Semantic Search** — Optional search by meaning (OpenAI, Azure OpenAI or a local Ollama/LM Studio server), so a query like "apple watch serial number" finds a bare `F4GXK2J1HG7Q`. Off by default; secrets are never sent ([details](Docs/semantic-search.md)).
 - **Keyboard-First** — Global hotkey (`⌃⌘V`) and full keyboard navigation
 - **Preview Everything** — Images, decoded base64, syntax-highlighted code
-- **Privacy-First** — Local-first storage with existing transient-content capture exclusions. iCloud sync and approved Tailnet Sync pairings are optional and off by default. Clipboard content is shared only through those enabled sync routes; crash reporting and anonymous usage analytics are separate opt-ins ([details](SECURITY.md#security-considerations)).
+- **Privacy-First** — Local-first storage with existing transient-content capture exclusions. iCloud sync and approved Tailnet Sync pairings are optional and off by default. Clipboard content is shared only through those enabled sync routes and opt-in semantic search; crash reporting and anonymous usage analytics are separate opt-ins ([details](SECURITY.md#security-considerations)).
 - **Tailnet Sync** — Pair your personal Macs across iCloud accounts through Tailscale discovery and approval on the target. Sync new history, optionally send older items, and transfer files/folders into managed receiver storage. Large file selections require sender approval (50 MB by default). [Setup and behaviour](Docs/tailnet-sync.md).
 
 ## Installation
