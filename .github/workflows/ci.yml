@@ -1,18 +1,34 @@
 name: CI
 
+# Fast gate on pull requests, full verification on main (AGENTS.md "Release
+# gates"). A pull request runs the Swift build and test suites, the CI/release
+# tooling tests and the appcast contract, plus Playwright when the landing page
+# changed. The heavy suites -- the release-built, ad-hoc-signed macOS bundle
+# with its launch smoke test, and the iOS XCUITests -- run on every main push
+# and manual run, on a pull request labelled `ci:full` (the label is read when
+# the run starts, so push after adding it), and on a pull request that touches
+# the iOS app, packaging/launch scripts or package manifests. Only a fully
+# green main run starts an Alpha (alpha-release.yml) or verifies any
+# publication (scripts/ci-verify-landing-deploy.mjs); a red main run opens an
+# issue (main-ci-responder.yml) and is fixed forward or reverted.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  # Manual runs exist for the landing page jobs below (e.g. to re-run the
-  # advisory live probe after a release). Note that a manual run also executes
-  # the macOS "Build & Test" job.
+  # A manual run is treated exactly like a main push: every suite runs.
   workflow_dispatch:
 
 # Read-only by default; jobs that need more declare it explicitly.
 permissions:
   contents: read
+
+# One run per ref. A newer pull-request push cancels its superseded run; a
+# main run always finishes, so every merged commit gets its own verdict. A
+# main re-run takes its own group so it is not replaced by a newer push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}${{ github.event_name != 'pull_request' && github.run_attempt != '1' && format('-attempt-{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # ============================================================================
@@ -88,8 +104,11 @@ jobs:
           APPCAST_REQUIRE_LATEST: '1'
         run: npm run test:contract
 
-  # Detect whether the landing page surface changed so the browser suite only
-  # runs when it can possibly be affected.
+  # Routes the run. `landing`: the landing page surface changed, so the browser
+  # suite runs. `full`: the heavy native suites run (macOS bundle + launch
+  # smoke, iOS XCUITests). `full` is true on every non-pull-request event, for
+  # a `ci:full` pull request and for a pull request touching the heavy paths.
+  # The job keeps its historical name because publication gates verify it.
   landing-changes:
     name: Detect landing page changes
     # Keep fork PR code on hosted runners; trusted jobs use the dedicated Linux host.
@@ -100,6 +119,7 @@ jobs:
       pull-requests: read
     outputs:
       landing: ${{ steps.filter.outputs.landing }}
+      full: ${{ steps.depth.outputs.full }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -116,6 +136,32 @@ jobs:
               - '.github/workflows/deploy-landing-page.yml'
               - '.github/workflows/release.yml'
               - 'scripts/ci-verify-landing-deploy.mjs'
+            heavy:
+              - 'PastaIOS/**'
+              - 'Package.swift'
+              - 'Package.resolved'
+              - 'Resources/**'
+              - 'scripts/ci-ios-e2e.sh'
+              - 'scripts/ci-launch-smoke.sh'
+              - 'scripts/ci-prepare-macos-executable.sh'
+              - 'scripts/ci-stage-macos-resources.py'
+              - 'scripts/ci-swift.sh'
+
+      - name: Decide whether the heavy native suites run
+        id: depth
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAVY: ${{ steps.filter.outputs.heavy }}
+          FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+        run: |
+          set -u
+          if [ "$EVENT" != "pull_request" ] || [ "$HEAVY" = "true" ] || [ "$FULL_LABEL" = "true" ]; then
+            full=true
+          else
+            full=false
+          fi
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "Heavy native suites on this run: $full (event=$EVENT, heavy paths=$HEAVY, ci:full label=$FULL_LABEL)"
 
   landing-e2e:
     name: Landing page e2e (Playwright)
@@ -200,10 +246,18 @@ jobs:
   # MACOS APP
   # ============================================================================
 
+  # Runs on every event. The fast part (debug build, every Swift test suite
+  # including PastaE2ETests, release tooling tests) is the pull-request gate;
+  # the release build, ad-hoc-signed bundle and launch smoke test run only when
+  # landing-changes routed the heavy suites (always on main). Publication
+  # gates check that the "Launch smoke test" step itself succeeded.
   test:
     name: Build & Test
+    needs: landing-changes
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (vars.PASTA_NATIVE_RUNNER || 'pasta-local') || 'macos-15' }}
-    
+    env:
+      FULL: ${{ needs.landing-changes.outputs.full }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -235,12 +289,14 @@ jobs:
         run: python3 -m unittest discover -s scripts/tests -p 'test_macos_packaging.py'
       
       - name: Build release
+        if: env.FULL == 'true'
         run: |
           bash scripts/ci-swift.sh build -c release
           echo "RELEASE_BIN_DIR=$(bash scripts/ci-swift.sh build -c release --show-bin-path)" >> "$GITHUB_ENV"
           echo "SWIFTPM_ARTIFACTS_DIR=$(bash scripts/ci-swift.sh artifacts)" >> "$GITHUB_ENV"
       
       - name: Create test app bundle (mirrors release workflow)
+        if: env.FULL == 'true'
         id: bundle
         run: |
           set -e
@@ -312,6 +368,7 @@ jobs:
           echo "✓ No restricted entitlements found"
       
       - name: Sign test bundle (mirrors release signing)
+        if: env.FULL == 'true'
         run: |
           set -e
           APP_DIR="${{ steps.bundle.outputs.APP_DIR }}"
@@ -376,6 +433,7 @@ jobs:
           echo "✓ Framework entitlements are clean"
       
       - name: Verify bundle structure
+        if: env.FULL == 'true'
         run: |
           set -e
           APP_DIR="${{ steps.bundle.outputs.APP_DIR }}"
@@ -406,17 +464,21 @@ jobs:
           echo "✓ rpath OK"
       
       # Shared with release.yml (pre- and post-publish, on the notarized bundle)
-      # so the smoke test users' builds get is byte-for-byte the one PRs get.
+      # so the smoke test users' builds get is byte-for-byte the one main gets.
       # Waits for the PASTA_CI_READY marker (see Sources/PastaApp/CIReadiness.swift),
       # then SIGTERM must exit 0.
       - name: Launch smoke test
+        if: env.FULL == 'true'
         run: scripts/ci-launch-smoke.sh "${{ steps.bundle.outputs.APP_DIR }}"
 
   # Every step below is a subcommand of scripts/ci-ios-e2e.sh, which
   # release-ios.yml's `preflight` job runs identically before any TestFlight
   # upload. Change the script, not the steps, so the two cannot drift.
+  # Heavy suite: main pushes, manual runs and routed pull requests only.
   ios-e2e:
     name: iOS E2E (XCUITest)
+    needs: landing-changes
+    if: needs.landing-changes.outputs.full == 'true'
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (vars.PASTA_NATIVE_RUNNER || 'pasta-local') || 'macos-15' }}
     timeout-minutes: 45
     env:
@@ -487,15 +549,19 @@ jobs:
         run: scripts/ci-ios-e2e.sh cleanup
 
   # ============================================================================
-  # CI GATE: one always-reported check that is green only when EVERY suite on
-  # every surface is green: macOS build+tests+launch smoke, iOS XCUITests, the
+  # CI GATE: one always-reported check over every suite on every surface:
+  # macOS build+tests (+ bundle launch smoke when routed), iOS XCUITests, the
   # appcast/Cloudflare contract, path detection, and the landing-page Playwright
-  # suite whenever it was relevant. A path-filtered "skipped" Playwright result
-  # is accepted only when path detection proved the landing page untouched.
-  # Because this job always runs, it can be a REQUIRED status check on main
-  # (a skipped check never reports and would block or be ignored); the ruleset
-  # installed by scripts/owner-require-status-checks.sh requires it. It is also
-  # the single condition auto-release depends on (#108).
+  # suite whenever it was relevant.
+  # - On main pushes and manual runs every suite must succeed; nothing may be
+  #   skipped except Playwright when path detection proved the landing page
+  #   untouched on a push. Alpha and every publisher consume only such runs.
+  # - On a pull request the iOS suite (and the launch-smoke steps inside
+  #   Build & Test) may be skipped only when routing said the heavy suites
+  #   were not needed; they then run on main after the merge.
+  # Because this job always runs, it is the REQUIRED status check on main (a
+  # skipped check never reports); scripts/owner-require-status-checks.sh
+  # installs the ruleset.
   # ============================================================================
   ci-gate:
     name: CI gate
@@ -513,6 +579,7 @@ jobs:
           APPCAST: ${{ needs.appcast-contract.result }}
           LANDING_CHANGES: ${{ needs.landing-changes.result }}
           LANDING_TOUCHED: ${{ needs.landing-changes.outputs.landing }}
+          FULL: ${{ needs.landing-changes.outputs.full }}
           LANDING_E2E: ${{ needs.landing-e2e.result }}
           EVENT: ${{ github.event_name }}
         run: |
@@ -520,10 +587,25 @@ jobs:
           ok=true
           row() { printf '| %s | %s | %s |\n' "$1" "$2" "$3" >> "$GITHUB_STEP_SUMMARY"; }
           { echo "## CI gate"; echo; echo "| Gate | Result | Verdict |"; echo "|---|---|---|"; } >> "$GITHUB_STEP_SUMMARY"
-          for pair in "Build & Test:$TEST" "iOS E2E (XCUITest):$IOS" "Appcast & Cloudflare config contract:$APPCAST" "Detect landing page changes:$LANDING_CHANGES"; do
+          for pair in "Build & Test:$TEST" "Appcast & Cloudflare config contract:$APPCAST" "Detect landing page changes:$LANDING_CHANGES"; do
             name="${pair%%:*}"; result="${pair##*:}"
             if [ "$result" = "success" ]; then row "$name" "$result" "✅"; else row "$name" "$result" "❌"; ok=false; fi
           done
+          case "$IOS" in
+            success) row "iOS E2E (XCUITest)" "success" "✅" ;;
+            skipped)
+              if [ "$EVENT" = "pull_request" ] && [ "$LANDING_CHANGES" = "success" ] && [ "$FULL" != "true" ]; then
+                row "iOS E2E (XCUITest)" "skipped (deferred to main after merge)" "✅"
+              else
+                row "iOS E2E (XCUITest)" "skipped although it was required" "❌"; ok=false
+              fi ;;
+            *) row "iOS E2E (XCUITest)" "$IOS" "❌"; ok=false ;;
+          esac
+          if [ "$FULL" = "true" ]; then
+            row "macOS bundle launch smoke" "ran inside Build & Test" "✅"
+          else
+            row "macOS bundle launch smoke" "deferred to main after merge" "✅"
+          fi
           case "$LANDING_E2E" in
             success) row "Landing page e2e (Playwright)" "success" "✅" ;;
             skipped)
@@ -541,8 +623,7 @@ jobs:
             exit 1
           fi
 
-  # RELEASE GATE. Tagging a release must wait for the CI gate above, i.e. for
-  # EVERY suite on every surface. A red, cancelled or missing result on any of
-  # them fails `ci-gate`, so this job never runs and no release.yml /
-  # release-ios.yml run is triggered.
-  # Alpha Release consumes completed successful main CI; Stable is owner-approved.
+  # Alpha Release (alpha-release.yml) consumes only completed, successful
+  # main push runs of this workflow, which always include every suite. A red
+  # main run instead opens an issue (main-ci-responder.yml). Stable is
+  # owner-approved (publish-stable.yml) and re-verifies this evidence.
