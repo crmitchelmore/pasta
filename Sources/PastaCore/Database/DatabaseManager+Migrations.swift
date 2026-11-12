@@ -295,6 +295,26 @@ extension DatabaseManager {
             }
         }
 
+        // Semantic search vectors live in their own table so the entries table,
+        // FTS triggers and sync never see them. A NULL vector marks an entry
+        // that was deliberately skipped (empty, image, or private for a remote
+        // provider) so it is not retried. Rows are discarded when the entry
+        // goes away, or rebuilt when its content, type or the index key change.
+        migrator.registerMigration("addSemanticEmbeddings") { db in
+            try db.execute(sql: """
+                CREATE TABLE semantic_embeddings (
+                    entryId TEXT PRIMARY KEY NOT NULL,
+                    indexKey TEXT NOT NULL,
+                    contentHash TEXT NOT NULL,
+                    contentType TEXT NOT NULL,
+                    vector BLOB
+                );
+                CREATE TRIGGER semantic_embeddings_entry_deleted AFTER DELETE ON clipboard_entries BEGIN
+                    DELETE FROM semantic_embeddings WHERE entryId = OLD.id;
+                END;
+                """)
+        }
+
         return migrator
     }
 }

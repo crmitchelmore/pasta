@@ -75,7 +75,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         QuickSearchManager.shared.initialize(
             entriesPublisher: BackgroundService.shared.$entries.eraseToAnyPublisher(),
             initialEntries: BackgroundService.shared.entries,
-            database: BackgroundService.shared.database
+            database: BackgroundService.shared.database,
+            semanticSearch: BackgroundService.shared.semanticSearch
         )
 
         // Configure command handlers

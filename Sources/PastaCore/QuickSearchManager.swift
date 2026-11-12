@@ -20,6 +20,8 @@ public final class QuickSearchManager: ObservableObject {
     @Published public private(set) var totalCount: Int? = nil
     @Published public private(set) var isUsingLoadedHistory: Bool = true
     @Published public private(set) var isReady: Bool = false
+    /// Results found by meaning rather than by their text.
+    @Published public private(set) var semanticMatchIDs: Set<UUID> = []
     
     // Command mode state
     @Published public private(set) var isCommandMode: Bool = false
@@ -40,6 +42,7 @@ public final class QuickSearchManager: ObservableObject {
     
     // Database reference for FTS5 search
     private var database: DatabaseManager?
+    private var semanticSearch: SemanticSearchService?
     
     init() {}
 
@@ -49,6 +52,9 @@ public final class QuickSearchManager: ObservableObject {
                 ? "Up to 50 recent items · loaded history only"
                 : "Up to 50 recent items · all history"
         }
+        if !semanticMatchIDs.isEmpty {
+            return "Up to 20 matches · including related by meaning"
+        }
         return isUsingLoadedHistory
             ? "Up to 20 matches · loaded history only"
             : "Up to 20 matches · all history"
@@ -57,10 +63,16 @@ public final class QuickSearchManager: ObservableObject {
     // MARK: - Public API
     
     /// Call once at app startup to begin indexing
-    public func initialize(entriesPublisher: AnyPublisher<[ClipboardEntry], Never>, initialEntries: [ClipboardEntry] = [], database: DatabaseManager? = nil) {
+    public func initialize(
+        entriesPublisher: AnyPublisher<[ClipboardEntry], Never>,
+        initialEntries: [ClipboardEntry] = [],
+        database: DatabaseManager? = nil,
+        semanticSearch: SemanticSearchService? = nil
+    ) {
         PastaLogger.search.debug("QuickSearchManager.initialize called: initialEntries=\(initialEntries.count)")
         
         self.database = database
+        self.semanticSearch = semanticSearch
         countsTask?.cancel()
         totalCount = nil
         pinnedCount = 0
@@ -240,6 +252,7 @@ public final class QuickSearchManager: ObservableObject {
     private func updateResultsImmediate() {
         searchTask?.cancel()
         selectedIndex = 0
+        semanticMatchIDs = []
 
         results = Array(allEntries.prefix(200).lazy
             .filter { !self.showPinnedOnly || $0.isPinned }
@@ -321,7 +334,32 @@ public final class QuickSearchManager: ObservableObject {
             guard showPinnedOnly == pinnedSnapshot else { return }
             results = searchResult.entries
             isUsingLoadedHistory = searchResult.loadedOnly
+            semanticMatchIDs = []
+
+            await mergeSemanticMatches(query: querySnapshot, keyword: searchResult.entries,
+                                       filter: filterSnapshot, pinnedOnly: pinnedSnapshot)
         }
+    }
+
+    /// Second phase: once typing settles, blend in entries related by meaning.
+    private func mergeSemanticMatches(query: String, keyword: [ClipboardEntry], filter: ContentType?, pinnedOnly: Bool) async {
+        guard let semanticSearch, HybridSearchRanking.shouldRunSemantic(for: query) else { return }
+        try? await Task.sleep(nanoseconds: HybridSearchRanking.semanticDebounceNanoseconds)
+        guard !Task.isCancelled else { return }
+
+        let semantic = await semanticSearch.searchEntries(query: query, limit: 20) { entry in
+            (filter == nil || entry.contentType == filter) && (!pinnedOnly || entry.isPinned)
+        }
+        guard !Task.isCancelled, !semantic.isEmpty,
+              self.query.trimmingCharacters(in: .whitespacesAndNewlines) == query,
+              selectedFilter == filter, showPinnedOnly == pinnedOnly else { return }
+
+        let keywordIDs = Set(keyword.map(\.id))
+        let merged = HybridSearchRanking.merge(keyword: keyword, semantic: semantic, query: query, limit: 20)
+        let selectedID = selectedEntry?.id
+        results = merged
+        semanticMatchIDs = Set(merged.lazy.map(\.id).filter { !keywordIDs.contains($0) })
+        selectedIndex = selectedID.flatMap { id in merged.firstIndex { $0.id == id } } ?? 0
     }
 
     private nonisolated static func fallbackMatches(query: String, entries: [ClipboardEntry], filter: ContentType?, pinnedOnly: Bool) -> [ClipboardEntry] {

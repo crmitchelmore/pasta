@@ -35,6 +35,7 @@ extension AppDelegate {
                     let service = BackgroundService.shared
                     return await service.syncManager.diagnosticReport(localDatabase: service.database)
                 },
+                semanticSearch: BackgroundService.shared.semanticSearch,
                 openWalkthrough: { [weak self] in
                     self?.panelController?.show()
                     NotificationCenter.default.post(name: .openOnboarding, object: nil)

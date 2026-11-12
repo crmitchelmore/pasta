@@ -111,7 +111,7 @@ for provenance and the update procedure.
 ## Conventions & Patterns
 
 - Conventional commits feed deterministic per-platform release notes. Every successful main merge goes to Alpha; Stable requires an explicit frozen-candidate approval. See `Docs/release-trains.md`.
-- Privacy is opt-in only: clipboard content leaves the device only through explicitly enabled iCloud sync or approved Tailnet Sync pairings. Tailnet forwarding, onward iCloud publication and clipboard replacement are separate per-peer controls, off by default. File payloads remain tailnet-only.
+- Privacy is opt-in only: clipboard content leaves the device only through explicitly enabled iCloud sync, approved Tailnet Sync pairings, or validated semantic search (embeddings never include secrets, Tailnet-received or iCloud-excluded entries unless the endpoint is loopback; see `Docs/semantic-search.md`). Tailnet forwarding, onward iCloud publication and clipboard replacement are separate per-peer controls, off by default. File payloads remain tailnet-only.
 - `AGENTS.md` is the single source of agent instructions. `CLAUDE.md` imports it with `@AGENTS.md`, and `.github/copilot-instructions.md` holds code patterns and signing notes that defer to this file for build, test, release and merge rules; edit here rather than copying sections.
 
 ## Release gates

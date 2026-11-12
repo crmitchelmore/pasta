@@ -248,6 +248,7 @@ extension PanelContentView {
         }
 
         searchTask?.cancel()
+        let semanticSearch = backgroundService.semanticSearch
         let typeFilter = contentTypeFilter
         let sourceFilter = sourceAppFilter.trimmingCharacters(in: .whitespacesAndNewlines)
         let domainFilter = urlDomainFilter
@@ -290,6 +291,28 @@ extension PanelContentView {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 displayedEntries = result
+            }
+
+            // Second phase: once typing settles, blend in entries related by
+            // meaning (no-op unless semantic search is configured).
+            guard HybridSearchRanking.shouldRunSemantic(for: query) else { return }
+            try? await Task.sleep(nanoseconds: HybridSearchRanking.semanticDebounceNanoseconds)
+            guard !Task.isCancelled else { return }
+            let semantic = await semanticSearch.searchEntries(query: query, limit: limit)
+            guard !Task.isCancelled, !semantic.isEmpty else { return }
+            let filtered = Self.filterEntries(
+                semantic,
+                contentTypeFilter: typeFilter,
+                sourceFilter: sourceFilter,
+                urlDomainFilter: domainFilter,
+                pinnedOnly: pinnedOnly,
+                limit: limit,
+                mixedOnly: mixedOnly
+            )
+            guard !filtered.isEmpty else { return }
+            let merged = HybridSearchRanking.merge(keyword: result, semantic: filtered, query: query, limit: limit)
+            await MainActor.run {
+                displayedEntries = merged
             }
         }
     }
