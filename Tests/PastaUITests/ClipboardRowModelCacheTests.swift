@@ -3,74 +3,35 @@ import PastaCore
 @testable import PastaUI
 
 final class ClipboardRowModelCacheTests: XCTestCase {
-    func testReturnsRowsInOrderWithExpectedContent() {
+    func testCacheReusesUnchangedRowsRebuildsChangedOnesAndPrunes() {
         let cache = ClipboardRowModelCache()
-        let entries = [
-            ClipboardEntry(content: "first", contentType: .text),
-            ClipboardEntry(content: "second", contentType: .url)
-        ]
+        var entries = (0..<500).map { ClipboardEntry(content: "entry \($0)", contentType: $0 == 1 ? .url : .text) }
 
         let rows = cache.rows(for: entries)
-
         XCTAssertEqual(rows.map(\.id), entries.map(\.id))
-        XCTAssertEqual(rows.map(\.previewText), ["first", "second"])
-        XCTAssertEqual(rows.map(\.contentType), [.text, .url])
-    }
+        XCTAssertEqual(rows.prefix(2).map(\.previewText), ["entry 0", "entry 1"])
+        XCTAssertEqual(rows.prefix(2).map(\.contentType), [.text, .url])
+        XCTAssertEqual(cache.rowBuildCountForTesting, 500)
 
-    func testReusesCachedRowsAcrossBodyEvaluations() {
-        let cache = ClipboardRowModelCache()
-        let entries = (0..<50).map { ClipboardEntry(content: "entry \($0)", contentType: .text) }
-
-        _ = cache.rows(for: entries)
-        XCTAssertEqual(cache.rowBuildCountForTesting, 50)
-
-        // Repeated body evaluations with the same (or equal) entries must not
-        // rebuild any row model.
+        // Repeated body evaluations with equal entries must not rebuild any row model.
         _ = cache.rows(for: entries)
         _ = cache.rows(for: entries)
-        XCTAssertEqual(cache.rowBuildCountForTesting, 50)
-    }
+        XCTAssertEqual(cache.rowBuildCountForTesting, 500)
 
-    func testRebuildsRowWhenAnyFieldChanges() {
-        let cache = ClipboardRowModelCache()
-        var entry = ClipboardEntry(content: "hello", contentType: .text)
-        let initial = cache.rows(for: [entry])
-        XCTAssertFalse(initial[0].isPinned)
-        XCTAssertEqual(initial[0].copyCount, 1)
-
-        entry.isPinned = true
-        entry.copyCount = 3
-        let updated = cache.rows(for: [entry])
-
+        // Whole-value equality: any field change, even content, rebuilds that row only.
+        entries[0].isPinned = true
+        entries[0].copyCount = 3
+        entries[1].content = "rewritten"
+        let updated = cache.rows(for: entries)
         XCTAssertTrue(updated[0].isPinned)
         XCTAssertEqual(updated[0].copyCount, 3)
-    }
-
-    func testRebuildsRowWhenContentChanges() {
-        // Whole-value equality means even a content mutation (no such path
-        // exists in the app today) can never render a stale preview.
-        let cache = ClipboardRowModelCache()
-        var entry = ClipboardEntry(content: "original", contentType: .text)
-        _ = cache.rows(for: [entry])
-
-        entry.content = "rewritten"
-        let rows = cache.rows(for: [entry])
-
-        XCTAssertEqual(rows[0].previewText, "rewritten")
-        XCTAssertEqual(cache.rowBuildCountForTesting, 2)
-    }
-
-    func testPruneEvictsEntriesNoLongerDisplayed() {
-        let cache = ClipboardRowModelCache()
-        let bigBatch = (0..<500).map { ClipboardEntry(content: "entry \($0)", contentType: .text) }
-        _ = cache.rows(for: bigBatch)
+        XCTAssertEqual(updated[1].previewText, "rewritten")
+        XCTAssertEqual(cache.rowBuildCountForTesting, 502)
         XCTAssertEqual(cache.cachedRowCountForTesting, 500)
 
-        // A much smaller display set pushes the cache over its keep threshold
-        // and prunes everything not currently displayed.
+        // A much smaller display set prunes everything not currently displayed.
         let smallBatch = (0..<10).map { ClipboardEntry(content: "fresh \($0)", contentType: .text) }
         _ = cache.rows(for: smallBatch)
-
         XCTAssertEqual(cache.cachedRowCountForTesting, 10)
     }
 }

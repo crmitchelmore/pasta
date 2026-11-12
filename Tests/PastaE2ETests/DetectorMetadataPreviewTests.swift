@@ -16,11 +16,14 @@ final class DetectorMetadataPreviewTests: XCTestCase {
     private struct Sample {
         let name: String
         let content: String
-        let expectedType: ContentType
+        /// nil for mixed content, whose primary type the detectors may choose.
+        let expectedType: ContentType?
         /// Bits the mask must carry; the detectors may legitimately add more
         /// (a URL path also reads as a file path, a temp dir contains a UUID).
         let requiredMask: ContentTypeMask
         let metadataKey: String
+        /// Per-type derivations the preview relies on.
+        var check: ((ClipboardEntry) throws -> Void)? = nil
     }
 
     private var env: E2ETempEnvironment!
@@ -47,8 +50,9 @@ final class DetectorMetadataPreviewTests: XCTestCase {
     }
 
     private func samples() throws -> [Sample] {
-        let realFile = env.root.appendingPathComponent("report.pdf")
+        let realFile = env.root.appendingPathComponent("slides.pdf")
         try Data([0x25, 0x50, 0x44, 0x46]).write(to: realFile)
+        let uuid = "550e8400-e29b-41d4-a716-446655440000"
 
         return [
             Sample(
@@ -64,7 +68,18 @@ final class DetectorMetadataPreviewTests: XCTestCase {
             Sample(
                 name: "jwt",
                 content: e2eSampleJWT(),
-                expectedType: .jwt, requiredMask: [.jwt], metadataKey: "jwt"
+                expectedType: .jwt, requiredMask: [.jwt], metadataKey: "jwt",
+                check: { stored in
+                    let jwts = try XCTUnwrap(e2eJSONDictionary(stored.metadata)?["jwt"] as? [[String: Any]])
+                    let first = try XCTUnwrap(jwts.first)
+                    XCTAssertEqual(first["token"] as? String, e2eSampleJWT())
+                    XCTAssertTrue((first["headerJSON"] as? String)?.contains("HS256") == true)
+                    XCTAssertTrue((first["payloadJSON"] as? String)?.contains("Pasta E2E") == true)
+                    XCTAssertEqual((first["claims"] as? [String: Any])?["iss"] as? String, "pasta.test")
+                    XCTAssertEqual(first["isExpired"] as? Bool, false)
+                    XCTAssertTrue(stored.containsType(.jwt))
+                    XCTAssertEqual(stored.extractedValues(for: .jwt).map(\.value), [e2eSampleJWT()])
+                }
             ),
             Sample(
                 name: "colour",
@@ -72,7 +87,33 @@ final class DetectorMetadataPreviewTests: XCTestCase {
                 expectedType: .color, requiredMask: [], metadataKey: "colors"
             ),
             Sample(
+                name: "rgb colour",
+                content: "rgb(18, 52, 86)",
+                expectedType: .color, requiredMask: [], metadataKey: "colors",
+                check: { stored in
+                    let swatch = try XCTUnwrap(ClipboardRowData(from: stored).swatchColor, "swatch must be parsed from persisted colour metadata")
+                    XCTAssertEqual(swatch.red, 18)
+                    XCTAssertEqual(swatch.green, 52)
+                    XCTAssertEqual(swatch.blue, 86)
+                    XCTAssertEqual(swatch.alpha, 1.0, accuracy: 0.001)
+                }
+            ),
+            Sample(
                 name: "code",
+                content: """
+                import SwiftUI
+                struct ContentView: View {
+                    var body: some View { Text("Hi") }
+                }
+                """,
+                expectedType: .code, requiredMask: [], metadataKey: "code",
+                check: { stored in
+                    let code = try XCTUnwrap(e2eJSONDictionary(stored.metadata)?["code"] as? [[String: Any]])
+                    XCTAssertEqual(code.first?["language"] as? String, CodeLanguage.swift.rawValue)
+                }
+            ),
+            Sample(
+                name: "code (plain Swift)",
                 content: """
                 import Foundation
 
@@ -98,20 +139,42 @@ final class DetectorMetadataPreviewTests: XCTestCase {
             Sample(
                 name: "file path",
                 content: realFile.path,
-                expectedType: .filePath, requiredMask: [.filePath], metadataKey: "filePaths"
+                expectedType: .filePath, requiredMask: [.filePath], metadataKey: "filePaths",
+                check: { stored in
+                    let paths = try XCTUnwrap(e2eJSONDictionary(stored.metadata)?["filePaths"] as? [[String: Any]])
+                    let first = try XCTUnwrap(paths.first)
+                    XCTAssertEqual(first["path"] as? String, realFile.path)
+                    XCTAssertEqual(first["filename"] as? String, "slides.pdf")
+                    XCTAssertEqual(first["exists"] as? Bool, true)
+                    XCTAssertEqual(first["fileType"] as? String, FilePathDetector.FileType.document.rawValue)
+                }
+            ),
+            Sample(
+                name: "mixed",
+                content: "Staging is 10.0.0.42 (id \(uuid)); page ops@example.com or open https://status.example.com",
+                expectedType: nil, requiredMask: [.ipAddress, .uuid, .email, .url], metadataKey: "emails",
+                check: { stored in
+                    let values = stored.allExtractedValues
+                    XCTAssertTrue(Set(values.map(\.type)).isSuperset(of: [.ipAddress, .uuid, .email, .url]), "got \(values.map(\.type))")
+                    XCTAssertTrue(values.contains { $0.value == uuid })
+                    XCTAssertEqual(MetadataParser.extractAllValues(from: stored.metadata, limit: 2).count, 2)
+                }
             ),
         ]
     }
 
-    // MARK: - Stage assertions
-
-    func testEachSamplePersistsTheTypeMetadataAndMaskTheDetectorsProduced() throws {
-        for sample in try samples() {
+    /// Every sample: persisted type/metadata/mask → row model → model cache →
+    /// preview panel, plus the per-type derivation the preview reads.
+    func testEachSampleFlowsFromDetectorsThroughStorageToRowAndPreview() throws {
+        let samples = try samples()
+        for sample in samples {
             let captured = ClipboardEntry(content: sample.content, contentType: .text, sourceApp: "com.example.Editor")
             let result = try pipeline.ingest(captured)
             let stored = try XCTUnwrap(database.fetch(id: captured.id), "\(sample.name): row missing")
 
-            XCTAssertEqual(stored.contentType, sample.expectedType, "\(sample.name): primary type")
+            if let expectedType = sample.expectedType {
+                XCTAssertEqual(stored.contentType, expectedType, "\(sample.name): primary type")
+            }
             XCTAssertEqual(stored.contentType, result.primary.contentType, "\(sample.name): stored type must equal detected type")
             XCTAssertEqual(stored.metadata, result.primary.metadata, "\(sample.name): metadata must round-trip through SQLite")
 
@@ -120,49 +183,25 @@ final class DetectorMetadataPreviewTests: XCTestCase {
 
             XCTAssertTrue(stored.contentTypeMask.isSuperset(of: sample.requiredMask), "\(sample.name): persisted mask \(stored.contentTypeMask) lacks \(sample.requiredMask)")
             XCTAssertEqual(stored.contentTypeMask, MetadataParser.typeMask(for: stored.metadata), "\(sample.name): mask derived from stored metadata")
-        }
-        XCTAssertEqual(try database.fetchPrimaryEntries().count, 7)
-    }
-
-    func testEachSampleDrivesRowDataAndPreviewPanelWithoutTrapping() throws {
-        var rendered = 0
-        for sample in try samples() {
-            let captured = ClipboardEntry(content: sample.content, contentType: .text, sourceApp: "com.example.Editor")
-            try pipeline.ingest(captured)
-            let stored = try XCTUnwrap(database.fetch(id: captured.id))
 
             let row = ClipboardRowData(from: stored)
             XCTAssertEqual(row.id, stored.id)
-            XCTAssertEqual(row.contentType, sample.expectedType, "\(sample.name): row type")
+            XCTAssertEqual(row.contentType, stored.contentType, "\(sample.name): row type")
             XCTAssertFalse(row.previewText.isEmpty, "\(sample.name): row preview")
             XCTAssertFalse(row.singleLinePreview.contains("\n"), "\(sample.name): single-line preview")
             XCTAssertFalse(row.mainPanelMetadata.isEmpty)
-            XCTAssertEqual(row.quickSearchMetadataSegments.first, sample.expectedType.displayTitle)
+            if let expectedType = sample.expectedType {
+                XCTAssertEqual(row.quickSearchMetadataSegments.first, expectedType.displayTitle)
+            }
             XCTAssertEqual(row.contentLength, sample.content.utf8.count)
 
             let cached = ClipboardRowModelCache().rows(for: [stored])
             XCTAssertEqual(cached, [row], "\(sample.name): the model cache must produce the same row")
 
-            let image = E2ERender.snapshot(PreviewPanelView(entry: stored, onCopy: { _ in }))
-            XCTAssertNotNil(image, "\(sample.name): preview panel must render")
-            rendered += 1
+            try sample.check?(stored)
+            XCTAssertNotNil(E2ERender.snapshot(PreviewPanelView(entry: stored, onCopy: { _ in })), "\(sample.name): preview panel must render")
         }
-        XCTAssertEqual(rendered, 7)
-    }
-
-    // MARK: - Per-type derivations the preview relies on
-
-    func testColourMetadataDrivesTheRowSwatch() throws {
-        let captured = ClipboardEntry(content: "rgb(18, 52, 86)", contentType: .text)
-        try pipeline.ingest(captured)
-        let stored = try XCTUnwrap(database.fetch(id: captured.id))
-        XCTAssertEqual(stored.contentType, .color)
-
-        let swatch = try XCTUnwrap(ClipboardRowData(from: stored).swatchColor, "swatch must be parsed from persisted colour metadata")
-        XCTAssertEqual(swatch.red, 18)
-        XCTAssertEqual(swatch.green, 52)
-        XCTAssertEqual(swatch.blue, 86)
-        XCTAssertEqual(swatch.alpha, 1.0, accuracy: 0.001)
+        XCTAssertEqual(try database.fetchPrimaryEntries().count, samples.count)
 
         // A colour row without metadata falls back to parsing hex content.
         let bare = ClipboardEntry(content: "#0A0B0C", contentType: .color)
@@ -170,80 +209,14 @@ final class DetectorMetadataPreviewTests: XCTestCase {
         XCTAssertEqual([fallback.red, fallback.green, fallback.blue], [0x0A, 0x0B, 0x0C])
     }
 
-    func testJWTMetadataExposesDecodedHeaderAndPayload() throws {
-        let captured = ClipboardEntry(content: e2eSampleJWT(), contentType: .text)
-        try pipeline.ingest(captured)
-        let stored = try XCTUnwrap(database.fetch(id: captured.id))
-        XCTAssertEqual(stored.contentType, .jwt)
+    func testPreviewSurvivesHostileAndOversizedMetadataAndEmptyState() throws {
+        let manyEmails = (0..<2_000).map { "person\($0)@example.com" }
+        let oversized = #"{"emails":[\#(manyEmails.map { "\"\($0)\"" }.joined(separator: ","))]}"#
+        let unparseable = #"{"emails":[\#(Array(repeating: #""padding-padding-padding@example.com""#, count: 5_000).joined(separator: ","))]}"#
+        XCTAssertGreaterThan(oversized.utf8.count, 24_000, "must exceed the render cap")
+        XCTAssertLessThan(oversized.utf8.count, 128_000, "must stay under the parse cap")
+        XCTAssertGreaterThan(unparseable.utf8.count, 128_000, "must exceed the parse cap")
 
-        let jwts = try XCTUnwrap(e2eJSONDictionary(stored.metadata)?["jwt"] as? [[String: Any]])
-        let first = try XCTUnwrap(jwts.first)
-        XCTAssertEqual(first["token"] as? String, e2eSampleJWT())
-        XCTAssertTrue((first["headerJSON"] as? String)?.contains("HS256") == true)
-        XCTAssertTrue((first["payloadJSON"] as? String)?.contains("Pasta E2E") == true)
-        XCTAssertEqual((first["claims"] as? [String: Any])?["iss"] as? String, "pasta.test")
-        XCTAssertEqual(first["isExpired"] as? Bool, false)
-
-        XCTAssertTrue(stored.containsType(.jwt))
-        XCTAssertEqual(stored.extractedValues(for: .jwt).map(\.value), [e2eSampleJWT()])
-    }
-
-    func testCodeMetadataNamesTheLanguage() throws {
-        let captured = ClipboardEntry(
-            content: """
-            import SwiftUI
-            struct ContentView: View {
-                var body: some View { Text("Hi") }
-            }
-            """,
-            contentType: .text
-        )
-        try pipeline.ingest(captured)
-        let stored = try XCTUnwrap(database.fetch(id: captured.id))
-        XCTAssertEqual(stored.contentType, .code)
-
-        let code = try XCTUnwrap(e2eJSONDictionary(stored.metadata)?["code"] as? [[String: Any]])
-        XCTAssertEqual(code.first?["language"] as? String, CodeLanguage.swift.rawValue)
-        XCTAssertNotNil(E2ERender.snapshot(PreviewPanelView(entry: stored)))
-    }
-
-    func testFilePathMetadataRecordsExistenceAndTypeForPreview() throws {
-        let file = env.root.appendingPathComponent("slides.pdf")
-        try Data([0x25, 0x50, 0x44, 0x46]).write(to: file)
-        let captured = ClipboardEntry(content: file.path, contentType: .filePath)
-        try pipeline.ingest(captured)
-        let stored = try XCTUnwrap(database.fetch(id: captured.id))
-        XCTAssertEqual(stored.contentType, .filePath)
-
-        let paths = try XCTUnwrap(e2eJSONDictionary(stored.metadata)?["filePaths"] as? [[String: Any]])
-        let first = try XCTUnwrap(paths.first)
-        XCTAssertEqual(first["path"] as? String, file.path)
-        XCTAssertEqual(first["filename"] as? String, "slides.pdf")
-        XCTAssertEqual(first["exists"] as? Bool, true)
-        XCTAssertEqual(first["fileType"] as? String, FilePathDetector.FileType.document.rawValue)
-        XCTAssertNotNil(E2ERender.snapshot(PreviewPanelView(entry: stored)))
-    }
-
-    func testMixedContentExposesExtractedValuesForTheDetectedItemsSection() throws {
-        let captured = ClipboardEntry(
-            content: "Staging is 10.0.0.42 (id 550e8400-e29b-41d4-a716-446655440000); page ops@example.com or open https://status.example.com",
-            contentType: .text
-        )
-        try pipeline.ingest(captured)
-        let stored = try XCTUnwrap(database.fetch(id: captured.id))
-
-        for type in [ContentType.ipAddress, .uuid, .email, .url] {
-            XCTAssertTrue(stored.contentTypeMask.contains(try XCTUnwrap(ContentTypeMask(type))), "mask must include \(type)")
-        }
-        let values = stored.allExtractedValues
-        XCTAssertTrue(Set(values.map(\.type)).isSuperset(of: [.ipAddress, .uuid, .email, .url]), "got \(values.map(\.type))")
-        XCTAssertTrue(values.contains { $0.value == "550e8400-e29b-41d4-a716-446655440000" })
-        XCTAssertEqual(MetadataParser.extractAllValues(from: stored.metadata, limit: 2).count, 2)
-
-        XCTAssertNotNil(E2ERender.snapshot(PreviewPanelView(entry: stored)))
-    }
-
-    func testPreviewSurvivesHostileMetadataAndEmptyState() throws {
         let hostile = [
             ClipboardEntry(content: "#abc", contentType: .color, metadata: #"{"colors":"not-an-array"}"#),
             ClipboardEntry(content: "x.y.z", contentType: .jwt, metadata: #"{"jwt":[{"claims":"oops"}]}"#),
@@ -251,6 +224,8 @@ final class DetectorMetadataPreviewTests: XCTestCase {
             ClipboardEntry(content: "fn()", contentType: .code, metadata: "{not json"),
             ClipboardEntry(content: "", contentType: .image, imagePath: "/definitely/missing.dat"),
             ClipboardEntry(content: String(repeating: "long ", count: 5_000), contentType: .text, metadata: nil),
+            ClipboardEntry(content: manyEmails.joined(separator: "\n"), contentType: .email, metadata: oversized),
+            ClipboardEntry(content: "too much metadata", contentType: .text, metadata: unparseable),
         ]
         for entry in hostile {
             try database.insert(entry, deduplicate: false)
@@ -260,5 +235,22 @@ final class DetectorMetadataPreviewTests: XCTestCase {
         }
         XCTAssertNotNil(E2ERender.snapshot(PreviewPanelView(entry: nil, isListEmpty: true)))
         XCTAssertNotNil(E2ERender.snapshot(PreviewPanelView(entry: nil, isListEmpty: false)))
+
+        // A capped capture: the detected-items section pages its values in a
+        // live window rather than rendering every extracted item at once.
+        pipeline.extractionConfiguration = try .init(maximumSavedItems: 25)
+        let capped = ClipboardEntry(content: manyEmails.prefix(150).joined(separator: " "), contentType: .text)
+        try pipeline.ingest(capped)
+        let stored = try XCTUnwrap(database.fetch(id: capped.id))
+        XCTAssertEqual(try database.fetchExtractedEntries(parentId: capped.id).count, 25)
+        XCTAssertEqual(MetadataParser.extractAllValues(from: stored.metadata, limit: 101, content: stored.content).count, 101,
+                       "every detected value stays copyable beyond the saved-item limit")
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 640), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: PreviewPanelView(entry: stored, onCopy: { _ in }))
+        window.contentView?.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.close()
     }
 }

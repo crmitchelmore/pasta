@@ -15,26 +15,20 @@ final class ReleaseNotesTests: XCTestCase {
         """.utf8))
     }
 
-    func testExactBuildWinsAndHistoryIsNumericWithoutFutureChanges() throws {
+    /// Notes resolve to the installed build (never another build's notes), history
+    /// sorts numerically without future versions, and the sheet waits for onboarding
+    /// and per-build acknowledgement.
+    func testCatalogLookupAndPresentationGate() throws {
         let notes = try catalog()
         XCTAssertEqual(notes.entry(version: "1.5.18", build: "140")?.summary, "Build 140")
         XCTAssertEqual(notes.entry(version: "1.5.18", build: "142")?.summary, "Version notes")
         XCTAssertNil(notes.entry(version: "1.5.20", build: "142"))
         XCTAssertEqual(notes.history(version: "1.5.18", build: "140").map(\.id), ["1.5.18:version", "1.5.9:version"])
-    }
-
-    func testAnotherBuildIsNeverSubstitutedForTheInstalledBuild() throws {
-        let notes = ReleaseNotesCatalog(entries: try catalog().entries.filter { $0.build != nil })
-        XCTAssertNil(notes.entry(version: "1.5.18", build: "142"))
-    }
-
-    func testBundledHistoryIsAvailableOffline() {
+        let buildOnly = ReleaseNotesCatalog(entries: notes.entries.filter { $0.build != nil })
+        XCTAssertNil(buildOnly.entry(version: "1.5.18", build: "142"), "Another build is never substituted")
         XCTAssertEqual(ReleaseNotesCatalog.bundled.entry(version: "1.5.18", build: "999")?.summary,
                        "More reliable clipboard history shared from your Mac.")
         XCTAssertNil(ReleaseNotesCatalog.bundled.entry(version: "1.5.15", build: "1"))
-    }
-
-    func testFreshInstallWaitsForOnboardingAndUpgradeRequiresAcknowledgement() {
         XCTAssertFalse(ReleaseNotesPresentation.shouldPresent(onboardingCompleted: false, acknowledged: nil, version: "1.5.18", build: "140"))
         // Missing new key includes legacy installs whose old version-only key
         // was written even though the sheet never appeared.

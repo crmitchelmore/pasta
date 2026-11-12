@@ -2,12 +2,12 @@ import XCTest
 @testable import PastaCore
 
 final class ReleaseTrainTests: XCTestCase {
-    func testExistingInstallationsRemainStable() {
+    /// Existing installs stay Stable, Alpha isolates every shared namespace, and the
+    /// archive configuration (feed URL, CloudKit container, bundle IDs) matches runtime.
+    func testTrainIdentitiesAreIsolatedAndMatchArchiveConfiguration() throws {
         XCTAssertEqual(ReleaseTrain.resolve(bundleIdentifier: "com.pasta.clipboard", metadata: nil), .stable)
         XCTAssertTrue(ReleaseTrain.stable.acceptsPeer(nil))
         XCTAssertTrue(ReleaseTrain.stable.allowsGlobalShortcut(explicitlyChosen: false))
-    }
-    func testAlphaIsolatesEverySharedNamespace() {
         XCTAssertEqual(ReleaseTrain.resolve(bundleIdentifier: "com.pasta.ios.alpha", metadata: nil), .alpha)
         XCTAssertNotEqual(ReleaseTrain.alpha.cloudContainer, ReleaseTrain.stable.cloudContainer)
         XCTAssertNotEqual(ReleaseTrain.alpha.tailnetPort, ReleaseTrain.stable.tailnetPort)
@@ -17,8 +17,6 @@ final class ReleaseTrainTests: XCTestCase {
         XCTAssertFalse(ReleaseTrain.stable.acceptsPeer("alpha"))
         XCTAssertFalse(ReleaseTrain.alpha.allowsGlobalShortcut(explicitlyChosen: false))
         XCTAssertTrue(ReleaseTrain.alpha.allowsGlobalShortcut(explicitlyChosen: true))
-    }
-    func testArchiveConfigurationMatchesRuntimeIdentities() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let data = try Data(contentsOf: root.appendingPathComponent("Sources/PastaCore/Resources/ReleaseTrains.json"))
@@ -32,5 +30,4 @@ final class ReleaseTrainTests: XCTestCase {
             XCTAssertEqual(config["feedURL"], train.feedURL)
         }
     }
-
 }

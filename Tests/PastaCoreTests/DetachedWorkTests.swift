@@ -20,15 +20,14 @@ final class DetachedWorkTests: XCTestCase {
         }
     }
 
-    func testReturnsOperationResult() async {
+    /// Cancelling the caller must stop detached background work (e.g. a
+    /// superseded search) instead of letting it run to completion.
+    func testReturnsResultAndPropagatesCancellationIntoDetachedWork() async {
         let result = await withCancellableDetachedTask { 21 * 2 }
         XCTAssertEqual(result, 42)
-    }
 
-    func testCancellationPropagatesIntoDetachedWork() async {
         let started = Box()
         let observedCancellation = Box()
-
         let outer = Task {
             await withCancellableDetachedTask(priority: .utility) { () -> Bool in
                 started.set()
@@ -52,29 +51,5 @@ final class DetachedWorkTests: XCTestCase {
 
         XCTAssertTrue(sawCancellation)
         XCTAssertTrue(observedCancellation.isSet)
-    }
-
-    func testAlreadyCancelledCallerCancelsDetachedWork() async {
-        let observedCancellation = Box()
-
-        let outer = Task {
-            // Give the test a chance to cancel before the detached work starts.
-            try? await Task.sleep(nanoseconds: 50_000_000)
-            return await withCancellableDetachedTask { () -> Bool in
-                for _ in 0..<10_000 {
-                    if Task.isCancelled {
-                        observedCancellation.set()
-                        return true
-                    }
-                    try? await Task.sleep(nanoseconds: 1_000_000)
-                }
-                return false
-            }
-        }
-
-        outer.cancel()
-        _ = await outer.value
-
-        XCTAssertTrue(observedCancellation.isSet || outer.isCancelled)
     }
 }

@@ -10,6 +10,8 @@ function fixture() {
   const jobs = ['Build & Test', 'iOS E2E (XCUITest)', 'Appcast & Cloudflare config contract',
     'Detect landing page changes', 'Landing page e2e (Playwright)']
     .map((name) => ({ name, status: 'completed', conclusion: 'success' }));
+  jobs[0].steps = [{ name: 'Run tests', status: 'completed', conclusion: 'success' },
+    { name: 'Launch smoke test', status: 'completed', conclusion: 'success' }];
   const github = {
     rest: { git: { getRef: async () => ({ data: { object: { sha } } }) }, actions: {
       getWorkflowRun: async () => ({ data: run }),
@@ -56,6 +58,21 @@ test('overall success cannot hide failed, skipped, cancelled or missing surface 
     jobs.splice(index, 1);
     await assert.rejects(verifyLandingDeploy(args), /Deployment blocked/);
   }
+});
+
+test('a green Build & Test job cannot hide a skipped or missing launch smoke', async () => {
+  for (const change of ['skipped', 'missing', 'failure', 'duplicate']) {
+    const { jobs, args } = fixture();
+    const steps = jobs[0].steps;
+    if (change === 'missing') steps.pop();
+    else if (change === 'duplicate') steps.push({ ...steps[1] });
+    else steps[1].conclusion = change;
+    await assert.rejects(verifyLandingDeploy(args), /launch smoke test did not succeed/);
+    await assert.rejects(verifyManifestPublication(args), /launch smoke test did not succeed/);
+  }
+  const { jobs, args } = fixture();
+  delete jobs[0].steps;
+  await assert.rejects(verifyReleasePublication(args), /launch smoke test did not succeed/);
 });
 
 test('irrelevant auto run does not deploy; manual deploy still requires Playwright', async () => {
