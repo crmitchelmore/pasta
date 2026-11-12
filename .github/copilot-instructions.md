@@ -1,7 +1,9 @@
 # Pasta - Copilot Instructions
 
+`AGENTS.md` at the repository root is the source of truth for build and test commands, architecture, release gates and merge rules. This file adds code patterns and signing notes; where the two differ, follow `AGENTS.md`.
+
 ## Project Overview
-Pasta is a macOS clipboard history manager built with SwiftUI and Swift Package Manager. It features a main app window and a Spotlight-style quick search panel.
+Pasta is a macOS clipboard history manager built with SwiftUI and Swift Package Manager, with an iOS companion app (`PastaIOS/`) and opt-in iCloud and Tailnet sync. The Mac app has a main window and a Spotlight-style quick search panel.
 
 ## Architecture
 
@@ -10,6 +12,8 @@ Pasta is a macOS clipboard history manager built with SwiftUI and Swift Package 
 - **PastaCore** (`Sources/PastaCore/`) - Business logic, clipboard monitoring, database, search
 - **PastaUI** (`Sources/PastaUI/`) - Reusable SwiftUI views and components
 - **PastaDetectors** (`Sources/PastaDetectors/`) - Content type detection (URLs, emails, etc.)
+- **PastaSync** (`Sources/PastaSync/`) - CloudKit sync and macOS tailnet pairing; see `Sources/PastaSync/README.md`
+- **PastaIOS** (`PastaIOS/`) - Xcode project for the iOS companion app
 
 ### Window Types
 - **MainWindow** - Standard resizable window for browsing clipboard history
@@ -39,25 +43,7 @@ let limited = Array(input.prefix(200))  // Prevent main thread blocking
 ```
 
 ### Quick Search Paste Behavior
-**DO NOT** paste while the quick search panel is visible. The correct sequence is:
-
-```swift
-// 1. Hide the quick search panel first
-quickSearchController?.hide()
-
-// 2. Copy content to clipboard
-pasteService.copy(entry)
-
-// 3. Deactivate app to return focus to previous app
-DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-    NSApp.hide(nil)
-    
-    // 4. Small delay then simulate Cmd+V
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-        SystemPasteEventSimulator().simulateCommandV()
-    }
-}
-```
+**DO NOT** paste while the quick search panel is visible. Route pastes into other apps through `ExternalPasteCoordinator.shared.paste(...)` (`Sources/PastaApp/ExternalPasteCoordinator.swift`) rather than sequencing it by hand. It copies the entry, hides the panel and the app, reactivates the remembered previous app, and sends Cmd+V via `SystemPasteEventSimulator` only once that app is frontmost again.
 
 **Why**: If you paste while the panel is visible, Cmd+V goes to our app instead of the user's previous app.
 
@@ -193,10 +179,9 @@ Any state shown in the UI that should survive app restart MUST be persisted:
 - Never use `@Published var` as the sole store for data the user expects to see on relaunch
 
 ### Global Hotkeys
-Use the HotKey library (Carbon-based) with a fallback global NSEvent monitor:
+The quick search hotkey uses Carbon `RegisterEventHotKey` through `CarbonHotKeyManager` (`Sources/PastaUI/CarbonHotKeyManager.swift`), configured by the user as a `PastaHotKey` and registered in `Sources/PastaApp/AppDelegate/AppDelegate+HotKey.swift`:
 - Carbon hotkeys work without accessibility permissions but need a proper app bundle
-- Global monitor (`NSEvent.addGlobalMonitorForEvents`) requires accessibility permissions
-- Both are registered for reliability
+- Global monitors (`NSEvent.addGlobalMonitorForEvents`, used by snippet expansion) require accessibility permissions
 
 ### Settings Window Width Guardrail
 When adding new tabs to `SettingsView`, increase the fixed settings window width so tabs remain visible and do not collapse into the macOS "Navigation Tab Bar" overflow popout.
@@ -205,9 +190,11 @@ Keep `SettingsView.Layout.settingsWidth` updated whenever tab count/labels chang
 ## Build & Test
 ```bash
 swift build              # Debug build
-swift build -c release   # Release build  
-swift test               # Run all tests
+swift build -c release   # Release build
+swift test --parallel    # Run all tests (unit suites + PastaE2ETests)
 ```
+
+See `AGENTS.md` for the e2e suite, launch smoke test and the CI jobs a PR must pass.
 
 ### Detector Regression Checks
 When changing detector rules or metadata extraction:
@@ -216,56 +203,40 @@ When changing detector rules or metadata extraction:
 3. Run targeted detector tests (`PhoneNumberDetectorTests`, strictness config tests) before full `swift build && swift test`.
 
 ## Commit Conventions
-Use [Conventional Commits](https://www.conventionalcommits.org/) for all commit messages. These drive automated version bumps and releases.
+Use [Conventional Commits](https://www.conventionalcommits.org/) for all commit messages. The commit type decides the release-note section (`scripts/release-notes-lib.mjs`); it does not choose version numbers or trigger a release.
 
-### Commit types and version impact
-| Prefix | Version bump | Example |
-|--------|-------------|---------|
-| `feat:` | Minor (0.x.0) | `feat(ui): add dark mode toggle` |
-| `fix:` | Patch (0.0.x) | `fix: prevent crash on empty clipboard` |
-| `perf:` | Patch (0.0.x) | `perf: reduce FTS5 query time` |
-| `docs:` | No release | `docs: update README` |
-| `chore:` | No release | `chore: update dependencies` |
-| `ci:` | No release | `ci: add smoke test step` |
-| `test:` | No release | `test: add search edge cases` |
-| `refactor:` | No release | `refactor: extract paste service` |
-| `style:` | No release | `style: fix indentation` |
-| `build:` | No release | `build: update Package.swift` |
-| `!` after type | **Major** (x.0.0) | `feat!: redesign settings API` |
-| `BREAKING CHANGE:` in body | **Major** (x.0.0) | (any type with breaking body) |
+| Prefix | Release-note section | Example |
+|--------|----------------------|---------|
+| `feat:` | New and improved | `feat(ui): add dark mode toggle` |
+| `fix:` | Fixes | `fix: prevent crash on empty clipboard` |
+| `perf:` | Performance | `perf: reduce FTS5 query time` |
+| `refactor:`, `build:`, `ci:`, `test:`, `chore:` | Under the hood | `chore: update dependencies` |
+| `docs:` | Documentation | `docs: update README` |
+| anything else | Other changes | |
 
 ### Scopes
 Use optional scopes for clarity: `feat(ui):`, `fix(core):`, `perf(search):`.
 
 ## Release Process
-Releases are fully automated via conventional commits:
+Releases use Alpha and Stable trains (`Docs/release-trains.md`; gates in `AGENTS.md`):
 
-1. Push to `main` → CI runs (build, test, smoke test)
-2. CI passes → auto-release job parses commits since last tag
-3. If releasable commits exist (`feat:`, `fix:`, `perf:`, or breaking) → version tag is created
-4. Tag push → release workflow builds universal binary, signs, notarizes, and creates GitHub release with DMG
-
-**No manual tagging is needed.** Just use the correct conventional commit prefix and push to main.
-
-To force a release for non-standard commit types, use `fix:` or `feat:` prefix as appropriate.
+1. Every successful main CI push is eligible for Alpha; `alpha-release.yml` builds and publishes it as a GitHub prerelease with its own Sparkle feed.
+2. Stable is promoted explicitly: **Prepare Stable** (`prepare-stable.yml`) freezes a verified Alpha with chosen macOS and iOS marketing versions, then the owner approves **Publish Stable** (`publish-stable.yml`).
+3. Manual legacy tags do not publish.
 
 ### Release Notes Quality
 - Release notes must include a compare link, grouped conventional-commit sections, commit links, and key touched files.
 - Avoid placeholder changelog text (for example, "See commit history"); include concrete shipped changes.
 
 ### Release Completion Reporting
-- When asked to confirm release completion, wait until the latest CI run on `main` succeeds and all newly triggered `Release` runs for resulting tags are successful (no queued/in-progress runs).
+- When asked to confirm release completion, wait until the latest CI run on `main` and the resulting Alpha or Publish Stable runs, including their live verification, have succeeded (no queued/in-progress runs).
 - Report released tag(s) and release URL(s) as evidence.
 
-### Protected Branch Limitation
-The release workflow **cannot push to main** due to branch protection requiring status checks.
-
-- Don't try to `git push` from release workflows to protected main branch.
-- For appcast/changelog updates, deploy directly to CDN (Cloudflare Pages) without git commit.
-- The appcast.xml is deployed to pasta-app.com via Cloudflare, not committed to the repo.
+### Appcast Commit-Back
+After deploying `appcast.xml`, the release workflow commits it back to `main` as `landing-page/appcast.xml` (`scripts/ci-commit-appcast.sh`, through the `Release gates` ruleset's admin bypass, falling back to a PR). CI fails if the committed appcast lags the newest published release. See release gate 5 in `AGENTS.md`.
 
 ### Cloudflare Pages Production Deployment
-When deploying to Cloudflare Pages from a tag-triggered workflow (not main branch), you MUST use `--branch=main` to deploy to production:
+When deploying to Cloudflare Pages from a workflow, pass `--branch=main` to deploy to production, as `deploy-landing-page.yml` and `publish-stable.yml` do:
 ```bash
 wrangler pages deploy landing-page --project-name=pasta-app --branch=main
 ```
@@ -326,7 +297,7 @@ If a restricted entitlement is in the binary but not in the provisioning profile
 Xcode adds this automatically, but manual `codesign` does not. Without it, CloudKit fails at runtime with `CKError 8 "Missing Entitlement"`. Format: `TeamID.BundleID` (e.g. `8X4ZN58TYH.com.pasta.clipboard`).
 
 ### Rule 4: ALWAYS launch-test the signed binary
-Both CI and release workflows MUST launch the signed binary and verify it stays running for 5 seconds. This is the ONLY way to catch:
+Both CI and release workflows MUST launch the signed bundle with `scripts/ci-launch-smoke.sh`, which waits for the app's `PASTA_CI_READY` marker and then requires a clean exit on SIGTERM. This is the ONLY way to catch:
 - AMFI SIGKILL from restricted entitlements
 - dyld crashes from framework signing issues
 - Missing framework bundles
@@ -353,7 +324,7 @@ All entitlements live in `Resources/release.entitlements` (committed). Both CI a
 
 ## Sparkle Auto-Updates
 
-- Feed URL: `https://pasta-app.com/appcast.xml` (deployed to Cloudflare Pages)
+- Feed URL: `https://pasta-app.com/appcast.xml` (deployed to Cloudflare Pages); Alpha uses its own feed at `https://pasta-app.com/alpha/appcast.xml`
 - The release workflow generates and uploads `appcast.xml` with EdDSA signatures
 - Keys are stored in GitHub Secrets: `SPARKLE_PUBLIC_KEY`, `SPARKLE_PRIVATE_KEY`
 - UpdaterManager wraps SPUStandardUpdaterController for SwiftUI integration
