@@ -17,6 +17,9 @@ final class AppState: ObservableObject {
         static let syncDetectedSecrets = "pasta.ios.syncDetectedSecrets.v1"
     }
 
+    /// Read by the Shortcuts actions, which run without an `AppState`.
+    nonisolated static let syncDetectedSecretsKey = Defaults.syncDetectedSecrets
+
     @Published var entries: [ClipboardEntry] = []
     @Published var isLoading = true
     @Published var hasCompletedOnboarding: Bool
@@ -45,6 +48,7 @@ final class AppState: ObservableObject {
     private var entriesGeneration = 0
     private let activationRequests = SyncRequestQueue()
     private let syncRequests = SyncRequestQueue()
+    private var shortcutsObserver: NSObjectProtocol?
 
     init() {
         // No-op unless launched by the XCUITest suite with `-uiTesting`.
@@ -57,6 +61,18 @@ final class AppState: ObservableObject {
         // Existing onboarding and old sync timestamps are not consent.
         self.isICloudSyncEnabled = UserDefaults.standard.bool(forKey: Defaults.iCloudSyncConsent)
         self.syncsDetectedSecrets = UserDefaults.standard.bool(forKey: Defaults.syncDetectedSecrets)
+        shortcutsObserver = NotificationCenter.default.addObserver(
+            forName: ShortcutsHistoryStore.historyChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.database != nil else { return }
+                try? await self.loadEntries()
+            }
+        }
+    }
+
+    deinit {
+        if let shortcutsObserver { NotificationCenter.default.removeObserver(shortcutsObserver) }
     }
 
     func initialise(syncManager: SyncManager) async {
@@ -353,7 +369,7 @@ final class AppState: ObservableObject {
         isShowingWhatsNew = false
     }
 
-    static func databaseURL() -> URL {
+    nonisolated static func databaseURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return appSupport
             .appendingPathComponent(PastaStorageLocation.directoryName, isDirectory: true)
