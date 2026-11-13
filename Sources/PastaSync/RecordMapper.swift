@@ -5,6 +5,33 @@ import PastaCore
 /// Maps between ClipboardEntry and CKRecord.
 public struct RecordMapper {
     public static let recordType = "ClipboardEntry"
+
+    /// Clipboard text, source app and detector metadata are written only to
+    /// `encryptedValues` (end-to-end encrypted when the user has Advanced Data
+    /// Protection). CloudKit cannot change an existing field's encryption, so
+    /// these use new keys; the legacy plaintext keys are read as a fallback
+    /// for records written by older builds and cleared whenever a record is
+    /// re-saved. Encrypted fields can't be queried, sorted or indexed, so
+    /// `contentType`, `contentHash`, `timestamp` and the other bookkeeping
+    /// fields stay plaintext.
+    enum EncryptedKey {
+        static let content = "encContent"
+        static let sourceApp = "encSourceApp"
+        static let metadata = "encMetadata"
+    }
+
+    enum LegacyPlaintextKey {
+        static let content = "content"
+        static let sourceApp = "sourceApp"
+        static let metadata = "metadata"
+        static let all = [content, sourceApp, metadata]
+    }
+
+    /// Reads a sensitive string field, preferring the encrypted value over the
+    /// legacy plaintext one.
+    static func sensitiveString(_ record: CKRecord, encrypted: String, legacy: String) -> String? {
+        record.encryptedValues[encrypted] as? String ?? record[legacy] as? String
+    }
     
     // Size threshold for including raw data inline vs as asset
     private static let inlineDataThreshold = 50_000 // 50KB
@@ -48,13 +75,16 @@ public struct RecordMapper {
         let recordID = CKRecord.ID(recordName: entry.id.uuidString, zoneID: zoneID)
         let record = CKRecord(recordType: Self.recordType, recordID: recordID)
 
-        record["content"] = entry.content as CKRecordValue
+        record.encryptedValues[EncryptedKey.content] = entry.content
+        record.encryptedValues[EncryptedKey.sourceApp] = entry.sourceApp
+        record.encryptedValues[EncryptedKey.metadata] = cloudMetadata(entry)
+        // Explicit nils make `.changedKeys` saves remove any plaintext copy a
+        // legacy build left on an existing server record.
+        for key in LegacyPlaintextKey.all { record[key] = nil }
         record["contentType"] = entry.contentType.rawValue as CKRecordValue
         record["contentHash"] = entry.contentHash as CKRecordValue
         record["timestamp"] = entry.timestamp as CKRecordValue
         record["copyCount"] = entry.copyCount as CKRecordValue
-        record["sourceApp"] = entry.sourceApp as CKRecordValue?
-        record["metadata"] = cloudMetadata(entry) as CKRecordValue?
         record["parentEntryId"] = entry.parentEntryId?.uuidString as CKRecordValue?
 
         // macOS moves captured images to imagePath and clears rawData before
@@ -91,7 +121,7 @@ public struct RecordMapper {
     public func entry(from record: CKRecord) -> ClipboardEntry? {
         guard let idString = record.recordID.recordName as String?,
               let id = UUID(uuidString: idString),
-              let content = record["content"] as? String,
+              let content = Self.sensitiveString(record, encrypted: EncryptedKey.content, legacy: LegacyPlaintextKey.content),
               let contentTypeRaw = record["contentType"] as? String,
               let contentType = ContentType(rawValue: contentTypeRaw),
               let timestamp = record["timestamp"] as? Date else {
@@ -99,8 +129,8 @@ public struct RecordMapper {
         }
         
         let copyCount = record["copyCount"] as? Int ?? 1
-        let sourceApp = record["sourceApp"] as? String
-        let storedMetadata = record["metadata"] as? String
+        let sourceApp = Self.sensitiveString(record, encrypted: EncryptedKey.sourceApp, legacy: LegacyPlaintextKey.sourceApp)
+        let storedMetadata = Self.sensitiveString(record, encrypted: EncryptedKey.metadata, legacy: LegacyPlaintextKey.metadata)
         let envelope = storedMetadata.flatMap { $0.data(using: .utf8) }.flatMap { try? JSONDecoder().decode(TailnetMetadata.self, from: $0) }
         let metadata = envelope?.pastaTailnetVersion == 1 ? envelope?.originalMetadata : storedMetadata
         let parentEntryId: UUID? = {

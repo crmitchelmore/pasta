@@ -320,6 +320,14 @@ extension DatabaseManager {
                 """)
         }
 
+        // Clients before encrypted CloudKit fields skipped encrypted-only
+        // records as unmappable yet still advanced the checkpoint past them.
+        // Drop it once so the upgraded client replays a full download; upload
+        // state is untouched and replay is idempotent.
+        migrator.registerMigration("replayCloudKitForEncryptedFields") { db in
+            try db.execute(sql: "DELETE FROM sync_checkpoints WHERE name = 'cloudkit'")
+        }
+
         return migrator
     }
 }
