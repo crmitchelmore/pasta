@@ -25,7 +25,8 @@ else:
     if info.get('CFBundleIcons', {}).get('CFBundlePrimaryIcon', {}).get('CFBundleIconName') != expected_icon:
         raise SystemExit('Wrong release train icon')
 e = plistlib.loads(subprocess.run(['codesign','-d','--entitlements',':-',str(app)],check=True,capture_output=True).stdout)
-if e.get('com.apple.developer.icloud-container-identifiers') != [c['cloudContainer']]: raise SystemExit('Cloud identity mismatch')
+container = c['cloudContainer' if surface == 'mac-direct' else 'iosCloudContainer']
+if e.get('com.apple.developer.icloud-container-identifiers') != [container]: raise SystemExit('Cloud identity mismatch')
 if e.get('com.apple.developer.icloud-container-environment') != 'Production': raise SystemExit('Cloud environment mismatch')
 paths = list(app.rglob('IOSReleaseNotes.json'))
 if not paths: raise SystemExit('Missing frozen release notes')

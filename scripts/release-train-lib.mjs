@@ -77,13 +77,30 @@ export const stableGateSurfaces = ['mac-direct'];
 export function alphaPublicationPending(release, pointer, manifest) {
     return release?.draft !== false || canAdvance(pointer, manifest);
 }
+// `manifests` is the whole ledger (both trains). The ordinal and direct-Mac
+// build only follow the requested train, so the Mac lanes are unchanged.
 export function nextAllocation(manifests, train, now = Date.now()) {
-    const ordinal = 1 + Math.max(0, ...manifests.filter(m => m.train === train).map(m => m.ordinal));
+    const own = manifests.filter(m => m.train === train);
+    const ordinal = 1 + Math.max(0, ...own.map(m => m.ordinal));
     // Preserve the existing direct-Mac YYYYMMDDHHmm update ordering.
-    // Apple uploads use a separate small counter in each surface entry.
     const timestamp = Number(new Date(now).toISOString().replace(/\D/g, "").slice(0,12));
-    const build = String(Math.max(timestamp, ...manifests.map(m => Number(m.build) + 1)));
-    return {ordinal, build};
+    const build = String(Math.max(timestamp, ...own.map(m => Number(m.build) + 1)));
+    // Alpha and Stable iOS builds share the one App Store Connect record, so
+    // CFBundleVersion comes from one increasing counter across both trains.
+    const iosBuild = String(Math.max(1000 + ordinal, ...manifests.map(m => Number(String(m.surfaces?.ios?.build ?? '0').split('.')[0]) + 1)));
+    return {ordinal, build, iosBuild};
+}
+const semver = value => value.split('.').map(Number);
+const compareVersions = (a, b) => { const l = semver(a), r = semver(b); for (let i = 0; i < 3; i++) if (l[i] !== r[i]) return l[i] > r[i] ? 1 : -1; return 0; };
+// iOS Alpha uploads to the Stable app record, where Apple refuses builds for a
+// version train that is released or below the approved version. Alpha stays a
+// patch above every Stable candidate unless the configured version is higher.
+export function alphaIOSVersion(configured, stableVersions) {
+    const newest = [...stableVersions].sort(compareVersions).at(-1);
+    if (!newest) return configured;
+    const [major, minor, patch] = semver(newest);
+    const next = `${major}.${minor}.${patch + 1}`;
+    return compareVersions(configured, next) >= 0 ? configured : next;
 }
 
 // A fresh Stable version must advance the published semantic version. An

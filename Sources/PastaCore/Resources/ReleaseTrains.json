@@ -4,13 +4,15 @@
     "macBundleIdentifier": "com.pasta.clipboard",
     "iosBundleIdentifier": "com.pasta.ios",
     "cloudContainer": "iCloud.com.pasta.ios",
+    "iosCloudContainer": "iCloud.com.pasta.ios",
     "feedURL": "https://pasta-app.com/appcast.xml"
   },
   "alpha": {
     "displayName": "Pasta Alpha",
     "macBundleIdentifier": "com.pasta.clipboard.alpha",
-    "iosBundleIdentifier": "com.pasta.ios.alpha",
+    "iosBundleIdentifier": "com.pasta.ios",
     "cloudContainer": "iCloud.com.pasta.ios.alpha",
+    "iosCloudContainer": "iCloud.com.pasta.ios",
     "feedURL": "https://pasta-app.com/alpha/appcast.xml"
   }
 }
