@@ -316,6 +316,45 @@ class ReleaseAppleTest < Minitest::Test
     client=SubmitClient.new; client.bundle_id=client.bundle_id.delete_suffix('.alpha'); client.conflict='another resource is locked'
     assert_raises(AppleAPI::ConflictError) { ApprovedDelivery.new(client:client,manifest:manifest,surface:'ios').submit }
   end
+  class HeldVersionClient < SubmitClient
+    HOLDER='aed18c8c-8be4-414a-acb1-f392e5f313e4'
+    attr_accessor :holder_state
+    def list(path)
+      return [{'relationships'=>{'appStoreVersion'=>{'data'=>{'id'=>'v'}}}}] if path == "/v1/reviewSubmissions/#{HOLDER}/items"
+      super(path)
+    end
+    def get(path)
+      return {'data'=>{'id'=>HOLDER,'attributes'=>{'state'=>patches.include?("/v1/reviewSubmissions/#{HOLDER}") ? 'WAITING_FOR_REVIEW' : holder_state}}} if path == "/v1/reviewSubmissions/#{HOLDER}"
+      super(path)
+    end
+    def post(path, body)
+      if path == '/v1/reviewSubmissionItems'
+        @posts << path
+        raise AppleAPI::ConflictError.new("App Store Connect API POST #{path} failed (409): {\"code\" : \"STATE_ERROR.ITEM_PART_OF_ANOTHER_SUBMISSION\", \"detail\" : \"appStoreVersions with id v was already added to another reviewSubmission with id #{HOLDER}\"}", status: 409)
+      end
+      super
+    end
+  end
+  def stable_manifest
+    notes='Frozen notes'
+    {'train'=>'stable','source'=>'a'*40,'tag'=>'stable-candidate-1','surfaces'=>{'ios'=>{'version'=>'3.2.0','build'=>'1000.0.1','notes'=>notes,'notesHash'=>Digest::SHA256.hexdigest(notes),'storeNotes'=>notes,'storeNotesHash'=>Digest::SHA256.hexdigest(notes)}}}
+  end
+  def held_client(state)
+    client=HeldVersionClient.new; client.bundle_id=client.bundle_id.delete_suffix('.alpha'); client.holder_state=state; client
+  end
+  def test_version_held_by_ready_submission_submits_that_submission
+    client=held_client('READY_FOR_REVIEW')
+    capture_io { ApprovedDelivery.new(client:client,manifest:stable_manifest,surface:'ios').submit }
+    assert_includes client.patches, "/v1/reviewSubmissions/#{HeldVersionClient::HOLDER}"
+  end
+  def test_version_already_in_review_or_needing_a_human_is_not_a_failure
+    %w[WAITING_FOR_REVIEW IN_REVIEW COMPLETE UNRESOLVED_ISSUES].each do |state|
+      client=held_client(state)
+      out, _ = capture_io { ApprovedDelivery.new(client:client,manifest:stable_manifest,surface:'ios').submit }
+      assert_match(/#{HeldVersionClient::HOLDER}/, out, state)
+      refute client.patches.any? { |p| p.start_with?('/v1/reviewSubmissions/') }, state
+    end
+  end
   def test_alpha_never_submits_through_async_gate
     assert_raises(RuntimeError) { delivery(FakeClient.new).submit_if_ready }
   end

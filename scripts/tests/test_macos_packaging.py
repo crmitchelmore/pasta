@@ -1,4 +1,6 @@
+import ast
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -166,40 +168,83 @@ if tool == 'xcrun':
         result = self.run_script("ci-prepare-macos-executable.sh", self.binary, FAIL_TOOL="strip")
         self.assertNotEqual(result.returncode, 0)
 
-    def test_dmg_uses_lossless_lzma_and_preserves_layout_arguments(self):
-        result = self.run_script("ci-create-macos-dmg.sh", "--volname", "Pasta Alpha",
-                                 "--background", "background.png", "output.dmg", "Pasta Alpha.app")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("['--format', 'ULMO', '--volname', 'Pasta Alpha', '--background', "
-                      "'background.png', 'output.dmg', 'Pasta Alpha.app']", self.log.read_text())
-
-    def test_dmg_volume_icon_is_a_slim_copy_of_the_app_icon(self):
+    def make_dmg_resources(self, *volume_names):
+        resources = self.root / "DMG"
+        (resources / "Layout").mkdir(parents=True)
+        for name in volume_names:
+            (resources / "Layout" / f"{name}.DS_Store").write_bytes(b"layout " + name.encode())
         icon = self.root / "App Icon.icns"
         icon.write_bytes(sample_icns("ic09", "ic10", "ic11"))
+        return resources, icon
+
+    def logged_create_dmg_args(self):
+        line = self.log.read_text().splitlines()[-1]
+        self.assertTrue(line.startswith("create-dmg "), line)
+        return ast.literal_eval(line[len("create-dmg "):])
+
+    def test_dmg_applies_committed_layout_without_scripting_finder(self):
+        resources, icon = self.make_dmg_resources("Pasta Alpha")
         create_dmg = self.bin / "create-dmg"
         create_dmg.write_text(create_dmg.read_text() + """
 args = sys.argv[1:]
 volicon = pathlib.Path(args[args.index('--volicon') + 1])
 pathlib.Path(os.environ['COMMAND_LOG'] + '.icns').write_bytes(volicon.read_bytes())
 """)
-        result = self.run_script("ci-create-macos-dmg.sh", "--volname", "Pasta", "--volicon", icon,
-                                 "--background", "background@2x.png", "output.dmg", "Pasta.app")
+        result = self.run_script("ci-create-macos-dmg.sh", "Pasta Alpha", icon, "output.dmg",
+                                 "build/Pasta Alpha.app", PASTA_DMG_RESOURCES=str(resources))
         self.assertEqual(result.returncode, 0, result.stderr)
-        logged = self.log.read_text()
-        self.assertNotIn(str(icon), logged)
-        self.assertRegex(logged, r"\['--format', 'ULMO', '--volname', 'Pasta', '--volicon', "
-                                 r"'[^']+/VolumeIcon\.icns', '--background', 'background@2x\.png', "
-                                 r"'output\.dmg', 'Pasta\.app'\]")
+        args = self.logged_create_dmg_args()
+        self.assertEqual(args[:4], ["--format", "ULMO", "--volname", "Pasta Alpha"])
+        self.assertEqual(args[args.index("--icon") + 1], "Pasta Alpha.app")
+        self.assertIn("--skip-jenkins", args)
+        add = args.index("--add-file")
+        self.assertEqual(args[add + 1:add + 3], [".DS_Store", str(resources / "Layout/Pasta Alpha.DS_Store")])
+        self.assertEqual(args[-2:], ["output.dmg", "build/Pasta Alpha.app"])
+        self.assertNotIn(str(icon), args)
         self.assertEqual(Path(str(self.log) + ".icns").read_bytes(), sample_icns("ic09", "ic11"))
         self.assertEqual(icon.read_bytes(), sample_icns("ic09", "ic10", "ic11"))
 
+    def test_finder_layout_mode_lets_finder_write_the_layout(self):
+        resources, icon = self.make_dmg_resources()
+        result = self.run_script("ci-create-macos-dmg.sh", "--finder-layout", "Pasta", icon, "output.dmg",
+                                 "Pasta.app", PASTA_DMG_RESOURCES=str(resources))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = self.logged_create_dmg_args()
+        self.assertNotIn("--skip-jenkins", args)
+        self.assertNotIn("--add-file", args)
+
+    def test_dmg_fails_without_a_layout_for_the_volume_name(self):
+        resources, icon = self.make_dmg_resources("Pasta")
+        result = self.run_script("ci-create-macos-dmg.sh", "Pasta Beta", icon, "output.dmg", "Pasta Beta.app",
+                                 PASTA_DMG_RESOURCES=str(resources))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("generate-dmg-layout.sh", result.stderr)
+        self.assertFalse(self.log.exists())
+
     def test_dmg_fails_when_volume_icon_cannot_be_slimmed(self):
+        resources, _ = self.make_dmg_resources("Pasta")
         icon = self.root / "broken.icns"
         icon.write_bytes(b"not an icon")
-        result = self.run_script("ci-create-macos-dmg.sh", "--volicon", icon, "output.dmg", "Pasta.app")
+        result = self.run_script("ci-create-macos-dmg.sh", "Pasta", icon, "output.dmg", "Pasta.app",
+                                 PASTA_DMG_RESOURCES=str(resources))
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.log.exists())
 
+
+class DMGLayoutTemplateTests(unittest.TestCase):
+    def test_every_train_has_a_layout_pointing_at_its_own_volume_background(self):
+        trains = json.loads((ROOT / "Sources/PastaCore/Resources/ReleaseTrains.json").read_text())
+        names = {train["displayName"] for train in (trains.values() if isinstance(trains, dict) else trains)}
+        layouts = {path.stem for path in (ROOT / "Resources/DMG/Layout").glob("*.DS_Store")}
+        self.assertEqual(layouts, names)
+        for name in names:
+            with self.subTest(name=name):
+                data = (ROOT / "Resources/DMG/Layout" / f"{name}.DS_Store").read_bytes()
+                self.assertEqual(data[4:8], b"Bud1")
+                self.assertIn(f"{name}:.background:".encode(), data)
+                self.assertIn(b"/.background/background@2x.png", data)
+                self.assertIn(f"{name}.app".encode("utf-16-be"), data)
+                self.assertIn("Applications".encode("utf-16-be"), data)
 
 if __name__ == "__main__":
     unittest.main()

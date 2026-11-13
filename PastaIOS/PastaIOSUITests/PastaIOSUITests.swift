@@ -117,6 +117,10 @@ final class PastaIOSUITests: PastaUITestCase {
 
         row.tap()
         let detailBar = app.navigationBars["Entry"]
+        // A tap landing while the list is still settling after the capture can be dropped.
+        if !detailBar.waitForExistence(timeout: 5), app.navigationBars["Clipboard History"].exists {
+            row.tap()
+        }
         XCTAssertTrue(detailBar.waitForExistence(timeout: Self.uiTimeout), "Entry detail screen did not open")
         XCTAssertTrue(app.staticTexts[content].firstMatch.waitForExistence(timeout: Self.uiTimeout),
                       "Detail must display the captured content")

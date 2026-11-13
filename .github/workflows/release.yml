@@ -102,7 +102,7 @@ jobs:
         CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
         CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION_PASSWORD }}
       run: "# Create temporary keychain\nKEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db\nKEYCHAIN_PASSWORD=$(openssl rand\
-        \ -base64 32)\n\necho \"==> Creating temporary keychain\"\necho \"KEYCHAIN_PATH=$KEYCHAIN_PATH\" >> \"$GITHUB_ENV\"\
+        \ -base64 32)\necho \"::add-mask::$KEYCHAIN_PASSWORD\"\n\necho \"==> Creating temporary keychain\"\necho \"KEYCHAIN_PATH=$KEYCHAIN_PATH\" >> \"$GITHUB_ENV\"\
         \nsecurity create-keychain -p \"$KEYCHAIN_PASSWORD\" \"$KEYCHAIN_PATH\"\nsecurity set-keychain-settings -lut 21600\
         \ \"$KEYCHAIN_PATH\"\nsecurity unlock-keychain -p \"$KEYCHAIN_PASSWORD\" \"$KEYCHAIN_PATH\"\n\necho \"==> Importing\
         \ certificate\"\necho \"$CERTIFICATE_BASE64\" | base64 --decode > certificate.p12\nsecurity import certificate.p12\
@@ -279,19 +279,7 @@ jobs:
 
         create_dmg() {
           echo "==> Creating $1 from $2"
-          bash scripts/ci-create-macos-dmg.sh \
-            --volname "${DMG_NAME}" \
-            --volicon "$ICON_PATH" \
-            --background "Resources/DMG/background@2x.png" \
-            --window-pos 200 120 \
-            --window-size 660 400 \
-            --icon-size 100 \
-            --icon "${DMG_NAME}.app" 180 200 \
-            --app-drop-link 480 200 \
-            --hide-extension "${DMG_NAME}.app" \
-            --no-internet-enable \
-            "$1" \
-            "$2"
+          bash scripts/ci-create-macos-dmg.sh "${DMG_NAME}" "$ICON_PATH" "$1" "$2"
           ls -lh "$1"
         }
 
