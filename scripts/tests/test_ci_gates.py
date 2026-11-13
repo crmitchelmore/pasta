@@ -290,3 +290,34 @@ while True: time.sleep(0.2)
         code, output = self.run_smoke(app, READY_TIMEOUT="3")
         self.assertNotEqual(code, 0, output)
         self.assertIn("never reported PASTA_CI_READY", output)
+
+
+class StaplerRetryTests(unittest.TestCase):
+    """scripts/ci-stapler.sh retries stapler a bounded number of times."""
+
+    def run_stapler(self, failures):
+        with tempfile.TemporaryDirectory(prefix="pasta-stapler-") as temp:
+            root = Path(temp)
+            counter = root / "calls"
+            fake = root / "stapler"
+            fake.write_text(
+                "#!/bin/bash\n"
+                f"n=$(( $(cat '{counter}' 2>/dev/null || echo 0) + 1 )); echo $n > '{counter}'\n"
+                f"[ $n -gt {failures} ] || exit 68\n"
+            )
+            fake.chmod(0o755)
+            result = subprocess.run(
+                ['bash', str(ROOT / 'scripts' / 'ci-stapler.sh'), 'validate', 'Pasta.dmg'],
+                env={**os.environ, "STAPLER_BIN": str(fake), "STAPLER_ATTEMPTS": "3", "STAPLER_RETRY_DELAY": "0"},
+                capture_output=True, text=True, timeout=30,
+            )
+            return result.returncode, int(counter.read_text()), result.stdout + result.stderr
+
+    def test_transient_failure_is_retried(self):
+        code, calls, output = self.run_stapler(failures=2)
+        self.assertEqual((code, calls), (0, 3), output)
+
+    def test_persistent_failure_fails_with_stapler_status(self):
+        code, calls, output = self.run_stapler(failures=99)
+        self.assertEqual((code, calls), (68, 3), output)
+        self.assertIn("after 3 attempts", output)
