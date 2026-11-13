@@ -279,19 +279,7 @@ jobs:
 
         create_dmg() {
           echo "==> Creating $1 from $2"
-          bash scripts/ci-create-macos-dmg.sh \
-            --volname "${DMG_NAME}" \
-            --volicon "$ICON_PATH" \
-            --background "Resources/DMG/background@2x.png" \
-            --window-pos 200 120 \
-            --window-size 660 400 \
-            --icon-size 100 \
-            --icon "${DMG_NAME}.app" 180 200 \
-            --app-drop-link 480 200 \
-            --hide-extension "${DMG_NAME}.app" \
-            --no-internet-enable \
-            "$1" \
-            "$2"
+          bash scripts/ci-create-macos-dmg.sh "${DMG_NAME}" "$ICON_PATH" "$1" "$2"
           ls -lh "$1"
         }
 
