@@ -2,6 +2,7 @@ import CloudKit
 import Foundation
 import os.log
 import PastaCore
+import PastaDetectors
 import PastaSync
 #if canImport(UIKit)
 import UIKit
@@ -121,19 +122,19 @@ final class AppState: ObservableObject {
             return
         }
 
-        let entry = ClipboardEntry(
-            content: clipboardString,
-            contentType: .text,
-            sourceApp: "iOS Pasteboard"
-        )
-
         do {
-            let alreadyExists = try database.existsWithHash(entry.contentHash)
+            // The text hash ignores the type, so dedupe before classifying.
+            let alreadyExists = try database.existsWithHash(
+                ClipboardEntry(content: clipboardString, contentType: .text).contentHash
+            )
             if alreadyExists {
                 lastObservedPasteboardChangeCount = changeCount
                 return
             }
 
+            let entry = await Task.detached(priority: .userInitiated) {
+                CapturedTextClassifier.entry(content: clipboardString, sourceApp: "iOS Pasteboard")
+            }.value
             try database.insert(entry, deduplicate: false)
             lastObservedPasteboardChangeCount = changeCount
 

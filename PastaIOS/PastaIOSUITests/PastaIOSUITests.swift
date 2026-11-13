@@ -101,9 +101,9 @@ final class PastaIOSUITests: PastaUITestCase {
 
     /// Pasteboard text at activation is captured exactly once, opens in
     /// detail, is found by FTS search while unrelated queries return nothing,
-    /// and survives termination. The relaunch puts unrelated text on the
+    /// and survives termination. The relaunch puts an unrelated URL on the
     /// pasteboard, so the first entry can only come back from the on-disk
-    /// database, not by recapturing the fixture.
+    /// database, not by recapturing the fixture, and the URL must be classified.
     func testCaptureDetailSearchAndPersistenceAcrossRelaunch() {
         let token = "PastaJourney\(UUID().uuidString.prefix(8))"
         let content = "Captured clipboard content \(token)"
@@ -145,8 +145,13 @@ final class PastaIOSUITests: PastaUITestCase {
         XCTAssertTrue(element("search.emptyPrompt").waitForExistence(timeout: Self.uiTimeout), "Clearing must return to the prompt")
         XCTAssertFalse(element("search.row").exists)
 
-        relaunch(pasteboard: "Unrelated clipboard replacement")
+        // The replacement is a URL, so the capture must run the shared
+        // detectors rather than storing everything as plain text.
+        let replacementURL = "https://example.com/pasta-\(token)"
+        relaunch(pasteboard: replacementURL)
         XCTAssertTrue(app.staticTexts[content].waitForExistence(timeout: Self.uiTimeout), "Captured history was lost across relaunch")
+        XCTAssertTrue(app.staticTexts[replacementURL].waitForExistence(timeout: Self.uiTimeout), "Replacement URL was not captured")
+        XCTAssertTrue(app.staticTexts["URL"].firstMatch.exists, "Captured URL must be labelled URL, not Text")
         openTab("Settings", expecting: "settings.list")
         XCTAssertEqual(element("settings.entryCount").label, "2", "Relaunch must retain the first entry and capture the replacement once")
         openTab("Search", expecting: "search.list")
