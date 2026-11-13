@@ -326,7 +326,7 @@ jobs:
         BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
         APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
         APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        ASC_TIMEOUT_MINUTES: 20
+        ASC_TIMEOUT_MINUTES: 45
         ASC_POLL_SECONDS: 60
       run: scripts/ci-asc-wait-for-build.sh "$VERSION" "$BUILD_NUMBER"
     - name: Verify exported IPA (dry run)

@@ -107,7 +107,15 @@ launch-tests the same resource staging and stripping path as releases.
 macOS 10.15, below Pasta's macOS 14 minimum. The volume icon is the train ICNS
 without its 1024 px slot (`ci-slim-icns.py`). Releases ship the committed,
 pre-optimised ICNS and DMG background (`Resources/Branding/README.md`) rather
-than regenerating them. Layout, signing,
+than regenerating them. The Finder window layout (background, icon positions,
+window size) is a committed `.DS_Store` per volume name in
+`Resources/DMG/Layout/`, copied into the volume with create-dmg's
+`--skip-jenkins`, so release runners never script Finder (it timed out with
+AppleEvent -1712 on the headless runner). After changing the layout constants
+in `ci-create-macos-dmg.sh`, the background or a train `displayName`, run
+`bash scripts/generate-dmg-layout.sh` on a logged-in Mac with create-dmg
+installed and commit the regenerated templates; `test_macos_packaging.py`
+fails when a train has no matching template. Signing,
 notarisation, Sparkle signatures and pre-/post-publication verification remain
 unchanged. Optimisations happen before signing; never modify a signed bundle or
 recompress an already Sparkle-signed update.
