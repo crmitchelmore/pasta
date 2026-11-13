@@ -2,7 +2,7 @@
 
 CloudKit synchronization and macOS tailnet pairing/transfer for the Pasta clipboard manager.
 
-Tailnet Sync is an independent opt-in transport. See [the agreed specification and operating limits](../../Docs/tailnet-sync.md). Its code is under `Tailnet/` and is excluded on iOS; local policy and durable receipts live in PastaCore. CloudKit upload eligibility is explicit and enforced at both queue and record mapping boundaries. File-path entries are not uploaded to iCloud. Received provenance travels in the existing metadata field so account-bridge forwarding remains opt-in without a new CloudKit schema field.
+Tailnet Sync is an independent opt-in transport. See [the agreed specification and operating limits](../../Docs/tailnet-sync.md). Its code is under `Tailnet/` and is excluded on iOS; local policy and durable receipts live in PastaCore. CloudKit upload eligibility is explicit and enforced at both queue and record mapping boundaries. File-path entries are not uploaded to iCloud. Received provenance travels inside the encrypted metadata field so account-bridge forwarding remains opt-in without a dedicated CloudKit schema field.
 
 ## Overview
 
@@ -110,16 +110,23 @@ Maps between `ClipboardEntry` domain models and CloudKit `CKRecord`:
 | Field | Type | Notes |
 |-------|------|-------|
 | `id` | Record ID | UUID string |
-| `content` | String | Text content |
+| `encContent` | Encrypted String | Text content (`encryptedValues`) |
 | `contentType` | String | ContentType.rawValue |
 | `contentHash` | String | SHA-256 for dedup |
 | `timestamp` | Date | Creation time |
 | `copyCount` | Int | Usage counter |
-| `sourceApp` | String? | Optional |
-| `metadata` | String? | Optional JSON |
+| `encSourceApp` | Encrypted String? | Optional (`encryptedValues`) |
+| `encMetadata` | Encrypted String? | Optional JSON (`encryptedValues`) |
 | `parentEntryId` | String? | UUID for grouping |
 | `contentSize` | Int | Bytes (for UI) |
-| `imageAsset` | Asset? | Binary data |
+| `imageAsset` | Asset? | Binary data (CloudKit encrypts assets) |
+| `content`, `sourceApp`, `metadata` | String? | Legacy plaintext; read-only fallback |
+
+Clipboard text, source app and detector metadata are written only to `record.encryptedValues`, which CloudKit end-to-end encrypts when the user has Advanced Data Protection on. CloudKit can't change an existing field's encryption, so the encrypted fields use new `enc*` names. `RecordMapper` reads the encrypted value first and falls back to the legacy plaintext field, so records written by older builds still import. Every save also clears the legacy plaintext fields, so re-uploading an old record removes its plaintext copy. Builds that predate encryption skip records that carry only `encContent` (logged as "missing content") instead of failing the pull.
+
+Encrypted fields can't be queried, sorted or indexed. `contentType`, `contentHash`, `timestamp` and the remaining bookkeeping fields stay plaintext. Sync relies on zone change tokens rather than queries.
+
+Before a build with new fields ships, the owner must create the `enc*` fields in the Development schema (saving a record from a development build does this automatically) and then use **Deploy Schema Changes** in the CloudKit Console to deploy them to Production. A Production record save fails on fields missing from the Production schema.
 
 **Zone**: `PastaZone` (custom zone for change tracking)
 
