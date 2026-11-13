@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseCommits } from './release-notes-lib.mjs';
-import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, newestReconcileSource, receiptDelivered, receiptNeedsRebuild, stableGateSurfaces, alphaPublicationPending, assertStableVersionAdvance } from './release-train-lib.mjs';
+import { digest, validateManifest, surfaces, notesFor, notesHTML, nextAllocation, canAdvance, newestReconcileSource, receiptDelivered, receiptNeedsRebuild, stableGateSurfaces, alphaPublicationPending, assertStableVersionAdvance, alphaIOSVersion } from './release-train-lib.mjs';
 
 const repo = process.env.GITHUB_REPOSITORY ?? 'crmitchelmore/pasta';
 const run = runReleaseCommand;
@@ -77,20 +77,24 @@ if(command === 'allocate' || command === 'prepare') {
             throw Error(asset ? `Selected Alpha is not verified: ${surface}` : `Selected Alpha has no delivery receipt: ${surface}`);
         }
     }
-    const tagNames=git('tag','--list',train === 'alpha'?'alpha-build-*':'stable-candidate-*').split('\n').filter(Boolean);
+    const tagNames=git('tag','--list','alpha-build-*','stable-candidate-*').split('\n').filter(Boolean);
     // Annotated tags are the durable allocation ledger, including a crash
-    // between pushing a tag and creating its draft GitHub release.
-    const manifests=tagNames.map(tag=>manifestFor(tag));
+    // between pushing a tag and creating its draft GitHub release. Both trains
+    // are read because iOS build numbers share one App Store Connect record.
+    const ledger=tagNames.map(tag=>manifestFor(tag));
+    const manifests=ledger.filter(m=>m.train === train);
     if(train === 'alpha') {
         const same=manifests.filter(m=>m.source === source).sort((a,b)=>b.ordinal-a.ordinal)[0];
         if(same && option('rebuild','false') !== 'true') {
             ensureRelease(same,all); output('tag',same.tag); output('source',source); process.exit(0);
         }
     }
-    const allocation=nextAllocation(manifests,train);
+    const {iosBuild,...allocation}=nextAllocation(ledger,train);
     const tag=`${train === 'alpha'?'alpha-build':'stable-candidate'}-${allocation.ordinal}`;
     const config=json('Config/ReleasePipeline.json');
-    const versions=train === 'alpha' ? config.versions : {mac:required('mac-version'),ios:required('ios-version')};
+    const versions=train === 'alpha'
+        ? {mac:config.versions.mac,ios:alphaIOSVersion(config.versions.ios,ledger.filter(m=>m.train === 'stable').map(m=>m.surfaces.ios.version))}
+        : {mac:required('mac-version'),ios:required('ios-version')};
     const manifest={schema:1,train,tag,source,...allocation,createdAt:new Date().toISOString(),ci:proof,
         selectedAlpha:alpha?.tag ?? null,toolchain:'Xcode 26.3',dependenciesHash:digest(git('show',`${source}:Package.resolved`)),surfaces:{}};
     for(const surface of surfaces) {
@@ -100,7 +104,7 @@ if(command === 'allocate' || command === 'prepare') {
         const commits=parseCommits(git('log','--first-parent','--reverse','--format=%H%x1f%s%x1f%b%x1e',`${base}..${source}`));
         const notes=notesFor(commits,platform,`https://github.com/${repo}/compare/${base}...${source}`);
         const storeNotes=notes.length <= 4000 ? notes : notes.slice(0,3900)+'\nFull release notes are available in the app.';
-        manifest.surfaces[surface]={build:surface === "mac-direct" ? allocation.build : String(1000 + allocation.ordinal),version:versions[platform],baseline:base,notes,notesHash:digest(notes),storeNotes,storeNotesHash:digest(storeNotes)};
+        manifest.surfaces[surface]={build:surface === "mac-direct" ? allocation.build : iosBuild,version:versions[platform],baseline:base,notes,notesHash:digest(notes),storeNotes,storeNotesHash:digest(storeNotes)};
     }
     validateManifest(manifest);
     if(train === 'stable') assertStableVersionAdvance(versions.mac, all.filter(r=>!r.draft && !r.prerelease && /^v\d+\.\d+\.\d+$/.test(r.tag_name)).map(r=>r.tag_name.slice(1)));
@@ -119,7 +123,7 @@ if(command === 'allocate' || command === 'prepare') {
         RELEASE_SHA:manifest.source,RELEASE_VERSION:item.version,BUILD_NUMBER:item.build,
         DOWNLOAD_TAG:manifest.train === 'alpha' ? manifest.tag : `v${item.version}`,
         BUNDLE_ID:config[surface==='ios'?'iosBundleIdentifier':'macBundleIdentifier'],
-        ICLOUD_CONTAINER:config.cloudContainer,FEED_URL:config.feedURL,TRAIN_DISPLAY_NAME:config.displayName,
+        ICLOUD_CONTAINER:config[surface==='ios'?'iosCloudContainer':'cloudContainer'],FEED_URL:config.feedURL,TRAIN_DISPLAY_NAME:config.displayName,
         DMG_NAME:config.displayName,APP_NAME:'PastaApp',ICON_PATH:manifest.train === 'alpha' ? 'Resources/DMG/AppIconAlpha.icns' : 'Resources/DMG/AppIcon.icns'};
     if(!process.env.GITHUB_ENV) throw Error('Configure runs inside a release job');
     for(const [key,value] of Object.entries(values)) writeFileSync(process.env.GITHUB_ENV,`${key}=${value}\n`,{flag:'a'});

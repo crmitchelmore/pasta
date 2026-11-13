@@ -9,11 +9,36 @@ require 'digest'
 require 'open3'
 
 module AppleRelease
-  BETA_APP_DESCRIPTION = 'Pasta is a privacy-first clipboard history manager. Test clipboard history, search, sync, and experimental features in this public Alpha.'
+  BETA_APP_DESCRIPTION = 'Pasta is a privacy-first clipboard history manager. TestFlight builds are Pasta Alpha: pre-release builds for trying clipboard history, search, sync and experimental features before they reach the App Store.'
   BETA_BUILD_LOCALE = 'en-US'
   BETA_FEEDBACK_EMAIL = 'support@pasta-app.com'
   BETA_MARKETING_URL = 'https://pasta-app.com'
   BETA_PRIVACY_POLICY_URL = 'https://github.com/crmitchelmore/pasta/blob/main/SECURITY.md'
+  # TestFlight groups on the main Pasta app record. Alpha builds go to the
+  # external (public link) group after Beta App Review; the optional internal
+  # group receives them as soon as Apple has processed the build.
+  ALPHA_EXTERNAL_GROUP = 'Public Alpha'
+  ALPHA_INTERNAL_GROUP = 'Internal Alpha'
+  WHATS_NEW_LIMIT = 4000
+
+  # App Review Guideline 4.3(a): iOS Alpha is a TestFlight build of the one
+  # Pasta app, never a second App Store Connect record with its own bundle ID.
+  def self.app_record(pipeline, train, surface)
+    apps = pipeline.fetch('apple')
+    app = apps.fetch(train).fetch(surface, nil)
+    raise "#{train} App Store Connect record not configured for #{surface}" unless app
+    if surface == 'ios' && app != apps.fetch('stable').fetch('ios')
+      raise 'iOS Alpha must upload to the main Pasta App Store Connect record (Guideline 4.3(a))'
+    end
+    app
+  end
+
+  def self.alpha_whats_new(manifest, item)
+    header = "Pasta Alpha build #{item.fetch('build')} (#{manifest.fetch('tag')}). Pre-release: not the App Store version.\n\n"
+    notes = item.fetch('storeNotes')
+    return header + notes if header.length + notes.length <= WHATS_NEW_LIMIT
+    header + notes[0, WHATS_NEW_LIMIT - header.length]
+  end
 
   class Client < AppleAPI::Client
     def initialize
@@ -57,9 +82,8 @@ module AppleRelease
       raise 'Store notes changed after approval' unless Digest::SHA256.hexdigest(@item.fetch('storeNotes')) == @item.fetch('storeNotesHash')
       @train = manifest.fetch('train')
       @pipeline = JSON.parse(File.read('Config/ReleasePipeline.json'))
-      @app = @pipeline.fetch('apple').fetch(@train).fetch(surface)
+      @app = AppleRelease.app_record(@pipeline, @train, surface)
       @stable_app = @pipeline.fetch('apple').fetch('stable').fetch(surface)
-      raise "Alpha App Store Connect record not configured for #{surface}" unless @app
       config = JSON.parse(File.read('Sources/PastaCore/Resources/ReleaseTrains.json')).fetch(@train)
       @bundle = config.fetch(surface == 'ios' ? 'iosBundleIdentifier' : 'storeMacBundleIdentifier')
       app_attributes = client.get("/v1/apps/#{@app}").dig('data', 'attributes') || {}
@@ -131,7 +155,7 @@ module AppleRelease
       ensure_beta_app_description
       ensure_beta_review_detail
       locales = @client.list("/v1/builds/#{id}/betaBuildLocalizations")
-      attrs = {whatsNew: @item.fetch('storeNotes')}
+      attrs = {whatsNew: AppleRelease.alpha_whats_new(@manifest, @item)}
       @beta_locales.each do |code|
         locale = locales.find { |l| l.dig('attributes', 'locale') == code }
         if locale
@@ -141,8 +165,9 @@ module AppleRelease
         end
       end
       groups = @client.list("/v1/apps/#{@app}/betaGroups?limit=200")
-      targets = groups.select { |g| g.dig('attributes', 'name') == 'Public Alpha' && !g.dig('attributes', 'isInternalGroup') }
-      raise 'Expected tester group is missing; do not move existing testers' if targets.empty?
+      targets = groups.select { |g| g.dig('attributes', 'name') == ALPHA_EXTERNAL_GROUP && !g.dig('attributes', 'isInternalGroup') }
+      raise "Expected TestFlight group '#{ALPHA_EXTERNAL_GROUP}' is missing; do not move existing testers" if targets.empty?
+      internal = assign_internal(groups, id)
       detail = @client.get("/v1/builds/#{id}/buildBetaDetail").fetch('data')
       state = detail.dig('attributes', 'externalBuildState')
       if @train == 'alpha' && %w[BETA_REJECTED INVALID_BINARY].include?(state)
@@ -169,19 +194,36 @@ module AppleRelease
         receipt('beta_review_pending', found, betaState: state)
         return
       end
-      targets.each do |group|
-        assigned = @client.list("/v1/betaGroups/#{group['id']}/builds?limit=200")
-        unless assigned.any? { |b| b['id'] == id }
-          @client.post("/v1/betaGroups/#{group['id']}/relationships/builds", data: [{type: 'builds', id: id}])
-        end
-        verified = @client.list("/v1/betaGroups/#{group['id']}/builds?limit=200")
-        raise 'Tester assignment was not observed' unless verified.any? { |b| b['id'] == id }
-      end
+      targets.each { |group| assign_group(group, id) }
       detail = @client.get("/v1/builds/#{id}/buildBetaDetail").fetch('data')
       state = detail.dig('attributes', 'externalBuildState')
       ready = %w[IN_BETA_TESTING READY_FOR_BETA_TESTING].include?(state)
       receipt(ready ? 'verified' : 'beta_processing', found, betaState: state,
-        groups: targets.map { |g| g['id'] }, publicLinks: targets.map { |g| g.dig('attributes', 'publicLink') }.compact, expirationDate: found.dig('attributes', 'expirationDate'))
+        groups: (internal + targets).map { |g| g['id'] }, publicLinks: targets.map { |g| g.dig('attributes', 'publicLink') }.compact, expirationDate: found.dig('attributes', 'expirationDate'))
+    end
+
+    # Internal testers need no Beta App Review, so they get every Alpha as soon
+    # as it is VALID. Groups with automatic distribution already receive it.
+    def assign_internal(groups, id)
+      internal = groups.select { |g| g.dig('attributes', 'name') == ALPHA_INTERNAL_GROUP && g.dig('attributes', 'isInternalGroup') }
+      if internal.empty?
+        puts "::warning::No internal TestFlight group '#{ALPHA_INTERNAL_GROUP}'; Alpha reaches testers only through '#{ALPHA_EXTERNAL_GROUP}'"
+        return []
+      end
+      internal.each do |group|
+        next if group.dig('attributes', 'hasAccessToAllBuilds')
+        assign_group(group, id)
+      end
+      internal
+    end
+
+    def assign_group(group, id)
+      assigned = @client.list("/v1/betaGroups/#{group['id']}/builds?limit=200")
+      unless assigned.any? { |b| b['id'] == id }
+        @client.post("/v1/betaGroups/#{group['id']}/relationships/builds", data: [{type: 'builds', id: id}])
+      end
+      verified = @client.list("/v1/betaGroups/#{group['id']}/builds?limit=200")
+      raise 'Tester assignment was not observed' unless verified.any? { |b| b['id'] == id }
     end
 
     def ensure_beta_app_description
@@ -209,14 +251,17 @@ module AppleRelease
 
     # Apple rejects external beta submission without review contact details.
     # Reuse contact metadata already held in App Store Connect (never stored in
-    # the repository): Alpha's own beta detail, then Stable's beta detail, then
-    # Stable's App Store review detail, which is where it lives after a normal
-    # App Store submission. Pasta has no sign-in, so demo credentials are refused.
+    # the repository): the app's own beta detail, then (for a separate Stable
+    # record) Stable's beta detail, then Stable's App Store review detail, which
+    # is where it lives after a normal App Store submission. Pasta has no
+    # sign-in, so demo credentials are refused.
     def ensure_beta_review_detail
       target = @client.get("/v1/apps/#{@app}/betaAppReviewDetail").fetch('data')
-      candidates = [['Alpha Beta App Review Information', -> { target.fetch('attributes') }],
-        ['Stable Beta App Review Information', -> { @client.get("/v1/apps/#{@stable_app}/betaAppReviewDetail").dig('data', 'attributes') }],
-        ['Stable App Store Review Information', -> { stable_app_store_review_attributes }]]
+      candidates = [['Beta App Review Information', -> { target.fetch('attributes') }]]
+      unless @stable_app == @app
+        candidates << ['Stable Beta App Review Information', -> { @client.get("/v1/apps/#{@stable_app}/betaAppReviewDetail").dig('data', 'attributes') }]
+      end
+      candidates << ['Stable App Store Review Information', -> { stable_app_store_review_attributes }]
       missing_by_source = []
       candidates.each do |label, fetch|
         attributes = fetch.call || {}
@@ -235,7 +280,7 @@ module AppleRelease
           data: {type: 'betaAppReviewDetails', id: target.fetch('id'), attributes: update})
         return
       end
-      raise "Beta App Review contact information is incomplete (#{missing_by_source.join('; ')}). Fill in App Store Connect → TestFlight → Test Information for the Alpha app."
+      raise "Beta App Review contact information is incomplete (#{missing_by_source.join('; ')}). Fill in App Store Connect → TestFlight → Test Information for the Pasta app."
     end
 
     def stable_app_store_review_attributes

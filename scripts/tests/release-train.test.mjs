@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {digest, validateManifest, nextAllocation, effectiveCommits, notesFor, canAdvance, newestReconcileSource, receiptDelivered, receiptNeedsRebuild, stableGateSurfaces, alphaPublicationPending} from '../release-train-lib.mjs';
+import {digest, validateManifest, nextAllocation, effectiveCommits, notesFor, canAdvance, newestReconcileSource, receiptDelivered, receiptNeedsRebuild, stableGateSurfaces, alphaPublicationPending, alphaIOSVersion} from '../release-train-lib.mjs';
 const source='a'.repeat(40), prior='b'.repeat(40);
 test('manifest rejects changed frozen notes and moving source refs',()=>{
  const entry={version:'3.2.0',build:'1001',baseline:prior,notes:'Frozen',notesHash:digest('Frozen'),storeNotes:'Short',storeNotesHash:digest('Short')};
@@ -15,6 +15,26 @@ test('allocation advances despite same minute retries and never uses Alpha ordin
  assert.equal(next.ordinal,43);assert.equal(next.build,'202609091401');
  assert.equal(nextAllocation([old],'stable').ordinal,1);
  assert.equal(canAdvance(old,{build:'202609091359'}),false);
+});
+test('Alpha and Stable iOS builds share one increasing counter on the one App Store Connect record',()=>{
+ const at=Date.parse('2026-11-13T12:00:00Z');
+ const ledger=[
+  {train:'stable',ordinal:2,build:'202611010000',surfaces:{ios:{build:'1002'}}},
+  {train:'alpha',ordinal:41,build:'202611120000',surfaces:{ios:{build:'1041'}}},
+ ];
+ const stable=nextAllocation(ledger,'stable',at);
+ assert.equal(stable.ordinal,3);assert.equal(stable.iosBuild,'1042');
+ // The direct-Mac build still follows only its own train.
+ assert.equal(stable.build,'202611131200');
+ ledger.push({train:'stable',ordinal:3,build:stable.build,surfaces:{ios:{build:stable.iosBuild}}});
+ const alpha=nextAllocation(ledger,'alpha',at);
+ assert.equal(alpha.ordinal,42);assert.equal(alpha.iosBuild,'1043');
+ assert.equal(nextAllocation([],'alpha',at).iosBuild,'1001');
+});
+test('iOS Alpha versions stay above every Stable candidate on the shared record',()=>{
+ assert.equal(alphaIOSVersion('1.9.0',['1.9.0','1.10.0']),'1.10.1');
+ assert.equal(alphaIOSVersion('1.9.0',[]),'1.9.0');
+ assert.equal(alphaIOSVersion('2.0.0',['1.10.0']),'2.0.0');
 });
 test('cumulative notes remove paired reverts, preserve reverts of published behaviour and platform scope',()=>{
  const added={sha:source,subject:'feat(mac): transient feature',body:''};

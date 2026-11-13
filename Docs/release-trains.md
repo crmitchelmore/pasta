@@ -1,8 +1,16 @@
 # Alpha and Stable releases
 
-Pasta Alpha installs alongside Pasta with separate bundle IDs, preferences, history,
-CloudKit container and Tailnet pairing credentials/port. It has no global shortcut
-until one is explicitly chosen. Stable retains its existing identity and data.
+Pasta Alpha for Mac installs alongside Pasta with a separate bundle ID, preferences,
+history, CloudKit container and Tailnet pairing credentials/port. It has no global
+shortcut until one is explicitly chosen. Stable retains its existing identity and data.
+
+On iOS there is one app: Pasta (`com.pasta.ios`, one App Store Connect record).
+Alpha builds are TestFlight builds of that app, distributed only to its TestFlight
+beta groups, so App Review never sees a second bundle ID for the same app
+(Guideline 4.3(a)). An iOS Alpha replaces the App Store install, shares its data
+and syncs through the Production `iCloud.com.pasta.ios` container. The older
+"Pasta Alpha" record (`com.pasta.ios.alpha`) is no longer used; automation never
+deletes or modifies it.
 
 The supported distribution surfaces are the existing direct macOS/Sparkle app and
 iOS TestFlight/App Store app. This does not add a macOS App Store target.
@@ -29,9 +37,21 @@ Reconciliation only retries the newest successful main source and only submits
 the newest Alpha for TestFlight beta review; superseded sources are never
 rebuilt with current workflows. An iOS receipt still processing or awaiting
 beta review counts as delivered: the hourly Apple reconciler advances it, so the
-Alpha workflow is not redispatched while Apple reviews. Before submission the Alpha app's Beta App
-Review contact is filled from App Store Connect (Alpha's own Test Information,
-else Stable's beta or App Store review contact); no contact data is committed.
+Alpha workflow is not redispatched while Apple reviews. Before submission the Pasta app's Beta App
+Review contact is filled from App Store Connect (its Test Information, else its App
+Store review contact); no contact data is committed.
+
+TestFlight groups on the Pasta app (names are fixed in `scripts/release-apple.rb`):
+
+- **Internal Alpha** (internal testers): each Alpha is added as soon as it is
+  `VALID`. Keep automatic distribution off, otherwise Stable candidates would
+  reach it too.
+- **Public Alpha** (external, public link): each newest Alpha is submitted for
+  Beta App Review and added once approved.
+
+What to Test for every Alpha starts with "Pasta Alpha build N (tag).
+Pre-release: not the App Store version." Alpha builds are never submitted for
+App Store review.
 
 Alpha is a GitHub prerelease, never GitHub Latest. Only the README advertises
 `/alpha/download` and the Public Alpha TestFlight group. The Alpha Sparkle feed
@@ -50,7 +70,7 @@ the existing Sparkle feed and App Store remain Stable.
 3. Candidate workers rebuild that source using Stable identities and stage signed,
    verified assets and processed App Store candidates. The Mac candidate builds
    first; the iOS candidate follows and its receipt is not required to publish. Stable builds are never
-   assigned to TestFlight groups; Alpha alone uses its Public Alpha group.
+   assigned to TestFlight groups; only Alpha builds go to Internal Alpha and Public Alpha.
    Validate Stable archives and runtime separately before owner approval.
 4. Run **Publish Stable** with the candidate tag and the exact reviewed manifest
    SHA-256. Only the repository owner may approve. Changed notes/assets or a newer
@@ -74,10 +94,18 @@ No Stable candidate is approved merely by merging this implementation.
 
 ## Signing and CloudKit
 
-Stable signing secrets remain unchanged. Alpha uses `ALPHA_IOS_APPSTORE_PROFILE`
-and `ALPHA_MACOS_PROVISIONING_PROFILE` with existing distribution certificates.
+Stable signing secrets remain unchanged. iOS Alpha signs with the Stable
+`IOS_APPSTORE_PROFILE`; Mac Alpha uses `ALPHA_MACOS_PROVISIONING_PROFILE`, both with
+existing distribution certificates. `ALPHA_IOS_APPSTORE_PROFILE` is no longer read.
 Archive validation requires the exact train bundle, source, version/build, notes
-hash, Sparkle feed and isolated Production CloudKit container.
+hash, Sparkle feed and per-surface Production CloudKit container.
+
+Alpha and Stable iOS builds share one record, so the allocator reads both
+trains' tags: iOS `CFBundleVersion` is one counter, above every earlier iOS build
+of either train. An iOS Alpha's marketing version is the configured
+`versions.ios` or, when higher, a patch above the newest Stable candidate
+(Stable 1.10.0 gives Alpha 1.10.1), because Apple refuses builds for a released
+version. The direct-Mac build and both trains' ordinals stay per train.
 
 ### Direct macOS package size
 
@@ -120,8 +148,10 @@ notarisation, Sparkle signatures and pre-/post-publication verification remain
 unchanged. Optimisations happen before signing; never modify a signed bundle or
 recompress an already Sparkle-signed update.
 
-Pasta Alpha iOS: `com.pasta.ios.alpha`; direct Mac: `com.pasta.clipboard.alpha`.
-Both use `iCloud.com.pasta.ios.alpha`. On 9 September 2026 its Production schema
+Pasta Alpha iOS: `com.pasta.ios` with `iCloud.com.pasta.ios` (the Stable app).
+Direct Mac Alpha: `com.pasta.clipboard.alpha` with `iCloud.com.pasta.ios.alpha`, so
+iOS Alpha syncs with Stable Mac, not Mac Alpha. On 9 September 2026 the Alpha
+container's Production schema
 was deployed and matched the Stable Production schema byte-for-byte (SHA-256
 `b4e159c6e3fbbc89d96827af78d49b064508c80fc5182179fe176aff49ef3a88`).
 Only schema definitions were copied. No Stable user data was migrated.
