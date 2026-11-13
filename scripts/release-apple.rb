@@ -44,7 +44,11 @@ module AppleRelease
     def initialize
       @key_id = ENV.fetch('APP_STORE_CONNECT_KEY_ID', 'B3BM4F88FJ')
       @issuer = ENV.fetch('APP_STORE_CONNECT_ISSUER_ID')
-      @key = OpenSSL::PKey.read(File.read(ENV.fetch('APP_STORE_CONNECT_KEY_PATH', File.expand_path("~/.appstoreconnect/private_keys/AuthKey_#{@key_id}.p8"))))
+      # release-ios.yml installs the key at ASC_KEY_PATH; the home-directory
+      # fallback only exists on the self-hosted runner.
+      key_path = [ENV['APP_STORE_CONNECT_KEY_PATH'], ENV['ASC_KEY_PATH']].find { |p| p && !p.empty? } ||
+                 File.expand_path("~/.appstoreconnect/private_keys/AuthKey_#{@key_id}.p8")
+      @key = OpenSSL::PKey.read(File.read(key_path))
     end
 
     def request(method:, path:, body: nil)
