@@ -380,18 +380,54 @@ module AppleRelease
           puts "::warning::#{@surface}: Apple does not accept What's New for #{@item['version']} (first App Store version); submitting without it"
         end
       end
-      submissions=@client.list("/v1/apps/#{@app}/reviewSubmissions?limit=200")
-      review=submissions.find { |r| r.dig('attributes','platform') == platform && r.dig('attributes','state') == 'READY_FOR_REVIEW' }
-      review ||= @client.post('/v1/reviewSubmissions',data:{type:'reviewSubmissions',attributes:{platform:platform},relationships:{app:AppleRelease.relationship('apps',@app)}})['data']
-      items=@client.list("/v1/reviewSubmissions/#{review['id']}/items")
-      raise 'Existing review contains another submission item' if items.any? { |i| i.dig('relationships','appStoreVersion','data','id') != id }
-      if items.empty?
-        @client.post('/v1/reviewSubmissionItems',data:{type:'reviewSubmissionItems',relationships:{reviewSubmission:AppleRelease.relationship('reviewSubmissions',review['id']),appStoreVersion:AppleRelease.relationship('appStoreVersions',id)}})
-      end
+      review=review_submission_for(id, platform)
+      return unless review
       @client.patch("/v1/reviewSubmissions/#{review['id']}",data:{type:'reviewSubmissions',id:review['id'],attributes:{submitted:true}})
       observed=@client.get("/v1/reviewSubmissions/#{review['id']}").dig('data','attributes','state')
       raise "Review submission not observed: #{observed}" unless %w[WAITING_FOR_REVIEW IN_REVIEW COMPLETE].include?(observed)
       puts "#{@surface}: #{observed}; releaseType AFTER_APPROVAL; public availability remains pending"
+    end
+
+    OTHER_SUBMISSION = /already added to another reviewSubmission with id ([0-9a-f-]{36})/
+
+    # Returns a READY_FOR_REVIEW submission holding only this version, or nil
+    # when Apple already holds the version in a submission that must not be
+    # submitted again (in review, complete, or needing a human).
+    def review_submission_for(version_id, platform)
+      submissions=@client.list("/v1/apps/#{@app}/reviewSubmissions?limit=200")
+      review=submissions.find { |r| r.dig('attributes','platform') == platform && r.dig('attributes','state') == 'READY_FOR_REVIEW' }
+      review ||= @client.post('/v1/reviewSubmissions',data:{type:'reviewSubmissions',attributes:{platform:platform},relationships:{app:AppleRelease.relationship('apps',@app)}})['data']
+      items=@client.list("/v1/reviewSubmissions/#{review['id']}/items")
+      raise 'Existing review contains another submission item' if items.any? { |i| i.dig('relationships','appStoreVersion','data','id') != version_id }
+      return review unless items.empty?
+      begin
+        @client.post('/v1/reviewSubmissionItems',data:{type:'reviewSubmissionItems',relationships:{reviewSubmission:AppleRelease.relationship('reviewSubmissions',review['id']),appStoreVersion:AppleRelease.relationship('appStoreVersions',version_id)}})
+        review
+      rescue AppleAPI::ConflictError => e
+        # An earlier run (or the portal) already attached this version to a
+        # different submission. Adopt that one instead of failing every hour.
+        holder=e.message[OTHER_SUBMISSION, 1]
+        raise unless holder
+        adopt_review_submission(holder, version_id)
+      end
+    end
+
+    def adopt_review_submission(review_id, version_id)
+      review=@client.get("/v1/reviewSubmissions/#{review_id}")['data'] || {}
+      state=review.dig('attributes','state')
+      case state
+      when 'READY_FOR_REVIEW'
+        items=@client.list("/v1/reviewSubmissions/#{review_id}/items")
+        raise "Review submission #{review_id} contains another submission item" if items.any? { |i| i.dig('relationships','appStoreVersion','data','id') != version_id }
+        puts "#{@surface}: reusing existing review submission #{review_id}"
+        review.merge('id'=>review_id)
+      when 'WAITING_FOR_REVIEW', 'IN_REVIEW', 'COMPLETE'
+        puts "#{@surface}: Stable #{@item['version']} already in review submission #{review_id} (#{state})"
+        nil
+      else
+        puts "::warning::#{@surface} Stable #{@item['version']} is held by review submission #{review_id} in state #{state || 'unknown'}; resolve it in App Store Connect"
+        nil
+      end
     end
   end
 end
