@@ -62,7 +62,7 @@ struct OnboardingView: View {
             Color.clear.frame(height: 24)
 
             if !isReplay {
-                Text("Enable iCloud sync to upload your existing and future clipboard history to your private iCloud account and receive history from your Mac. Sync is off by default.")
+                Text("Enable iCloud sync to upload your existing and future clipboard history to your private iCloud account and receive history from your Mac. Detected secrets stay on this device. Sync is off by default.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 24)

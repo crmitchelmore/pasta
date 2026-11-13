@@ -74,6 +74,12 @@ struct EntryDetailView: View {
                 if entry.copyCount > 1 {
                     LabeledContent("Copied", value: "\(entry.copyCount) times")
                 }
+                if !entry.allowsCloudUpload {
+                    Label("Detected secret. Kept on this device and not uploaded to iCloud.", systemImage: "lock.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("detail.localOnly")
+                }
 
                 Divider()
 

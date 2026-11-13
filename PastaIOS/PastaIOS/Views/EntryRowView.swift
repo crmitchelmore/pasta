@@ -29,6 +29,14 @@ struct EntryRowView: View {
                         .foregroundStyle(entry.contentType.tintColor)
                         .clipShape(Capsule())
 
+                    if !entry.allowsCloudUpload {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Kept on this device")
+                            .accessibilityIdentifier("history.row.localOnly")
+                    }
+
                     if let sourceApp = entry.sourceApp {
                         Text(sourceApp.components(separatedBy: ".").last ?? sourceApp)
                             .font(.caption2)

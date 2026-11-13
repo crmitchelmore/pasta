@@ -14,6 +14,7 @@ final class AppState: ObservableObject {
     private enum Defaults {
         static let iCloudSyncConsent = "pasta.ios.iCloudSyncConsent.v1"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
+        static let syncDetectedSecrets = "pasta.ios.syncDetectedSecrets.v1"
     }
 
     @Published var entries: [ClipboardEntry] = []
@@ -22,6 +23,8 @@ final class AppState: ObservableObject {
     @Published var isShowingOnboarding = false
     @Published var isShowingWhatsNew = false
     @Published private(set) var isICloudSyncEnabled: Bool
+    /// Off by default: detected secrets copied here stay on this device.
+    @Published private(set) var syncsDetectedSecrets: Bool
     @Published var iCloudStatus: SyncAccountRecovery.Availability = .disabled
     @Published private(set) var isCheckingSync = false
     @Published private(set) var syncErrorMessage: String?
@@ -53,6 +56,7 @@ final class AppState: ObservableObject {
         self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: Defaults.hasCompletedOnboarding)
         // Existing onboarding and old sync timestamps are not consent.
         self.isICloudSyncEnabled = UserDefaults.standard.bool(forKey: Defaults.iCloudSyncConsent)
+        self.syncsDetectedSecrets = UserDefaults.standard.bool(forKey: Defaults.syncDetectedSecrets)
     }
 
     func initialise(syncManager: SyncManager) async {
@@ -102,6 +106,12 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Applies to items copied after the change; existing entries keep their policy.
+    func setSyncsDetectedSecrets(_ enabled: Bool) {
+        syncsDetectedSecrets = enabled
+        UserDefaults.standard.set(enabled, forKey: Defaults.syncDetectedSecrets)
+    }
+
     func captureCurrentClipboardIfNeeded(syncManager: SyncManager) async {
         #if canImport(UIKit)
         guard !isClipboardCaptureInProgress else { return }
@@ -132,8 +142,12 @@ final class AppState: ObservableObject {
                 return
             }
 
+            let syncSecrets = syncsDetectedSecrets
             let entry = await Task.detached(priority: .userInitiated) {
-                CapturedTextClassifier.entry(content: clipboardString, sourceApp: "iOS Pasteboard")
+                CloudSyncPolicy.applying(
+                    to: CapturedTextClassifier.entry(content: clipboardString, sourceApp: "iOS Pasteboard"),
+                    syncSensitiveContent: syncSecrets
+                )
             }.value
             try database.insert(entry, deduplicate: false)
             lastObservedPasteboardChangeCount = changeCount
@@ -144,7 +158,7 @@ final class AppState: ObservableObject {
             entries.insert(entry, at: 0)
             refreshPendingUploadFeedback()
 
-            if isICloudSyncEnabled && iCloudAvailable {
+            if isICloudSyncEnabled && iCloudAvailable && entry.allowsCloudUpload {
                 do {
                     try await syncManager.pushEntry(entry)
                     try database.markSynced(ids: [entry.id])
@@ -166,7 +180,7 @@ final class AppState: ObservableObject {
 
     private func refreshPendingUploadFeedback() {
         if let message = SyncAccountRecovery.captureFeedback(
-            count: entries.filter { !$0.isSynced }.count,
+            count: entries.filter(\.isAwaitingUpload).count,
             syncEnabled: isICloudSyncEnabled,
             availability: iCloudStatus,
             isBusy: isCheckingSync || isResettingSync,
@@ -253,7 +267,7 @@ final class AppState: ObservableObject {
                 try Task.checkCancellation()
                 try await syncManager.pullChanges(into: database)
                 let loaded = try await self.loadEntries()
-                pendingUploadCount = loaded.filter { !$0.isSynced }.count
+                pendingUploadCount = loaded.filter(\.isAwaitingUpload).count
                 try Task.checkCancellation()
                 completedSync = true
             }
@@ -371,4 +385,9 @@ final class AppState: ObservableObject {
         if let build = UITestConfiguration.releaseBuild { return build }
         return Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
     }
+}
+
+private extension ClipboardEntry {
+    /// Local-only entries never upload, so they are not "waiting".
+    var isAwaitingUpload: Bool { !isSynced && allowsCloudUpload }
 }

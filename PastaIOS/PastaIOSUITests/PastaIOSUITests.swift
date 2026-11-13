@@ -284,6 +284,40 @@ final class PastaIOSUITests: PastaUITestCase {
         assertEntryCount("1", "Withdrawing consent must not delete history")
     }
 
+    /// A detected secret copied on the device is stored locally, marked as
+    /// kept on the device, and only later copies follow the opt-in setting.
+    func testDetectedSecretsStayLocalUntilTheUserOptsIn() {
+        let suffix = UUID().uuidString.prefix(8)
+        let secret = "API_KEY=localonly\(suffix)"
+        launchApp(pasteboard: secret)
+        waitForMainUI()
+        openTab("History", expecting: "history.list")
+        let row = app.staticTexts[secret].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: Self.uiTimeout), "Secret was not captured locally")
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "history.row.localOnly").count, 1,
+                       "A detected secret must be marked as kept on this device")
+        row.tap()
+        XCTAssertTrue(element("detail.localOnly").waitForExistence(timeout: Self.uiTimeout),
+                      "Detail must explain the secret is not uploaded")
+
+        openTab("Settings", expecting: "settings.list")
+        let toggle = app.switches["settings.syncDetectedSecrets"].firstMatch
+        revealSettingsRow(toggle, scrollUp: false)
+        XCTAssertEqual(toggle.value as? String, "0", "Secrets must stay local by default")
+        setSyncConsent(true, switch: "settings.syncDetectedSecrets")
+
+        let later = "OTHER_KEY=synced\(suffix)"
+        relaunch(pasteboard: later)
+        openTab("History", expecting: "history.list")
+        XCTAssertTrue(app.staticTexts[later].firstMatch.waitForExistence(timeout: Self.uiTimeout))
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "history.row.localOnly").count, 1,
+                       "Opting in applies only to later copies")
+        openTab("Settings", expecting: "settings.list")
+        revealSettingsRow(toggle, scrollUp: false)
+        XCTAssertEqual(toggle.value as? String, "1", "The opt-in must persist across relaunch")
+        assertConsent(false, "Syncing secrets must not grant iCloud consent")
+    }
+
     // MARK: - Release notes
 
     // Release-note journeys use real persisted defaults and bundled history.
@@ -420,10 +454,15 @@ final class PastaIOSUITests: PastaUITestCase {
 
     /// Tap the native switch, not the text/container SwiftUI also exposes.
     /// Verify the visible state before testing persistence or starting a retry.
-    private func setSyncConsent(_ enabled: Bool, file: StaticString = #filePath, line: UInt = #line) {
-        let control = app.switches["settings.iCloudConsent"].firstMatch
+    private func setSyncConsent(
+        _ enabled: Bool,
+        switch identifier: String = "settings.iCloudConsent",
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let control = app.switches[identifier].firstMatch
         revealSettingsRow(control, scrollUp: false)
-        XCTAssertTrue(control.waitForExistence(timeout: Self.uiTimeout), "Sync consent switch missing", file: file, line: line)
+        XCTAssertTrue(control.waitForExistence(timeout: Self.uiTimeout), "Switch \(identifier) missing", file: file, line: line)
         XCTAssertTrue(control.isHittable, "Sync consent switch is not reachable", file: file, line: line)
         XCTAssertEqual(control.value as? String, enabled ? "0" : "1", "Journey must start in the opposite consent state", file: file, line: line)
         // SwiftUI may give the switch a full-row frame including its label.

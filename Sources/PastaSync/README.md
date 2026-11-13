@@ -2,7 +2,7 @@
 
 CloudKit synchronization and macOS tailnet pairing/transfer for the Pasta clipboard manager.
 
-Tailnet Sync is an independent opt-in transport. See [the agreed specification and operating limits](../../Docs/tailnet-sync.md). Its code is under `Tailnet/` and is excluded on iOS; local policy and durable receipts live in PastaCore. CloudKit upload eligibility is explicit and enforced at both queue and record mapping boundaries. File-path entries are not uploaded to iCloud. Received provenance travels in the existing metadata field so account-bridge forwarding remains opt-in without a new CloudKit schema field.
+Tailnet Sync is an independent opt-in transport. See [the agreed specification and operating limits](../../Docs/tailnet-sync.md). Its code is under `Tailnet/` and is excluded on iOS; local policy and durable receipts live in PastaCore. CloudKit upload eligibility is explicit and enforced at both queue and record mapping boundaries. File-path entries are not uploaded to iCloud. On iOS, captured entries that contain a detected secret or financial value (`CloudSyncPolicy`) are stored with `cloudSyncAllowed = false` unless the user turns on Settings → Sync Detected Secrets. Received provenance travels in the existing metadata field so account-bridge forwarding remains opt-in without a new CloudKit schema field.
 
 ## Overview
 
