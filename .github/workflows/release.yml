@@ -336,9 +336,9 @@ jobs:
         set -euo pipefail
         for dmg in "$DMG_FILE" "$DMG_ARM64" "$DMG_X86_64"; do
           echo "==> Stapling notarization ticket to $dmg"
-          xcrun stapler staple "$dmg"
+          scripts/ci-stapler.sh staple "$dmg"
           echo "==> Verifying stapled ticket"
-          xcrun stapler validate "$dmg"
+          scripts/ci-stapler.sh validate "$dmg"
         done
     - name: Verify signed and notarized DMGs
       env:
@@ -361,7 +361,7 @@ jobs:
           fi
           # Check notarization ticket (stapler validate on the DMG already verified this)
           echo "==> Checking notarization"
-          xcrun stapler validate "$dmg"
+          scripts/ci-stapler.sh validate "$dmg"
         }
         verify_dmg "$DMG_FILE" "x86_64 arm64"
         verify_dmg "$DMG_ARM64" "arm64"

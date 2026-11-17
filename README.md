@@ -31,7 +31,7 @@ Download Pasta from [pasta-app.com](https://pasta-app.com/download), which picks
 
 ### Alpha testing
 
-Alpha installs alongside Stable with separate app data. Use [Pasta Alpha for Mac](https://pasta-app.com/alpha/download) or [Pasta Alpha on TestFlight](https://testflight.apple.com/join/ehBWvANT). Builds become available after commissioning and Apple beta approval. Choose a separate Alpha keyboard shortcut in Settings. Most users should stay on Stable.
+On Mac, Alpha installs alongside Stable with separate app data: use [Pasta Alpha for Mac](https://pasta-app.com/alpha/download) and choose a separate Alpha keyboard shortcut in Settings. On iOS, Alpha builds are TestFlight builds of the Pasta app and replace the App Store version on your device: join the [Pasta Public Alpha on TestFlight](https://testflight.apple.com/join/AnEywxJF). Builds become available after commissioning and Apple beta approval. Most users should stay on Stable.
 
 [Release channels and Stable promotion](Docs/release-trains.md).
 

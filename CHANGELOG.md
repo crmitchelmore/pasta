@@ -5,6 +5,18 @@ All notable changes to Pasta will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **iOS content types** — Text copied on iPhone and iPad now runs through the
+  same detectors as the Mac, so History shows URL, Email, Env, API Key, JWT and
+  the other badges instead of labelling everything as plain text. Detection runs
+  off the main thread after the duplicate check.
+- **iOS secrets stay local** — API keys, JWTs, environment variables, card
+  numbers and IBANs detected on iOS are kept out of iCloud sync by default and
+  marked with a lock in History and detail. Settings → Sync Detected Secrets
+  opts in for items copied afterwards.
+- **iOS Shortcuts actions** — Save to Pasta (classifies the text and applies the
+  secrets policy), Copy Latest Clip (optionally of one type, such as a link or
+  code) and Search Pasta. They run without opening the app and are offered as
+  App Shortcuts with spoken phrases.
 - **Opt-in product analytics** — A new "Share anonymous usage analytics" toggle
   under Settings → General → Diagnostics, **off by default** and applied
   immediately (no restart). When on, Pasta posts a single JSON body to PostHog's

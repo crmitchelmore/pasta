@@ -39,7 +39,9 @@ Nothing else is needed. The workflow never reads Apple ID passwords.
 ## How a release happens
 
 See [Alpha and Stable release trains](../Docs/release-trains.md) for the current
-workflow. Every successful main merge is eligible for a separate Alpha app;
+workflow. Every successful main merge is eligible for an Alpha TestFlight build of
+this app (`com.pasta.ios`), distributed only to its Internal Alpha and Public Alpha
+beta groups; there is no separate Alpha app record (Guideline 4.3(a)).
 Stable requires an explicitly approved candidate with cumulative release notes.
 The reusable iOS worker retains native XCUITest preflight, archive identity and
 Production CloudKit verification, exact-source CI and App Store processing checks.
@@ -49,8 +51,10 @@ Existing Apple builds are reused on retries. Upload is not public availability.
 ## Build numbers
 
 The immutable train manifest owns version/build values. Each train allocates an
-increasing ordinal; iOS uses `1000 + ordinal` and direct Mac preserves its existing
-timestamp ordering. Never upload outside this allocator without first reserving a
+increasing ordinal. Alpha and Stable upload to the same record, so iOS uses one
+counter across both trains (at least `1000 + ordinal` and above every earlier iOS
+build); direct Mac preserves its existing timestamp ordering. iOS Alpha uses a
+marketing version a patch above the newest Stable candidate. Never upload outside this allocator without first reserving a
 higher build. Failed/invalid uploads require a new attempt, not a reused number.
 `manageAppVersionAndBuildNumber` remains false so Xcode cannot rewrite the manifest.
 

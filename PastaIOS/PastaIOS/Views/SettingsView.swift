@@ -42,10 +42,20 @@ struct SettingsView: View {
                 set: { appState.setICloudSyncEnabled($0, syncManager: syncManager) }
             ))
             .accessibilityIdentifier("settings.iCloudConsent")
-            Text("Uploads existing and future clipboard history to your private iCloud account and downloads history from your Mac. Turning sync off stops transfers; local history and uploaded iCloud data are kept.")
+            Text("Uploads existing and future clipboard history, except detected secrets, to your private iCloud account and downloads history from your Mac. Turning sync off stops transfers; local history and uploaded iCloud data are kept.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("settings.iCloudConsentExplanation")
+
+            Toggle("Sync Detected Secrets", isOn: Binding(
+                get: { appState.syncsDetectedSecrets },
+                set: { appState.setSyncsDetectedSecrets($0) }
+            ))
+            .accessibilityIdentifier("settings.syncDetectedSecrets")
+            Text("Off by default. API keys, tokens, JWTs, environment variables, card numbers and IBANs you copy on this device stay here and are never uploaded to iCloud. Changes apply to items you copy afterwards.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("settings.syncDetectedSecretsExplanation")
 
             HStack {
                 Label("iCloud Status", systemImage: "icloud")
