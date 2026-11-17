@@ -154,6 +154,15 @@ final class PastaIOSUITests: PastaUITestCase {
         XCTAssertTrue(app.staticTexts["URL"].firstMatch.exists, "Captured URL must be labelled URL, not Text")
         openTab("Settings", expecting: "settings.list")
         XCTAssertEqual(element("settings.entryCount").label, "2", "Relaunch must retain the first entry and capture the replacement once")
+        openTab("History", expecting: "history.list")
+        let urlRow = app.staticTexts[replacementURL].firstMatch
+        urlRow.swipeLeft()
+        let delete = app.buttons["Delete"].firstMatch
+        XCTAssertTrue(delete.waitForExistence(timeout: Self.uiTimeout), "Swiping a History row must offer Delete")
+        delete.tap()
+        XCTAssertTrue(waitForDisappearance(of: urlRow), "Deleted entry is still listed")
+        openTab("Settings", expecting: "settings.list")
+        XCTAssertEqual(element("settings.entryCount").label, "1", "Delete must remove exactly one stored entry")
         openTab("Search", expecting: "search.list")
         search(for: token)
         let match = app.staticTexts[content]

@@ -7,7 +7,8 @@ struct EntryRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: entry.contentType.iconName)
-                .font(.system(size: 14, weight: .medium))
+                .font(.subheadline.weight(.medium))
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .foregroundStyle(entry.contentType.tintColor)
                 .frame(width: 28, height: 28)
                 .background(entry.contentType.tintColor.opacity(0.12))

@@ -82,7 +82,8 @@ the existing Sparkle feed and App Store remain Stable.
    Apple reconciler for the newest owner-approved candidate. It submits only once
    the owner approval is recorded, the matching direct release is public and the
    Stable build is `VALID`, using `AFTER_APPROVAL`. Apple rejections are reported
-   as warnings and never resubmitted automatically. Processing, submission and
+   as warnings and never resubmitted automatically, including a rejected build
+   that Apple returns to Prepare for Submission. Processing, submission and
    public availability have separate receipts; reconciliation advances Apple's
    notes boundary only after observed public availability. Alpha can continue
    while Apple reviews Stable. If an earlier Stable version still occupies
