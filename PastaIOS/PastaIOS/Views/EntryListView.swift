@@ -61,6 +61,13 @@ struct EntryListView: View {
                                 EntryRowView(entry: entry)
                             }
                             .accessibilityIdentifier("history.row")
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    Task { await appState.deleteEntries(ids: [entry.id]) }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                         }
                     }
                 }
@@ -122,7 +129,7 @@ struct EntryListView: View {
         Section {
             VStack(spacing: 12) {
                 Image(systemName: "clipboard")
-                    .font(.system(size: 48))
+                    .font(.largeTitle)
                     .foregroundStyle(.tertiary)
                 Text("No entries yet")
                     .font(.headline)

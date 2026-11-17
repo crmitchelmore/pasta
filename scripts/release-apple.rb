@@ -374,6 +374,10 @@ module AppleRelease
         return false
       end
       return pending("App Store version is #{app_state}") if app_state && !SUBMITTABLE_STATES.include?(app_state)
+      if version && already_reviewed?(version.fetch('id'), found.fetch('id'), platform)
+        puts "::warning::#{@surface} Stable #{@item['version']} build #{@item['build']} was already reviewed by Apple; reply and resubmit in App Store Connect, or approve a newer candidate"
+        return false
+      end
       unless version
         occupied = versions.find do |v|
           state = v.dig('attributes','appStoreState')
@@ -385,6 +389,20 @@ module AppleRelease
       end
       submit
       true
+    end
+
+    REVIEWED_SUBMISSION_STATES = %w[UNRESOLVED_ISSUES COMPLETE].freeze
+
+    # Apple can return a rejected version to PREPARE_FOR_SUBMISSION. If the
+    # same binary is still attached and a finished review held that version,
+    # submitting again would resend the rejected build without a reply.
+    def already_reviewed?(version_id, build_id, platform)
+      return false unless @client.get("/v1/appStoreVersions/#{version_id}/build").dig('data','id') == build_id
+      @client.list("/v1/apps/#{@app}/reviewSubmissions?limit=200").any? do |review|
+        review.dig('attributes','platform') == platform &&
+          REVIEWED_SUBMISSION_STATES.include?(review.dig('attributes','state')) &&
+          @client.list("/v1/reviewSubmissions/#{review['id']}/items").any? { |item| item.dig('relationships','appStoreVersion','data','id') == version_id }
+      end
     end
 
     def pending(reason)
