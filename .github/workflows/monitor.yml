@@ -48,17 +48,21 @@ jobs:
 
       - name: Probe the live site, appcast and download
         working-directory: landing-page
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: npm run test:live
 
       - name: Summarise
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           {
             echo "## Production monitor — $(date -u +'%Y-%m-%d %H:%MZ')"
             echo
             echo "- Result: **${{ job.status }}**"
             echo "- Live appcast top item: $(curl -fsSL https://pasta-app.com/appcast.xml | grep -oE '<title>Version [0-9.]+</title>' | head -1 | sed -E 's/<[^>]+>//g')"
-            echo "- Newest published release: $(curl -fsSL -H 'accept: application/vnd.github+json' https://api.github.com/repos/${{ github.repository }}/releases/latest | grep -oE '"tag_name": *"[^"]+"' | head -1 | cut -d'"' -f4)"
+            echo "- Newest published release: $(gh api repos/${{ github.repository }}/releases/latest --jq .tag_name)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Route the monitor outcome to its owner

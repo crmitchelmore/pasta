@@ -240,6 +240,8 @@ jobs:
 
       - name: Probe https://pasta-app.com
         working-directory: landing-page
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: npm run test:live
 
   # ============================================================================

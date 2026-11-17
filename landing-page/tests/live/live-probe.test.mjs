@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DMG_URL, compareSemver, latestGitTagVersion, parseAppcast } from '../support/appcast.mjs';
+import { fetchLatestPublishedReleaseVersion } from '../support/github-release.mjs';
 
 const ORIGIN = process.env.LANDING_LIVE_ORIGIN ?? 'https://pasta-app.com';
 const TIMEOUT_MS = 20_000;
@@ -74,14 +75,7 @@ test('live: appcast top version equals the newest PUBLISHED GitHub release', asy
   // not the newest tag: a tag whose release failed before publication must not
   // make the live feed look stale (issue #113). GitHub's releases/latest
   // endpoint is exactly that definition.
-  const api = await fetch('https://api.github.com/repos/crmitchelmore/pasta/releases/latest', {
-    headers: { 'user-agent': UA, accept: 'application/vnd.github+json' },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
-  assert.equal(api.status, 200, 'Cannot verify published release: GitHub releases/latest unavailable');
-  const body = await api.json();
-  const published = String(body.tag_name ?? '').replace(/^v/, '');
-  assert.match(published, /^\d+\.\d+\.\d+$/, 'Invalid published release version');
+  const published = await fetchLatestPublishedReleaseVersion();
   const latestTag = latestGitTagVersion();
 
   const response = await probe(`${ORIGIN}/appcast.xml`, { method: 'GET' });
