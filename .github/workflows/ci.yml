@@ -366,6 +366,12 @@ jobs:
             fi
           done
           echo "✓ No restricted entitlements found"
+          # Release-signed code is all team-signed; only the ad-hoc CI bundle
+          # below needs library validation off (see issue #212).
+          if grep -q "<key>com.apple.security.cs.disable-library-validation</key>" "Resources/release.entitlements"; then
+            echo "ERROR: release.entitlements disables library validation."
+            exit 1
+          fi
       
       - name: Sign test bundle (mirrors release signing)
         if: env.FULL == 'true'
@@ -387,6 +393,10 @@ jobs:
               ents = plistlib.load(f)
           safe = {k: v for k, v in ents.items()
                   if not any(k.startswith(p) for p in RESTRICTED_PREFIXES)}
+          # Ad-hoc signatures have no Team ID, so hardened-runtime library
+          # validation refuses to map the ad-hoc Sparkle.framework. Release
+          # signs Sparkle with the same Developer ID and needs no exception.
+          safe['com.apple.security.cs.disable-library-validation'] = True
           with open('/tmp/ci-entitlements.plist', 'wb') as f:
               plistlib.dump(safe, f)
           print(f'CI entitlements: {list(safe.keys())}')

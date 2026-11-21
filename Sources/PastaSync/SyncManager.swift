@@ -486,7 +486,8 @@ public final class SyncManager: ObservableObject {
         if ContentType(rawValue: contentTypeRaw) == nil {
             return .unmappable(reason: "unknown contentType '\(contentTypeRaw)'")
         }
-        if record["content"] as? String == nil {
+        if RecordMapper.sensitiveString(record, encrypted: RecordMapper.EncryptedKey.content,
+                                        legacy: RecordMapper.LegacyPlaintextKey.content) == nil {
             return .unmappable(reason: "missing content")
         }
         if record["timestamp"] as? Date == nil {
