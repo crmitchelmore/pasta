@@ -1,32 +1,32 @@
 {
-  "pins": [
+  "pins" : [
     {
-      "identity": "grdb.swift",
-      "kind": "remoteSourceControl",
-      "location": "https://github.com/groue/GRDB.swift.git",
-      "state": {
-        "revision": "92a554cd0d5e8d67cb18993c6054e73fe42c066c",
-        "version": "7.12.0"
+      "identity" : "grdb.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/groue/GRDB.swift.git",
+      "state" : {
+        "revision" : "92a554cd0d5e8d67cb18993c6054e73fe42c066c",
+        "version" : "7.12.0"
       }
     },
     {
-      "identity": "sentry-cocoa",
-      "kind": "remoteSourceControl",
-      "location": "https://github.com/getsentry/sentry-cocoa.git",
-      "state": {
-        "revision": "aa91bcf6bd6f383dbc49f38bf785d1d775c4f751",
-        "version": "9.34.0"
+      "identity" : "sentry-cocoa",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/getsentry/sentry-cocoa.git",
+      "state" : {
+        "revision" : "485e0622e00d60d71eb6b519822188e2eb7c29e3",
+        "version" : "9.35.0"
       }
     },
     {
-      "identity": "sparkle",
-      "kind": "remoteSourceControl",
-      "location": "https://github.com/sparkle-project/Sparkle.git",
-      "state": {
-        "revision": "ab7d71291238df6e0492143b120c9b696a35f603",
-        "version": "2.10.1"
+      "identity" : "sparkle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sparkle-project/Sparkle.git",
+      "state" : {
+        "revision" : "ab7d71291238df6e0492143b120c9b696a35f603",
+        "version" : "2.10.1"
       }
     }
   ],
-  "version": 2
+  "version" : 2
 }
