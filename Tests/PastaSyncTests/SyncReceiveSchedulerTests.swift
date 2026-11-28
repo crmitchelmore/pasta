@@ -3,160 +3,160 @@ import XCTest
 
 @MainActor
 final class SyncReceiveSchedulerTests: XCTestCase {
-    func testReceivesAtLaunchAndRetriesFailedAccountLookupNextInterval() async throws {
-        let clock = ReceiveTestClock()
-        let firstAttempt = expectation(description: "launch attempts receiving")
-        let failure = expectation(description: "account failure is reported")
-        let recovered = expectation(description: "next interval receives after account recovery")
-        let scheduler = SyncReceiveScheduler { try await clock.wait() }
-        defer { scheduler.stop() }
-        var attempts = 0
-        scheduler.start(receive: {
-            attempts += 1
-            if attempts == 1 {
+    func testReceiveLoopRetriesWithoutOverlappingAndStopsCleanly() async throws {
+        do {
+            let clock = ReceiveTestClock()
+            let firstAttempt = expectation(description: "launch attempts receiving")
+            let failure = expectation(description: "account failure is reported")
+            let recovered = expectation(description: "next interval receives after account recovery")
+            let scheduler = SyncReceiveScheduler { try await clock.wait() }
+            defer { scheduler.stop() }
+            var attempts = 0
+            scheduler.start(receive: {
+                attempts += 1
+                if attempts == 1 {
+                    firstAttempt.fulfill()
+                    throw TestError.accountUnavailable
+                }
+                recovered.fulfill()
+            }, onError: { _ in failure.fulfill() })
+
+            await fulfillment(of: [firstAttempt, failure], timeout: 2)
+            await clock.advance()
+            await fulfillment(of: [recovered], timeout: 2)
+            XCTAssertEqual(attempts, 2)
+        }
+        do {
+            let clock = ReceiveTestClock()
+            let manualGate = ReceiveTestClock()
+            let manualStarted = expectation(description: "manual sync started")
+            let intervalStarted = expectation(description: "busy background attempt skipped")
+            intervalStarted.assertForOverFulfill = false
+            let received = expectation(description: "receiving resumes after manual sync")
+            let scheduler = SyncReceiveScheduler {
+                intervalStarted.fulfill()
+                try await clock.wait()
+            }
+            defer { scheduler.stop() }
+            let manual = Task {
+                try await scheduler.run {
+                    manualStarted.fulfill()
+                    try await manualGate.wait()
+                }
+            }
+            await fulfillment(of: [manualStarted], timeout: 2)
+            var receives = 0
+            scheduler.start(receive: {
+                receives += 1
+                received.fulfill()
+            }, onError: { _ in XCTFail("An overlapping manual sync is not an account failure") })
+            await fulfillment(of: [intervalStarted], timeout: 2)
+            XCTAssertEqual(receives, 0)
+            await manualGate.advance()
+            try await manual.value
+            await clock.advance()
+            await fulfillment(of: [received], timeout: 2)
+            XCTAssertEqual(receives, 1)
+        }
+        do {
+            let remoteGate = ReceiveTestClock()
+            let clock = ReceiveTestClock()
+            let started = expectation(description: "remote receive suspended")
+            let cancelled = expectation(description: "remote receive cancelled on stop")
+            let restarted = expectation(description: "restart receives again")
+            let scheduler = SyncReceiveScheduler { try await clock.wait() }
+            defer { scheduler.stop() }
+            scheduler.start(receive: {
+                started.fulfill()
+                do { try await remoteGate.wait() }
+                catch {
+                    cancelled.fulfill()
+                    throw error
+                }
+            }, onError: { _ in XCTFail("Stopping must not report a sync error") })
+            await fulfillment(of: [started], timeout: 2)
+            do {
+                try await scheduler.run { XCTFail("Manual sync overlapped the active receiver") }
+                XCTFail("Expected overlap rejection")
+            } catch SyncPullService.PullError.alreadyInProgress {}
+            scheduler.stop()
+            await fulfillment(of: [cancelled], timeout: 2)
+            scheduler.start(receive: { restarted.fulfill() }, onError: { _ in XCTFail("Restart failed") })
+            await fulfillment(of: [restarted], timeout: 2)
+        }
+        do {
+            let clock = ReceiveTestClock()
+            let firstAttempt = expectation(description: "single launch receive")
+            let scheduler = SyncReceiveScheduler { try await clock.wait() }
+            var attempts = 0
+            let receive: @MainActor () async throws -> Void = {
+                attempts += 1
                 firstAttempt.fulfill()
-                throw TestError.accountUnavailable
             }
-            recovered.fulfill()
-        }, onError: { _ in failure.fulfill() })
-
-        await fulfillment(of: [firstAttempt, failure], timeout: 2)
-        await clock.advance()
-        await fulfillment(of: [recovered], timeout: 2)
-        XCTAssertEqual(attempts, 2)
+            scheduler.start(receive: receive, onError: { _ in XCTFail("Unexpected error") })
+            scheduler.start(receive: receive, onError: { _ in XCTFail("Unexpected error") })
+            await fulfillment(of: [firstAttempt], timeout: 2)
+            scheduler.stop()
+            await clock.advance()
+            // A manual operation still works after the background lifecycle stops.
+            try await scheduler.run {}
+            await Task.yield()
+            XCTAssertEqual(attempts, 1)
+        }
     }
 
-    func testBackgroundAttemptWaitsForNextIntervalWhenManualSyncOwnsTransport() async throws {
-        let clock = ReceiveTestClock()
-        let manualGate = ReceiveTestClock()
-        let manualStarted = expectation(description: "manual sync started")
-        let intervalStarted = expectation(description: "busy background attempt skipped")
-        intervalStarted.assertForOverFulfill = false
-        let received = expectation(description: "receiving resumes after manual sync")
-        let scheduler = SyncReceiveScheduler {
-            intervalStarted.fulfill()
-            try await clock.wait()
-        }
-        defer { scheduler.stop() }
-        let manual = Task {
-            try await scheduler.run {
-                manualStarted.fulfill()
-                try await manualGate.wait()
-            }
-        }
-        await fulfillment(of: [manualStarted], timeout: 2)
-        var receives = 0
-        scheduler.start(receive: {
-            receives += 1
-            received.fulfill()
-        }, onError: { _ in XCTFail("An overlapping manual sync is not an account failure") })
-        await fulfillment(of: [intervalStarted], timeout: 2)
-        XCTAssertEqual(receives, 0)
-        await manualGate.advance()
-        try await manual.value
-        await clock.advance()
-        await fulfillment(of: [received], timeout: 2)
-        XCTAssertEqual(receives, 1)
-    }
-
-    func testStopCancelsInFlightReceiveAndRestartDoesNotOverlapIt() async throws {
-        let remoteGate = ReceiveTestClock()
-        let clock = ReceiveTestClock()
-        let started = expectation(description: "remote receive suspended")
-        let cancelled = expectation(description: "remote receive cancelled on stop")
-        let restarted = expectation(description: "restart receives again")
-        let scheduler = SyncReceiveScheduler { try await clock.wait() }
-        defer { scheduler.stop() }
-        scheduler.start(receive: {
-            started.fulfill()
-            do { try await remoteGate.wait() }
-            catch {
-                cancelled.fulfill()
-                throw error
-            }
-        }, onError: { _ in XCTFail("Stopping must not report a sync error") })
-        await fulfillment(of: [started], timeout: 2)
+    func testClassificationWritesWaitForReceiveAndCancelOrTimeOutWithoutWriting() async throws {
         do {
-            try await scheduler.run { XCTFail("Manual sync overlapped the active receiver") }
-            XCTFail("Expected overlap rejection")
-        } catch SyncPullService.PullError.alreadyInProgress {}
-        scheduler.stop()
-        await fulfillment(of: [cancelled], timeout: 2)
-        scheduler.start(receive: { restarted.fulfill() }, onError: { _ in XCTFail("Restart failed") })
-        await fulfillment(of: [restarted], timeout: 2)
-    }
-
-    func testRepeatedStartDoesNotCreateAnotherLoopAndStopPreventsNextAttempt() async throws {
-        let clock = ReceiveTestClock()
-        let firstAttempt = expectation(description: "single launch receive")
-        let scheduler = SyncReceiveScheduler { try await clock.wait() }
-        var attempts = 0
-        let receive: @MainActor () async throws -> Void = {
-            attempts += 1
-            firstAttempt.fulfill()
-        }
-        scheduler.start(receive: receive, onError: { _ in XCTFail("Unexpected error") })
-        scheduler.start(receive: receive, onError: { _ in XCTFail("Unexpected error") })
-        await fulfillment(of: [firstAttempt], timeout: 2)
-        scheduler.stop()
-        await clock.advance()
-        // A manual operation still works after the background lifecycle stops.
-        try await scheduler.run {}
-        await Task.yield()
-        XCTAssertEqual(attempts, 1)
-    }
-
-    func testClassificationWriteWaitsForCloudReceiveAndReturnsItsResult() async throws {
-        let gate = ReceiveTestClock()
-        let started = expectation(description: "cloud pull is active")
-        let scheduler = SyncReceiveScheduler()
-        var cloudFinished = false
-        let cloud = Task {
-            try await scheduler.run {
-                started.fulfill()
-                try await gate.wait()
-                cloudFinished = true
+            let gate = ReceiveTestClock()
+            let started = expectation(description: "cloud pull is active")
+            let scheduler = SyncReceiveScheduler()
+            var cloudFinished = false
+            let cloud = Task {
+                try await scheduler.run {
+                    started.fulfill()
+                    try await gate.wait()
+                    cloudFinished = true
+                }
             }
-        }
-        await fulfillment(of: [started], timeout: 2)
-        let write = Task {
-            try await scheduler.runWhenAvailable {
-                XCTAssertTrue(cloudFinished, "A delayed cloud payload must commit before a classification write")
-                return 42
+            await fulfillment(of: [started], timeout: 2)
+            let write = Task {
+                try await scheduler.runWhenAvailable {
+                    XCTAssertTrue(cloudFinished, "A delayed cloud payload must commit before a classification write")
+                    return 42
+                }
             }
+            await gate.advance()
+            try await cloud.value
+            let result = try await write.value
+            XCTAssertEqual(result, 42)
         }
-        await gate.advance()
-        try await cloud.value
-        let result = try await write.value
-        XCTAssertEqual(result, 42)
-    }
-
-    func testWaitingClassificationIsCancellableAndTimeoutNeverRunsWrite() async throws {
-        let gate = ReceiveTestClock()
-        let started = expectation(description: "cloud pull holds transport")
-        let scheduler = SyncReceiveScheduler()
-        let cloud = Task {
-            try await scheduler.run {
-                started.fulfill()
-                try await gate.wait()
-            }
-        }
-        await fulfillment(of: [started], timeout: 2)
         do {
-            try await scheduler.runWhenAvailable(timeout: 0) { XCTFail("Timed-out write must not run") }
-            XCTFail("Busy classification should time out")
-        } catch SyncPullService.PullError.alreadyInProgress {}
-        let cancelled = Task {
-            try await scheduler.runWhenAvailable { XCTFail("Cancelled write must not run") }
+            let gate = ReceiveTestClock()
+            let started = expectation(description: "cloud pull holds transport")
+            let scheduler = SyncReceiveScheduler()
+            let cloud = Task {
+                try await scheduler.run {
+                    started.fulfill()
+                    try await gate.wait()
+                }
+            }
+            await fulfillment(of: [started], timeout: 2)
+            do {
+                try await scheduler.runWhenAvailable(timeout: 0) { XCTFail("Timed-out write must not run") }
+                XCTFail("Busy classification should time out")
+            } catch SyncPullService.PullError.alreadyInProgress {}
+            let cancelled = Task {
+                try await scheduler.runWhenAvailable { XCTFail("Cancelled write must not run") }
+            }
+            cancelled.cancel()
+            do {
+                try await cancelled.value
+                XCTFail("Expected cancellation")
+            } catch is CancellationError {}
+            await gate.advance()
+            try await cloud.value
+            try await scheduler.run {}
         }
-        cancelled.cancel()
-        do {
-            try await cancelled.value
-            XCTFail("Expected cancellation")
-        } catch is CancellationError {}
-        await gate.advance()
-        try await cloud.value
-        try await scheduler.run {}
     }
 
     private enum TestError: Error { case accountUnavailable }

@@ -8,7 +8,9 @@ final class BrandAssetTests: XCTestCase {
             .deletingLastPathComponent().deletingLastPathComponent()
     }
 
-    func testEveryAppIconSlotHasTheExactPixelsAndPlatformAlpha() throws {
+    /// Every icon slot has exact pixels and platform alpha, Alpha artwork is distinct
+    /// and complete, and the bundle and in-app branding share the same artwork.
+    func testBrandArtworkIsCompleteAndConsistent() throws {
         for (folder, expectsAlpha) in [
             ("Sources/PastaApp/Resources/Assets.xcassets/AppIcon.appiconset", true),
             ("PastaIOS/PastaIOS/Assets.xcassets/AppIcon.appiconset", false),
@@ -32,17 +34,12 @@ final class BrandAssetTests: XCTestCase {
                 }
             }
         }
-    }
-
-    func testAlphaArtworkIsDistinctAndIncludesEveryMacSize() throws {
         let alpha = try Data(contentsOf: root.appendingPathComponent("Resources/DMG/AppIconAlpha.icns"))
         let stable = try Data(contentsOf: root.appendingPathComponent("Resources/DMG/AppIcon.icns"))
         XCTAssertNotEqual(alpha, stable)
         let icon = try XCTUnwrap(NSImage(data: alpha))
         XCTAssertTrue(Set([16, 32, 64, 128, 256, 512, 1024]).isSubset(of: Set(icon.representations.map(\.pixelsWide))))
-    }
 
-    func testBundleAndInAppBrandingUseTheSameArtwork() throws {
         func data(_ path: String) throws -> Data { try Data(contentsOf: root.appendingPathComponent(path)) }
         XCTAssertEqual(try data("Sources/PastaApp/Resources/AppIcon.png"),
                        try data("Sources/PastaApp/Resources/Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png"))
@@ -51,8 +48,8 @@ final class BrandAssetTests: XCTestCase {
         XCTAssertEqual(mark.pixelsWide, 288)
         XCTAssertEqual(mark.pixelsHigh, 288)
         XCTAssertFalse(mark.hasAlpha)
-        let icon = try XCTUnwrap(NSImage(contentsOf: root.appendingPathComponent("Resources/DMG/AppIcon.icns")))
-        let sizes = Set(icon.representations.map(\.pixelsWide))
+        let stableIcon = try XCTUnwrap(NSImage(contentsOf: root.appendingPathComponent("Resources/DMG/AppIcon.icns")))
+        let sizes = Set(stableIcon.representations.map(\.pixelsWide))
         XCTAssertTrue(Set([16, 32, 64, 128, 256, 512, 1024]).isSubset(of: sizes), "Incomplete ICNS: \(sizes)")
     }
 }

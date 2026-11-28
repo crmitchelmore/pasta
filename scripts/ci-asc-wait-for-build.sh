@@ -2,7 +2,7 @@
 # Poll App Store Connect until the build just uploaded by release-ios.yml has
 # finished processing. `xcodebuild -exportArchive -destination upload` returns
 # as soon as the upload is accepted; Apple then processes the binary for
-# 5-30 minutes and can still reject it (processingState INVALID / FAILED)
+# 5-30+ minutes and can still reject it (processingState INVALID / FAILED)
 # without anything in the workflow noticing. This closes that gap.
 #
 #   VALID            -> exit 0 (the build is available in TestFlight)
@@ -16,7 +16,7 @@
 #   APP_STORE_CONNECT_ISSUER_ID   the issuer UUID                    (secret)
 #   ASC_KEY_PATH                  path to the decoded AuthKey_<id>.p8 (installed by the workflow)
 #   BUNDLE_ID                     app bundle id (default com.pasta.ios) - resolved to the ASC app id
-#   ASC_TIMEOUT_MINUTES           default 20
+#   ASC_TIMEOUT_MINUTES           default 45
 #   ASC_POLL_SECONDS              default 60
 #
 # The JWT is minted with openssl (ES256) and re-minted on every request so it
@@ -35,7 +35,7 @@ fi
 : "${APP_STORE_CONNECT_ISSUER_ID:?APP_STORE_CONNECT_ISSUER_ID is required}"
 : "${ASC_KEY_PATH:?ASC_KEY_PATH (path to the .p8 key) is required}"
 BUNDLE_ID="${BUNDLE_ID:-com.pasta.ios}"
-ASC_TIMEOUT_MINUTES="${ASC_TIMEOUT_MINUTES:-20}"
+ASC_TIMEOUT_MINUTES="${ASC_TIMEOUT_MINUTES:-45}"
 ASC_POLL_SECONDS="${ASC_POLL_SECONDS:-60}"
 API="https://api.appstoreconnect.apple.com"
 

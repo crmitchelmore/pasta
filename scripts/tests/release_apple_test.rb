@@ -3,12 +3,14 @@ require_relative '../release-apple'
 
 class ReleaseAppleTest < Minitest::Test
   class FakeClient
-    attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id, :app_localization, :review_source, :store_review, :primary_locale
-    attr_reader :posts, :patches, :post_bodies, :patch_bodies, :events
+    attr_accessor :processing, :beta_state, :review_busy, :assigned, :bundle_id, :app_localization, :review_source, :store_review, :primary_locale, :groups
+    attr_reader :posts, :patches, :post_bodies, :patch_bodies, :events, :assigned_groups
     def initialize
-      @bundle_id='com.pasta.ios.alpha'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false
+      @bundle_id='com.pasta.ios'; @processing='VALID'; @beta_state='READY_FOR_BETA_SUBMISSION'; @review_busy=false; @assigned=false
       @app_localization=nil
-      @review_source={'id'=>'stable-review','attributes'=>{'contactFirstName'=>'Test','contactLastName'=>'Reviewer','contactPhone'=>'+441234567890','contactEmail'=>'review@example.com','demoAccountRequired'=>false,'notes'=>'No sign-in required.'}}
+      @groups=[{'id'=>'public-alpha','attributes'=>{'name'=>'Public Alpha','isInternalGroup'=>false,'publicLink'=>'https://testflight.apple.com/join/example'}}]
+      @assigned_groups=[]
+      @review_source={'id'=>'main-review','attributes'=>{'contactFirstName'=>'Test','contactLastName'=>'Reviewer','contactPhone'=>'+441234567890','contactEmail'=>'review@example.com','demoAccountRequired'=>false,'notes'=>'No sign-in required.'}}
       @store_review=nil
       @posts=[]; @patches=[]; @post_bodies=[]; @patch_bodies=[]; @events=[]
     end
@@ -16,10 +18,7 @@ class ReleaseAppleTest < Minitest::Test
       {'id'=>'apple-build','attributes'=>{'processingState'=>processing,'expired'=>false,'expirationDate'=>'2026-12-01T00:00:00Z'}}
     end
     def get(path)
-      if path.end_with?('/betaAppReviewDetail')
-        return {'data'=>review_source} if path.include?('/6759037470/')
-        return {'data'=>{'id'=>'alpha-review','attributes'=>{}}}
-      end
+      return {'data'=>review_source} if path.end_with?('/betaAppReviewDetail')
       return {'data'=>(store_review && {'id'=>'stable-store-review','attributes'=>store_review})} if path.end_with?('/appStoreReviewDetail')
       return {'data'=>{'attributes'=>{'bundleId'=>bundle_id,'primaryLocale'=>primary_locale}}} if path.start_with?('/v1/apps/')
       {'data'=>{'attributes'=>{'externalBuildState'=>assigned ? 'IN_BETA_TESTING' : beta_state}}}
@@ -32,12 +31,17 @@ class ReleaseAppleTest < Minitest::Test
       return [app_localization].flatten.compact if path.include?('/betaAppLocalizations')
       return [] if path.end_with?('/betaBuildLocalizations')
       return [{'id'=>'stable-version','attributes'=>{'platform'=>'IOS','versionString'=>'1.8.0','appStoreState'=>'READY_FOR_SALE','createdDate'=>'2026-09-01T00:00:00Z'}}] if path.include?('/6759037470/appStoreVersions')
-      return [{'id'=>'public-alpha','attributes'=>{'name'=>'Public Alpha','isInternalGroup'=>false,'publicLink'=>'https://testflight.apple.com/join/example'}}] if path.include?('/apps/')
+      return groups if path.include?('/apps/')
+      group=path[%r{/betaGroups/([^/]+)/builds}, 1]
+      return assigned_groups.include?(group) || (group == 'public-alpha' && assigned) ? [build] : [] if group
       assigned ? [build] : []
     end
     def post(path, body)
       @posts << path; @post_bodies << body; @events << [:post, path]
-      @assigned=true if path.end_with?('/relationships/builds')
+      if (group=path[%r{/betaGroups/([^/]+)/relationships/builds}, 1])
+        @assigned_groups << group
+        @assigned=true if group == 'public-alpha'
+      end
       {'data'=>{}}
     end
     def patch(path, body); @patches << path; @patch_bodies << body; @events << [:patch, path]; {'data'=>{}}; end
@@ -102,15 +106,10 @@ class ReleaseAppleTest < Minitest::Test
     end
     assert_equal AppleRelease::BETA_BUILD_LOCALE, build_localization.dig(:data, :attributes, :locale)
   end
-  def test_alpha_copies_stable_beta_review_information_before_submission
+  def test_alpha_reuses_main_app_beta_review_information_before_submission
     client=FakeClient.new;delivery(client).distribute(wait_seconds:0)
-    patch_index=client.events.index([:patch, '/v1/betaAppReviewDetails/alpha-review'])
-    review_index=client.events.index([:post, '/v1/betaAppReviewSubmissions'])
-    refute_nil patch_index
-    refute_nil review_index
-    assert_operator patch_index, :<, review_index
-    body_index=client.patches.index('/v1/betaAppReviewDetails/alpha-review')
-    assert_equal client.review_source['attributes'], client.patch_bodies[body_index].dig(:data, :attributes)
+    refute client.patches.any? { |path| path.start_with?('/v1/betaAppReviewDetails/') }
+    assert_includes client.posts, '/v1/betaAppReviewSubmissions'
   end
   def test_alpha_refuses_review_metadata_that_requires_demo_credentials
     client=FakeClient.new
@@ -123,31 +122,31 @@ class ReleaseAppleTest < Minitest::Test
   end
   def test_alpha_refuses_incomplete_stable_beta_review_information
     client=FakeClient.new
-    client.review_source={'id'=>'stable-review','attributes'=>{'contactEmail'=>'review@example.com','demoAccountRequired'=>false}}
+    client.review_source={'id'=>'main-review','attributes'=>{'contactEmail'=>'review@example.com','demoAccountRequired'=>false}}
     error=assert_raises(RuntimeError){delivery(client).distribute(wait_seconds:0)}
-    assert_match 'Stable Beta App Review Information: contactFirstName, contactLastName, contactPhone', error.message
+    assert_match 'Beta App Review Information: contactFirstName, contactLastName, contactPhone', error.message
     assert_match 'Stable App Store Review Information', error.message
     refute_includes client.posts, '/v1/betaAppReviewSubmissions'
-    refute_includes client.patches, '/v1/betaAppReviewDetails/alpha-review'
+    refute_includes client.patches, '/v1/betaAppReviewDetails/main-review'
   end
   def test_alpha_falls_back_to_stable_app_store_review_contact
     client=FakeClient.new
-    client.review_source={'id'=>'stable-review','attributes'=>{'contactFirstName'=>nil,'contactLastName'=>nil,'contactPhone'=>nil,'contactEmail'=>nil,'demoAccountRequired'=>nil,'notes'=>nil}}
+    client.review_source={'id'=>'main-review','attributes'=>{'contactFirstName'=>nil,'contactLastName'=>nil,'contactPhone'=>nil,'contactEmail'=>nil,'demoAccountRequired'=>nil,'notes'=>nil}}
     client.store_review={'contactFirstName'=>'Store','contactLastName'=>'Reviewer','contactPhone'=>'+441234567890','contactEmail'=>'store@example.com','demoAccountName'=>nil,'demoAccountPassword'=>nil,'demoAccountRequired'=>false,'notes'=>'No sign-in required.'}
     delivery(client).distribute(wait_seconds:0)
-    patch_index=client.events.index([:patch, '/v1/betaAppReviewDetails/alpha-review'])
+    patch_index=client.events.index([:patch, '/v1/betaAppReviewDetails/main-review'])
     review_index=client.events.index([:post, '/v1/betaAppReviewSubmissions'])
     refute_nil patch_index
     refute_nil review_index
     assert_operator patch_index, :<, review_index
-    body=client.patch_bodies[client.patches.index('/v1/betaAppReviewDetails/alpha-review')].dig(:data, :attributes)
+    body=client.patch_bodies[client.patches.index('/v1/betaAppReviewDetails/main-review')].dig(:data, :attributes)
     assert_equal({'contactFirstName'=>'Store','contactLastName'=>'Reviewer','contactPhone'=>'+441234567890','contactEmail'=>'store@example.com','notes'=>'No sign-in required.','demoAccountRequired'=>false}, body)
   end
   def test_alpha_treats_unset_demo_requirement_as_not_required
     client=FakeClient.new
     client.review_source['attributes']['demoAccountRequired']=nil
     delivery(client).distribute(wait_seconds:0)
-    body=client.patch_bodies[client.patches.index('/v1/betaAppReviewDetails/alpha-review')].dig(:data, :attributes)
+    body=client.patch_bodies[client.patches.index('/v1/betaAppReviewDetails/main-review')].dig(:data, :attributes)
     assert_equal false, body['demoAccountRequired']
     assert_includes client.posts, '/v1/betaAppReviewSubmissions'
   end
@@ -246,6 +245,30 @@ class ReleaseAppleTest < Minitest::Test
       refute d.submitted, state
     end
   end
+  def test_stable_ios_never_resends_a_rejected_build_returned_to_prepare
+    [%w[UNRESOLVED_ISSUES apple-build], %w[COMPLETE apple-build], %w[UNRESOLVED_ISSUES older-build]].each do |review_state, attached|
+      client=FakeClient.new
+      client.define_singleton_method(:list) do |path|
+        next [{'id'=>'v','attributes'=>{'platform'=>'IOS','versionString'=>'3.2.0','appStoreState'=>'PREPARE_FOR_SUBMISSION'}}] if path.include?('/appStoreVersions')
+        next [{'id'=>'r','attributes'=>{'platform'=>'IOS','state'=>review_state}}] if path.include?('/reviewSubmissions?')
+        next [{'relationships'=>{'appStoreVersion'=>{'data'=>{'id'=>'v'}}}}] if path.end_with?('/r/items')
+        super(path)
+      end
+      client.define_singleton_method(:get) do |path|
+        next {'data'=>{'id'=>attached}} if path == '/v1/appStoreVersions/v/build'
+        super(path)
+      end
+      d=gated(client)
+      if attached == 'apple-build'
+        out, _ = capture_io { refute d.submit_if_ready, review_state }
+        assert_match(/already reviewed by Apple/, out)
+        refute d.submitted
+      else
+        assert d.submit_if_ready, 'a new candidate build may replace the rejected one'
+        assert d.submitted
+      end
+    end
+  end
   def test_new_stable_version_waits_for_prior_apple_review_or_release
     %w[WAITING_FOR_REVIEW IN_REVIEW PENDING_DEVELOPER_RELEASE PENDING_APPLE_RELEASE PROCESSING_FOR_APP_STORE METADATA_REJECTED INVALID_BINARY UNKNOWN].each do |state|
       client=FakeClient.new
@@ -316,7 +339,85 @@ class ReleaseAppleTest < Minitest::Test
     client=SubmitClient.new; client.bundle_id=client.bundle_id.delete_suffix('.alpha'); client.conflict='another resource is locked'
     assert_raises(AppleAPI::ConflictError) { ApprovedDelivery.new(client:client,manifest:manifest,surface:'ios').submit }
   end
+  class HeldVersionClient < SubmitClient
+    HOLDER='aed18c8c-8be4-414a-acb1-f392e5f313e4'
+    attr_accessor :holder_state
+    def list(path)
+      return [{'relationships'=>{'appStoreVersion'=>{'data'=>{'id'=>'v'}}}}] if path == "/v1/reviewSubmissions/#{HOLDER}/items"
+      super(path)
+    end
+    def get(path)
+      return {'data'=>{'id'=>HOLDER,'attributes'=>{'state'=>patches.include?("/v1/reviewSubmissions/#{HOLDER}") ? 'WAITING_FOR_REVIEW' : holder_state}}} if path == "/v1/reviewSubmissions/#{HOLDER}"
+      super(path)
+    end
+    def post(path, body)
+      if path == '/v1/reviewSubmissionItems'
+        @posts << path
+        raise AppleAPI::ConflictError.new("App Store Connect API POST #{path} failed (409): {\"code\" : \"STATE_ERROR.ITEM_PART_OF_ANOTHER_SUBMISSION\", \"detail\" : \"appStoreVersions with id v was already added to another reviewSubmission with id #{HOLDER}\"}", status: 409)
+      end
+      super
+    end
+  end
+  def stable_manifest
+    notes='Frozen notes'
+    {'train'=>'stable','source'=>'a'*40,'tag'=>'stable-candidate-1','surfaces'=>{'ios'=>{'version'=>'3.2.0','build'=>'1000.0.1','notes'=>notes,'notesHash'=>Digest::SHA256.hexdigest(notes),'storeNotes'=>notes,'storeNotesHash'=>Digest::SHA256.hexdigest(notes)}}}
+  end
+  def held_client(state)
+    client=HeldVersionClient.new; client.bundle_id=client.bundle_id.delete_suffix('.alpha'); client.holder_state=state; client
+  end
+  def test_version_held_by_ready_submission_submits_that_submission
+    client=held_client('READY_FOR_REVIEW')
+    capture_io { ApprovedDelivery.new(client:client,manifest:stable_manifest,surface:'ios').submit }
+    assert_includes client.patches, "/v1/reviewSubmissions/#{HeldVersionClient::HOLDER}"
+  end
+  def test_version_already_in_review_or_needing_a_human_is_not_a_failure
+    %w[WAITING_FOR_REVIEW IN_REVIEW COMPLETE UNRESOLVED_ISSUES].each do |state|
+      client=held_client(state)
+      out, _ = capture_io { ApprovedDelivery.new(client:client,manifest:stable_manifest,surface:'ios').submit }
+      assert_match(/#{HeldVersionClient::HOLDER}/, out, state)
+      refute client.patches.any? { |p| p.start_with?('/v1/reviewSubmissions/') }, state
+    end
+  end
   def test_alpha_never_submits_through_async_gate
     assert_raises(RuntimeError) { delivery(FakeClient.new).submit_if_ready }
+  end
+  def test_ios_alpha_uploads_to_the_main_app_record
+    pipeline=JSON.parse(File.read(File.expand_path('../../Config/ReleasePipeline.json', __dir__)))
+    assert_equal pipeline.dig('apple','stable','ios'), AppleRelease.app_record(pipeline,'alpha','ios')
+    separate={'apple'=>{'stable'=>{'ios'=>'6759037470'},'alpha'=>{'ios'=>'6810331953'}}}
+    error=assert_raises(RuntimeError) { AppleRelease.app_record(separate,'alpha','ios') }
+    assert_match '4.3(a)', error.message
+    client=FakeClient.new; client.bundle_id='com.pasta.ios.alpha'
+    assert_raises(RuntimeError) { delivery(client) }
+  end
+  def test_alpha_build_notes_are_marked_as_alpha
+    client=FakeClient.new;delivery(client).distribute(wait_seconds:0)
+    index=client.posts.index('/v1/betaBuildLocalizations')
+    whats_new=client.post_bodies[index].dig(:data, :attributes, :whatsNew)
+    assert_match(/\APasta Alpha build 1000\.0\.1 \(alpha-build-1\)/, whats_new)
+    assert whats_new.end_with?('Frozen notes')
+    long={'build'=>'1042','storeNotes'=>'x'*4000}
+    assert_equal AppleRelease::WHATS_NEW_LIMIT, AppleRelease.alpha_whats_new({'tag'=>'alpha-build-42'}, long).length
+  end
+  def test_internal_group_gets_alpha_before_external_beta_review
+    client=FakeClient.new
+    client.groups+= [{'id'=>'internal-alpha','attributes'=>{'name'=>'Internal Alpha','isInternalGroup'=>true}},
+      {'id'=>'auto-internal','attributes'=>{'name'=>'Internal Alpha','isInternalGroup'=>true,'hasAccessToAllBuilds'=>true}},
+      {'id'=>'other-internal','attributes'=>{'name'=>'Engineering','isInternalGroup'=>true}}]
+    d=delivery(client); d.distribute(wait_seconds:0)
+    assert_equal ['internal-alpha'], client.assigned_groups
+    assert_equal 'beta_review_pending', d.receipts.last.first
+    refute client.assigned
+    client.beta_state='BETA_APPROVED'
+    d=delivery(client); d.distribute(wait_seconds:0)
+    assert_equal %w[internal-alpha public-alpha], client.assigned_groups
+    assert_equal %w[internal-alpha auto-internal public-alpha], d.receipts.last.last[:groups]
+  end
+  def test_stable_build_on_shared_record_is_never_given_to_alpha_groups
+    client=FakeClient.new
+    client.groups+= [{'id'=>'internal-alpha','attributes'=>{'name'=>'Internal Alpha','isInternalGroup'=>true}}]
+    d=delivery(client, train: 'stable'); d.distribute(wait_seconds:0)
+    assert_empty client.assigned_groups
+    assert_empty client.posts
   end
 end

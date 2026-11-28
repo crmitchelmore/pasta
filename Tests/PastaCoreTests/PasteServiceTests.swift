@@ -5,164 +5,70 @@ import XCTest
 final class PasteServiceTests: XCTestCase {
     private final class StubPasteboard: PasteboardWriting {
         private(set) var written: PasteService.Contents?
-        var savedContents: PasteService.SavedContents?
-        private(set) var restoredContents: PasteService.SavedContents?
 
         func write(_ contents: PasteService.Contents) {
             written = contents
         }
-        
-        func saveCurrentContents() -> PasteService.SavedContents? {
-            return savedContents
-        }
-        
-        func restore(_ contents: PasteService.SavedContents) {
-            restoredContents = contents
-        }
+
+        func saveCurrentContents() -> PasteService.SavedContents? { nil }
+
+        func restore(_ contents: PasteService.SavedContents) {}
     }
 
     private final class StubSimulator: PasteEventSimulating {
-        private(set) var callCount: Int = 0
+        private(set) var callCount = 0
 
         func simulateCommandV() {
             callCount += 1
         }
     }
 
-    func testPastesTextAndSimulatesCommandV() {
-        let pb = StubPasteboard()
-        let sim = StubSimulator()
-        let service = PasteService(pasteboard: pb, simulator: sim, isAccessibilityTrusted: { true })
-
-        let entry = ClipboardEntry(content: "hello", contentType: .text)
-        XCTAssertTrue(service.paste(entry))
-        XCTAssertEqual(pb.written, .text("hello"))
-        XCTAssertEqual(sim.callCount, 1)
+    private enum Operation {
+        case paste, pastePlainText, copy, copyJoined
     }
 
-    func testUntrustedPasteCopiesWithoutSimulatingCommandV() {
-        let pb = StubPasteboard()
-        let sim = StubSimulator()
-        let service = PasteService(pasteboard: pb, simulator: sim, isAccessibilityTrusted: { false })
+    /// Paste safety: what lands on the pasteboard per content type, Cmd+V only
+    /// when trusted and pasting, and nothing written for unrepresentable entries.
+    func testPasteAndCopyWriteTheRightRepresentation() {
+        let text = ClipboardEntry(content: "hello", contentType: .text)
+        let world = ClipboardEntry(content: "world", contentType: .text)
+        let files = ClipboardEntry(content: "/tmp/a\n/tmp/b", contentType: .filePath)
+        let fileURLs = PasteService.Contents.fileURLs([URL(fileURLWithPath: "/tmp/a"), URL(fileURLWithPath: "/tmp/b")])
+        let imageData = Data([0x01, 0x02])
+        let image = ClipboardEntry(content: "", contentType: .image, rawData: imageData)
+        let emptyImage = ClipboardEntry(content: "", contentType: .image, rawData: nil)
 
-        XCTAssertTrue(service.paste(ClipboardEntry(content: "hello", contentType: .text)))
-        XCTAssertEqual(pb.written, .text("hello"))
-        XCTAssertEqual(sim.callCount, 0)
-    }
-
-    func testCopiesTextWithoutSimulatingCommandV() {
-        let pb = StubPasteboard()
-        let sim = StubSimulator()
-        let service = PasteService(pasteboard: pb, simulator: sim, isAccessibilityTrusted: { true })
-
-        let entry = ClipboardEntry(content: "hello", contentType: .text)
-        XCTAssertTrue(service.copy(entry))
-        XCTAssertEqual(pb.written, .text("hello"))
-        XCTAssertEqual(sim.callCount, 0)
-    }
-
-    func testCopiesMultipleEntriesUsingConfiguredSeparator() {
-        let pb = StubPasteboard()
-        let sim = StubSimulator()
-        let service = PasteService(pasteboard: pb, simulator: sim, isAccessibilityTrusted: { true })
-
-        let entries = [
-            ClipboardEntry(content: "hello", contentType: .text),
-            ClipboardEntry(content: "world", contentType: .text)
+        let cases: [(name: String, operation: Operation, entries: [ClipboardEntry], trusted: Bool,
+                     succeeds: Bool, written: PasteService.Contents?, commandV: Int)] = [
+            ("paste text", .paste, [text], true, true, .text("hello"), 1),
+            ("untrusted paste only copies", .paste, [text], false, true, .text("hello"), 0),
+            ("paste file paths as URLs", .paste, [files], true, true, fileURLs, 1),
+            ("paste image TIFF", .paste, [image], true, true, .imageTIFF(imageData), 1),
+            ("image without data", .paste, [emptyImage], true, false, nil, 0),
+            ("plain text of file paths", .pastePlainText, [files], true, true, .text("/tmp/a\n/tmp/b"), 1),
+            ("plain text of image", .pastePlainText, [image], true, false, nil, 0),
+            ("copy text", .copy, [text], true, true, .text("hello"), 0),
+            ("copy joined", .copyJoined, [text, world], true, true, .text("hello\nworld"), 0),
+            ("single selection keeps type", .copyJoined, [files], true, true, fileURLs, 0),
+            ("empty selection", .copyJoined, [], true, false, nil, 0)
         ]
 
-        XCTAssertTrue(service.copy(entries, joinedBy: "\n"))
-        XCTAssertEqual(pb.written, .text("hello\nworld"))
-        XCTAssertEqual(sim.callCount, 0)
-    }
-
-    func testCopyMultipleUsesNormalCopyBehaviourForSingleEntrySelection() {
-        let pb = StubPasteboard()
-        let sim = StubSimulator()
-        let service = PasteService(pasteboard: pb, simulator: sim, isAccessibilityTrusted: { true })
-
-        let entry = ClipboardEntry(content: "/tmp/a\n/tmp/b", contentType: .filePath)
-
-        XCTAssertTrue(service.copy([entry], joinedBy: "\n"))
-
-        guard case .fileURLs(let urls)? = pb.written else {
-            return XCTFail("Expected fileURLs")
+        for testCase in cases {
+            let pasteboard = StubPasteboard()
+            let simulator = StubSimulator()
+            let service = PasteService(pasteboard: pasteboard, simulator: simulator,
+                                       isAccessibilityTrusted: { testCase.trusted })
+            let result: Bool
+            switch testCase.operation {
+            case .paste: result = service.paste(testCase.entries[0])
+            case .pastePlainText: result = service.pastePlainText(testCase.entries[0])
+            case .copy: result = service.copy(testCase.entries[0])
+            case .copyJoined: result = service.copy(testCase.entries, joinedBy: "\n")
+            }
+            XCTAssertEqual(result, testCase.succeeds, "case \(testCase.name)")
+            XCTAssertEqual(pasteboard.written, testCase.written, "case \(testCase.name)")
+            XCTAssertEqual(simulator.callCount, testCase.commandV, "case \(testCase.name)")
         }
-
-        XCTAssertEqual(urls.map(\.path), ["/tmp/a", "/tmp/b"])
-        XCTAssertEqual(sim.callCount, 0)
-    }
-
-    func testCopyMultipleReturnsFalseForEmptySelection() {
-        let pb = StubPasteboard()
-        let sim = StubSimulator()
-        let service = PasteService(pasteboard: pb, simulator: sim, isAccessibilityTrusted: { true })
-
-        XCTAssertFalse(service.copy([], joinedBy: "\n"))
-        XCTAssertNil(pb.written)
-        XCTAssertEqual(sim.callCount, 0)
-    }
-
-    func testPastesFilePathsAsURLs() {
-        let pb = StubPasteboard()
-        let sim = StubSimulator()
-        let service = PasteService(pasteboard: pb, simulator: sim, isAccessibilityTrusted: { true })
-
-        let entry = ClipboardEntry(content: "/tmp/a\n/tmp/b", contentType: .filePath)
-        XCTAssertTrue(service.paste(entry))
-
-        guard case .fileURLs(let urls)? = pb.written else {
-            return XCTFail("Expected fileURLs")
-        }
-
-        XCTAssertEqual(urls.map(\.path), ["/tmp/a", "/tmp/b"])
-        XCTAssertEqual(sim.callCount, 1)
-    }
-
-    func testPastesImageTIFF() {
-        let pb = StubPasteboard()
-        let sim = StubSimulator()
-        let service = PasteService(pasteboard: pb, simulator: sim, isAccessibilityTrusted: { true })
-
-        let data = Data([0x01, 0x02])
-        let entry = ClipboardEntry(content: "", contentType: .image, rawData: data)
-        XCTAssertTrue(service.paste(entry))
-        XCTAssertEqual(pb.written, .imageTIFF(data))
-        XCTAssertEqual(sim.callCount, 1)
-    }
-
-    func testReturnsFalseWhenImageHasNoData() {
-        let pb = StubPasteboard()
-        let sim = StubSimulator()
-        let service = PasteService(pasteboard: pb, simulator: sim, isAccessibilityTrusted: { true })
-
-        let entry = ClipboardEntry(content: "", contentType: .image, rawData: nil)
-        XCTAssertFalse(service.paste(entry))
-        XCTAssertNil(pb.written)
-        XCTAssertEqual(sim.callCount, 0)
-    }
-
-    func testPastePlainTextWritesPlainStringEvenForFilePathEntries() {
-        let pb = StubPasteboard()
-        let sim = StubSimulator()
-        let service = PasteService(pasteboard: pb, simulator: sim, isAccessibilityTrusted: { true })
-
-        // A filePath entry would normally be written as fileURLs; with plain-text
-        // paste we expect the raw string to be written instead.
-        let entry = ClipboardEntry(content: "/tmp/a.txt\n/tmp/b.txt", contentType: .filePath)
-        XCTAssertTrue(service.pastePlainText(entry))
-        XCTAssertEqual(pb.written, .text("/tmp/a.txt\n/tmp/b.txt"))
-    }
-
-    func testPastePlainTextReturnsFalseForEmptyImageEntry() {
-        let pb = StubPasteboard()
-        let sim = StubSimulator()
-        let service = PasteService(pasteboard: pb, simulator: sim, isAccessibilityTrusted: { true })
-
-        let entry = ClipboardEntry(content: "", contentType: .image, rawData: Data([0x01]))
-        XCTAssertFalse(service.pastePlainText(entry))
-        XCTAssertNil(pb.written)
-        XCTAssertEqual(sim.callCount, 0)
     }
 }
 #endif

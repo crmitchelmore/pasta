@@ -25,7 +25,7 @@ struct RemoteClassificationSettingsSection: View {
 
     var body: some View {
         Section {
-            if provider == .microsoftDecision { connectionFields }
+            if provider != .jev { connectionFields }
             credentialFields
             Toggle("Allow eligible clipboard text to be sent to \(provider.title)", isOn: Binding(
                 get: { configuration.isEnabled },
@@ -58,6 +58,10 @@ struct RemoteClassificationSettingsSection: View {
             if provider == .microsoftDecision {
                 Link("Set up Microsoft Decision-1 in Foundry", destination: URL(string: "https://learn.microsoft.com/en-us/azure/foundry/foundry-models/how-to/use-foundry-models-microsoft-decision")!)
                 Text("Use the full resource endpoint followed by /providers/microsoft/v1/systemone and your deployment name. Requires key authentication; Microsoft Entra sign-in is not supported.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if provider == .openAI {
+                Link("Get an OpenAI API key", destination: URL(string: "https://platform.openai.com/api-keys")!)
+                Text("Uses the Responses API with structured output and a configurable model. API usage is billed separately from ChatGPT subscriptions. Response storage is disabled; OpenAI's API data policies still apply.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 Link("Get a Jev API key", destination: URL(string: "https://console.typesafe.ai/keys")!)
@@ -150,7 +154,7 @@ struct RemoteClassificationSettingsSection: View {
                     configuration.save()
                 }
             ))
-            TextField(provider == .jev ? "Model" : "Deployment name", text: Binding(
+            TextField(provider == .microsoftDecision ? "Deployment name" : "Model", text: Binding(
                 get: { configuration.model },
                 set: {
                     invalidateValidation()
@@ -172,7 +176,7 @@ struct RemoteClassificationSettingsSection: View {
     private func reloadConfiguration() {
         configuration = .load(provider: provider)
         if !configuration.isEnabled,
-           UserDefaults.standard.object(forKey: "\(provider == .jev ? "pasta.jev" : "pasta.microsoftDecision").mode") == nil {
+           UserDefaults.standard.object(forKey: "\(provider.defaultsPrefix).mode") == nil {
             configuration.mode = .primary
         }
         do {

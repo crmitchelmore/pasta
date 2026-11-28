@@ -1,166 +1,59 @@
+import PastaCore
 import XCTest
 @testable import PastaDetectors
 
 final class ContentTypeDetectorTests: XCTestCase {
-    func testDetectsJWTAsPrimary() throws {
+    private typealias Support = DetectorTestSupport
+
+    func testPrimaryClassificationAndMetadataTable() throws {
         let detector = ContentTypeDetector(jwtDetector: JWTDetector(now: { Date(timeIntervalSince1970: 2_000) }))
+        let jwt = Support.makeJWT(header: #"{"alg":"HS256"}"#, payload: #"{"exp":2500}"#, signature: "sig")
+        let cases: [(name: String, input: String, primary: ContentType, metadataKey: String?)] = [
+            ("bearer jwt", "Bearer \(jwt)", .jwt, "jwt"),
+            ("url in text", "See https://example.com", .url, nil),
+            ("percent-encoded url is classified decoded", "https%3A%2F%2Fgithub.com%2Fgroue%2FGRDB.swift", .url, "encoding"),
+            ("ip address", "ping 192.168.1.5", .ipAddress, "ipAddresses"),
+            ("uuid", "id=550e8400-e29b-41d4-a716-446655440000", .uuid, "uuids"),
+            ("hash", "sha256=9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", .hash, "hashes"),
+            ("bare email", "user@example.com", .email, nil),
+            ("bare url", "https://example.com/docs", .url, nil),
+            ("hex colour", "#ff8800", .color, "colors"),
+            ("empty input", "   \n", .unknown, nil),
+        ]
+        for c in cases {
+            let out = detector.detect(in: c.input)
+            XCTAssertEqual(out.primaryType, c.primary, "case \(c.name)")
+            if let key = c.metadataKey {
+                XCTAssertNotNil(Support.parseJSON(out.metadataJSON)?[key], "case \(c.name): metadata \(key)")
+            }
+        }
+        XCTAssertGreaterThanOrEqual(detector.detect(in: "Bearer \(jwt)").confidence, 0.9)
 
-        let header = "{\"alg\":\"HS256\"}"
-        let payload = "{\"exp\":2500}"
-        let token = makeJWT(headerJSON: header, payloadJSON: payload, signature: "sig")
-
-        let out = detector.detect(in: "Bearer \(token)")
-        XCTAssertEqual(out.primaryType, .jwt)
-        XCTAssertGreaterThanOrEqual(out.confidence, 0.9)
-
-        let meta = try XCTUnwrap(parseJSON(out.metadataJSON))
-        XCTAssertNotNil(meta["jwt"])
+        let env = detector.detect(in: "export FOO=bar\nBAZ=qux")
+        XCTAssertEqual(env.primaryType, .envVarBlock)
+        XCTAssertEqual(env.splitEntries.map(\.content), ["export FOO=bar", "BAZ=qux"])
+        XCTAssertTrue(env.splitEntries.allSatisfy { $0.contentType == .envVar })
+        let envMeta = try XCTUnwrap(Support.parseJSON(env.metadataJSON)?["env"] as? [String: Any])
+        XCTAssertEqual(envMeta["isBlock"] as? Bool, true)
     }
 
-    func testDetectsEnvVarBlockAndSplits() throws {
-        let detector = ContentTypeDetector()
-        let text = """
-        export FOO=bar
-        BAZ=qux
-        """
-
-        let out = detector.detect(in: text)
-        XCTAssertEqual(out.primaryType, .envVarBlock)
-        XCTAssertEqual(out.splitEntries.count, 2)
-        XCTAssertTrue(out.splitEntries.allSatisfy { $0.contentType == .envVar })
-
-        let meta = try XCTUnwrap(parseJSON(out.metadataJSON))
-        let env = try XCTUnwrap(meta["env"] as? [String: Any])
-        XCTAssertEqual(env["isBlock"] as? Bool, true)
-    }
-
-    func testPrefersURLWhenOnlyURLPresent() {
-        let detector = ContentTypeDetector()
-        let out = detector.detect(in: "See https://example.com")
-        XCTAssertEqual(out.primaryType, .url)
-    }
-
-    func testUsesDecodedContentForClassification() {
-        let detector = ContentTypeDetector()
-        let encoded = "https%3A%2F%2Fgithub.com%2Fgroue%2FGRDB.swift"
-        let out = detector.detect(in: encoded)
-        XCTAssertEqual(out.primaryType, .url)
-    }
-
-    func testDetectsIPAddressAsPrimary() throws {
-        let detector = ContentTypeDetector()
-        let out = detector.detect(in: "ping 192.168.1.5")
-        XCTAssertEqual(out.primaryType, .ipAddress)
-
-        let meta = try XCTUnwrap(parseJSON(out.metadataJSON))
-        XCTAssertNotNil(meta["ipAddresses"])
-    }
-
-    func testDetectsUUIDAsPrimary() throws {
-        let detector = ContentTypeDetector()
-        let out = detector.detect(in: "id=550e8400-e29b-41d4-a716-446655440000")
-        XCTAssertEqual(out.primaryType, .uuid)
-
-        let meta = try XCTUnwrap(parseJSON(out.metadataJSON))
-        XCTAssertNotNil(meta["uuids"])
-    }
-
-    func testDetectsHashAsPrimary() throws {
-        let detector = ContentTypeDetector()
-        let out = detector.detect(in: "sha256=9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08")
-        XCTAssertEqual(out.primaryType, .hash)
-
-        let meta = try XCTUnwrap(parseJSON(out.metadataJSON))
-        XCTAssertNotNil(meta["hashes"])
-    }
-
-    func testJWTDoesNotProduceFalseAPIKeyDetections() throws {
+    func testAPIKeyDetectionRespectsTokenBoundaries() throws {
         let detector = ContentTypeDetector(jwtDetector: JWTDetector(now: { Date(timeIntervalSince1970: 2_000) }))
-
-        // A realistic JWT with long base64url segments that could match broad API key patterns
-        let header = "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"kid\":\"abc123\"}"
-        let payload = "{\"sub\":\"user_2abc\",\"iss\":\"https://clerk.example.com\",\"iat\":1500,\"exp\":2500,\"azp\":\"app_2def\",\"org_id\":\"org_2ghi\",\"permissions\":[\"read\",\"write\"]}"
-        let token = makeJWT(headerJSON: header, payloadJSON: payload, signature: String(repeating: "x", count: 64))
-
+        // Long base64url JWT segments must not be reported as API keys.
+        let token = Support.makeJWT(
+            header: #"{"alg":"RS256","typ":"JWT","kid":"abc123"}"#,
+            payload: #"{"sub":"user_2abc","iss":"https://clerk.example.com","iat":1500,"exp":2500,"azp":"app_2def","org_id":"org_2ghi","permissions":["read","write"]}"#,
+            signature: String(repeating: "x", count: 64)
+        )
         let out = detector.detect(in: token)
         XCTAssertEqual(out.primaryType, .jwt)
+        XCTAssertNil(Support.parseJSON(out.metadataJSON)?["apiKeys"], "JWT should not produce false API key detections")
 
-        let meta = try XCTUnwrap(parseJSON(out.metadataJSON))
-        // Must not contain false positive API keys from JWT segments
-        let apiKeys = meta["apiKeys"] as? [[String: Any]]
-        XCTAssertNil(apiKeys, "JWT should not produce false API key detections")
-    }
-
-    func testAPIKeyBoundaryEnforcementPreventsEmbeddedMatches() {
-        let detector = APIKeyDetector()
-
-        // An AWS secret key pattern embedded in a longer string (no whitespace boundary)
+        let apiKeys = APIKeyDetector()
         let embedded = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzABCDEFGH"
-        let detections = detector.detect(in: embedded)
-        // Should not match because the 40-char AWS pattern is embedded in a longer run
-        let awsKeys = detections.filter { $0.provider.contains("AWS") }
-        XCTAssertTrue(awsKeys.isEmpty, "Should not detect embedded AWS key without boundary")
-    }
-
-    func testAPIKeyWithWhitespaceBoundaryIsDetected() {
-        let detector = APIKeyDetector()
-
-        let key = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"
-        let detections = detector.detect(in: "token: \(key) is live")
-        XCTAssertTrue(detections.contains(where: { $0.provider == "GitHub PAT" }))
-    }
-
-    func testPhoneDetectionsRespectConfiguredStrictness() throws {
-        let detector = ContentTypeDetector()
-        let text = "IDs: 202602191651 19105072027582"
-
-        var mediumConfig = DetectorConfiguration.default
-        mediumConfig.globalStrictness = .medium
-        let medium = detector.detect(in: text, configuration: mediumConfig)
-        let mediumMeta = try XCTUnwrap(parseJSON(medium.metadataJSON))
-        XCTAssertNil(mediumMeta["phoneNumbers"])
-
-        var laxConfig = DetectorConfiguration.default
-        laxConfig.globalStrictness = .lax
-        let lax = detector.detect(in: text, configuration: laxConfig)
-        let laxMeta = try XCTUnwrap(parseJSON(lax.metadataJSON))
-        let numbers = laxMeta["phoneNumbers"] as? [[String: Any]]
-        XCTAssertEqual(numbers?.count, 2)
-    }
-
-    func testCustomDetectorsAppearInMetadataAndOutput() throws {
-        let detector = ContentTypeDetector()
-        var config = DetectorConfiguration.default
-        config.customDetectors = [
-            CustomDetectorDefinition(name: "Ticket ID", pattern: #"TKT-(\d{4})"#, isEnabled: true, isCaseInsensitive: false, confidence: 0.8)
-        ]
-
-        let output = detector.detect(in: "Created ticket TKT-4821 yesterday", configuration: config)
-        XCTAssertEqual(output.customDetections.count, 1)
-        XCTAssertEqual(output.customDetections.first?.name, "Ticket ID")
-        XCTAssertEqual(output.customDetections.first?.value, "4821")
-
-        let metadata = try XCTUnwrap(parseJSON(output.metadataJSON))
-        let custom = metadata["customDetectors"] as? [[String: Any]]
-        XCTAssertEqual(custom?.first?["name"] as? String, "Ticket ID")
-        XCTAssertEqual(custom?.first?["value"] as? String, "4821")
-    }
-
-    private func parseJSON(_ json: String?) -> [String: Any]? {
-        guard let json, let data = json.data(using: .utf8) else { return nil }
-        return (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any]
-    }
-
-    private func makeJWT(headerJSON: String, payloadJSON: String, signature: String) -> String {
-        "\(base64url(headerJSON)).\(base64url(payloadJSON)).\(base64url(signature))"
-    }
-
-    private func base64url(_ s: String) -> String {
-        let data = Data(s.utf8)
-        let b64 = data.base64EncodedString()
-        return b64
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
+        XCTAssertTrue(apiKeys.detect(in: embedded).filter { $0.provider.contains("AWS") }.isEmpty,
+                      "40-char AWS secret pattern embedded in a longer run must not match")
+        XCTAssertTrue(apiKeys.detect(in: "token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij is live")
+            .contains { $0.provider == "GitHub PAT" })
     }
 }

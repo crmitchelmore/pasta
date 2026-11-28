@@ -1,5 +1,6 @@
 #!/bin/bash
-# iOS XCUITest e2e suite driver, shared by ci.yml (`ios-e2e`, every PR) and
+# iOS XCUITest e2e suite driver, shared by ci.yml (`ios-e2e`, every main push
+# and routed PRs) and
 # release-ios.yml (`preflight`, before any TestFlight upload) so the two cannot
 # drift. Each subcommand is one workflow step; state (the simulator UDID) is
 # handed between steps through $GITHUB_ENV when running under Actions and

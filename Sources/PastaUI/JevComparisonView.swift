@@ -70,27 +70,39 @@ public struct JevComparisonView: View {
     public let onExport: ((ExportFormat) -> Void)?
     private let originalEntries: [UUID: ClipboardEntry]
     private let rowsByID: [UUID: JevComparisonRow]
-    private let additionalReport: JevComparisonReport?
-    private let additionalRows: [UUID: JevComparisonRow]
+    private let additionalReports: [JevComparisonReport]
+    private let additionalRowLookups: [[UUID: JevComparisonRow]]
     private let onCopy: ((ClipboardEntry) -> Void)?
     @State private var filter: Filter = .all
     @State private var pair: JevCategoryPair?
     @State private var selectedRowID: UUID?
+    @State private var additionalIndex: Int
 
     public init(
         report: JevComparisonReport,
         originalEntries: [UUID: ClipboardEntry] = [:],
+        additionalProvider: RemoteClassificationProvider? = nil,
         onCopy: ((ClipboardEntry) -> Void)? = nil,
         onExport: ((ExportFormat) -> Void)? = nil
     ) {
         self.report = report
         self.originalEntries = originalEntries
         self.rowsByID = report.rows.reduce(into: [:]) { $0[$1.id] = $1 }
-        self.additionalReport = report.additionalReports?.first
-        self.additionalRows = (report.additionalReports?.first?.rows ?? []).reduce(into: [:]) { $0[$1.id] = $1 }
+        let additional = report.additionalReports ?? []
+        self.additionalReports = additional
+        self.additionalRowLookups = additional.map { $0.rows.reduce(into: [:]) { $0[$1.id] = $1 } }
+        _additionalIndex = State(initialValue: additional.firstIndex { $0.provider == additionalProvider } ?? 0)
         self.onCopy = onCopy
         self.onExport = onExport
         _selectedRowID = State(initialValue: report.rows.first?.id)
+    }
+
+    var additionalReport: JevComparisonReport? {
+        additionalReports.indices.contains(additionalIndex) ? additionalReports[additionalIndex] : nil
+    }
+
+    private var additionalRows: [UUID: JevComparisonRow] {
+        additionalRowLookups.indices.contains(additionalIndex) ? additionalRowLookups[additionalIndex] : [:]
     }
 
     public var body: some View {
@@ -117,6 +129,15 @@ public struct JevComparisonView: View {
                 summary("\(report.providerTitle) latency", latencyText, detail: report.latencySummary.map { "p95 \(milliseconds($0.p95))" })
             }
             if let additionalReport {
+                if additionalReports.count > 1 {
+                    Picker("Additional model", selection: $additionalIndex) {
+                        ForEach(additionalReports.indices, id: \.self) { index in
+                            Text(additionalReports[index].providerTitle).tag(index)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .help("Choose the additional provider shown in the table, details and filters. Exports include every provider.")
+                }
                 HStack(spacing: 16) {
                     Text(additionalReport.providerTitle).fontWeight(.semibold)
                     Text("\(additionalReport.compared) compared · \(percent(additionalReport.agreementRate)) agreement · \(additionalReport.failed) failed · \(additionalReport.skipped) skipped")

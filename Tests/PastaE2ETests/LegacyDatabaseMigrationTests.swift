@@ -10,19 +10,6 @@ import PastaUI
 /// the pending migrations, including the `contentTypeMask` backfill), then
 /// used for the things the panel does on launch.
 final class LegacyDatabaseMigrationTests: XCTestCase {
-    private var env: E2ETempEnvironment!
-
-    override func setUpWithError() throws {
-        try super.setUpWithError()
-        env = try E2ETempEnvironment(name: "migration")
-    }
-
-    override func tearDownWithError() throws {
-        env.destroy()
-        env = nil
-        try super.tearDownWithError()
-    }
-
     // MARK: - Fixture
 
     /// One legacy row's expected post-migration state.
@@ -106,7 +93,7 @@ final class LegacyDatabaseMigrationTests: XCTestCase {
     /// Builds the database file at the schema `upTo` produced, seeding rows
     /// with raw SQL against that schema's columns, and closes it again so the
     /// current code reopens a cold file exactly as it would on a user's Mac.
-    private func writeLegacyDatabase(upTo migration: String, rows: [SeededRow], columns: [String]) throws {
+    private func writeLegacyDatabase(at env: E2ETempEnvironment, upTo migration: String, rows: [SeededRow], columns: [String]) throws {
         var config = Configuration()
         config.foreignKeysEnabled = true
         try autoreleasepool {
@@ -238,52 +225,44 @@ final class LegacyDatabaseMigrationTests: XCTestCase {
 
     // MARK: - Tests
 
-    func testPreMaskDatabaseWithHundredsOfRowsIsBackfilledAndUsable() throws {
-        let rows = makeRows(count: 480)
-        try writeLegacyDatabase(upTo: "addUnsyncedIndex", rows: rows, columns: Self.preMaskColumns)
-
-        let db = try env.openDatabase()
-        let columns = try db.dbWriter.read { try $0.columns(in: ClipboardEntry.databaseTableName).map(\.name) }
-        XCTAssertTrue(columns.contains("contentTypeMask"))
-        try assertUpgradedDatabaseWorks(db, rows: rows)
-    }
-
-    func testOriginalReleaseSchemaUpgradesThroughEveryMigration() throws {
-        // The very first schema: no parentEntryId / isSynced / isPinned / mask,
+    func testLegacySchemasUpgradeIdempotentlyAndStayUsable() throws {
+        // "addUnsyncedIndex" predates only the mask column; "createClipboardEntriesFTS"
+        // is the very first release: no parentEntryId / isSynced / isPinned / mask,
         // and the original (contentType-polluted) FTS table.
-        let rows = makeRows(count: 300)
-        try writeLegacyDatabase(upTo: "createClipboardEntriesFTS", rows: rows, columns: Self.originalColumns)
+        let cases: [(name: String, migration: String, columns: [String], rowCount: Int)] = [
+            ("pre-mask", "addUnsyncedIndex", Self.preMaskColumns, 480),
+            ("original", "createClipboardEntriesFTS", Self.originalColumns, 300),
+        ]
+        for testCase in cases {
+            let env = try E2ETempEnvironment(name: "migration-\(testCase.name)")
+            defer { env.destroy() }
+            let rows = makeRows(count: testCase.rowCount)
+            try writeLegacyDatabase(at: env, upTo: testCase.migration, rows: rows, columns: testCase.columns)
 
-        let db = try env.openDatabase()
-        try assertUpgradedDatabaseWorks(db, rows: rows)
+            try autoreleasepool {
+                let first = try env.openDatabase()
+                XCTAssertEqual(try first.countEntries(), rows.count, testCase.name)
+                let columns = try first.dbWriter.read { try $0.columns(in: ClipboardEntry.databaseTableName).map(\.name) }
+                XCTAssertTrue(columns.contains("contentTypeMask"), testCase.name)
+            }
 
-        // Columns added by later migrations carry their defaults on the legacy rows.
-        let legacyIDs = Set(rows.map(\.id))
-        let fetched = try db.fetchAll().filter { legacyIDs.contains($0.id) }
-        XCTAssertEqual(fetched.count, rows.count)
-        XCTAssertTrue(fetched.allSatisfy { $0.parentEntryId == nil && !$0.isPinned })
-        // assertUpgradedDatabaseWorks re-copied rows[0]: its copyCount changed,
-        // so that row is pending upload again. Rows with newly backfilled
-        // composition metadata are also pending; unchanged rows stay synced.
-        XCTAssertTrue(fetched.filter { $0.id != rows[0].id && e2eJSONDictionary($0.metadata)?["composition"] == nil }.allSatisfy(\.isSynced), "unchanged pre-sync rows remain synced")
-        XCTAssertEqual(fetched.first { $0.id == rows[0].id }?.isSynced, false, "a re-copied legacy row must upload again with its new copyCount")
-    }
+            // Reopening an upgraded file is a no-op, then the library is fully usable.
+            let db = try env.openDatabase()
+            XCTAssertEqual(try db.countEntries(), rows.count, testCase.name)
+            XCTAssertTrue(try db.dbWriter.read { try DatabaseManager.migrator.hasCompletedMigrations($0) }, testCase.name)
+            try assertUpgradedDatabaseWorks(db, rows: rows)
 
-    func testReopeningAnUpgradedDatabaseIsIdempotent() throws {
-        let rows = makeRows(count: 120)
-        try writeLegacyDatabase(upTo: "addUnsyncedIndex", rows: rows, columns: Self.preMaskColumns)
-
-        try autoreleasepool {
-            let first = try env.openDatabase()
-            XCTAssertEqual(try first.countEntries(), rows.count)
+            guard testCase.migration == "createClipboardEntriesFTS" else { continue }
+            // Columns added by later migrations carry their defaults on the legacy rows.
+            let legacyIDs = Set(rows.map(\.id))
+            let fetched = try db.fetchAll().filter { legacyIDs.contains($0.id) }
+            XCTAssertEqual(fetched.count, rows.count)
+            XCTAssertTrue(fetched.allSatisfy { $0.parentEntryId == nil && !$0.isPinned })
+            // assertUpgradedDatabaseWorks re-copied rows[0]: its copyCount changed,
+            // so that row is pending upload again. Rows with newly backfilled
+            // composition metadata are also pending; unchanged rows stay synced.
+            XCTAssertTrue(fetched.filter { $0.id != rows[0].id && e2eJSONDictionary($0.metadata)?["composition"] == nil }.allSatisfy(\.isSynced), "unchanged pre-sync rows remain synced")
+            XCTAssertEqual(fetched.first { $0.id == rows[0].id }?.isSynced, false, "a re-copied legacy row must upload again with its new copyCount")
         }
-
-        let second = try env.openDatabase()
-        XCTAssertEqual(try second.countEntries(), rows.count)
-        let appliedTwice: Bool = try second.dbWriter.read { db in
-            try DatabaseManager.migrator.hasCompletedMigrations(db)
-        }
-        XCTAssertTrue(appliedTwice)
-        try assertUpgradedDatabaseWorks(second, rows: rows)
     }
 }

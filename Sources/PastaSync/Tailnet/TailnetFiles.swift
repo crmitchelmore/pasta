@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import CoreServices
 import CryptoKit
 import Darwin
 import PastaCore
@@ -299,6 +300,7 @@ struct TailnetFiles: Sendable {
                 try FileManager.default.moveItem(at: stage, to: destination)
             }
             let paths = manifest.roots.map { destination.appendingPathComponent("content").appendingPathComponent($0).path }
+            try Self.quarantine(destination.appendingPathComponent("content"))
             entry.content = paths.joined(separator: "\n")
             entry.rawData = try JSONEncoder().encode(paths)
         } else if !manifest.files.isEmpty {
@@ -306,6 +308,21 @@ struct TailnetFiles: Sendable {
         }
         // Non-file payloads can be retried from staging if SQLite rejects commit.
         return entry
+    }
+    /// Received files came from another machine, so mark every item like a
+    /// download: Gatekeeper then assesses apps, scripts and documents on open.
+    static func quarantine(_ content: URL) throws {
+        let properties: [String: Any] = [
+            kLSQuarantineAgentNameKey as String: "Pasta",
+            kLSQuarantineTypeKey as String: kLSQuarantineTypeOtherDownload as String,
+        ]
+        let children = FileManager.default.enumerator(at: content, includingPropertiesForKeys: nil)?.allObjects as? [URL] ?? []
+        for url in children {
+            var values = URLResourceValues()
+            values.quarantineProperties = properties
+            var target = url
+            try target.setResourceValues(values)
+        }
     }
     func acknowledge(_ id: UUID) {
         try? FileManager.default.removeItem(at: staging(id))

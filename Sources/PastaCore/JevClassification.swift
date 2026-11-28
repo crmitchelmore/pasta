@@ -10,11 +10,39 @@ import Security
 public enum RemoteClassificationProvider: String, Codable, Sendable, CaseIterable {
     case jev
     case microsoftDecision
+    case openAI
 
-    public var title: String { self == .jev ? "Jev" : "Microsoft Decision-1" }
-    public var defaultModel: String { self == .jev ? "jev-latest" : "microsoft-decision-1" }
-    public var defaultEndpoint: String { self == .jev ? JevConfiguration.defaultEndpoint : "" }
-    var defaultsPrefix: String { self == .jev ? "pasta.jev" : "pasta.microsoftDecision" }
+    public var title: String {
+        switch self {
+        case .jev: return "Jev"
+        case .microsoftDecision: return "Microsoft Decision-1"
+        case .openAI: return "OpenAI"
+        }
+    }
+
+    public var defaultModel: String {
+        switch self {
+        case .jev: return "jev-latest"
+        case .microsoftDecision: return "microsoft-decision-1"
+        case .openAI: return "gpt-5.6-terra"
+        }
+    }
+
+    public var defaultEndpoint: String {
+        switch self {
+        case .jev: return JevConfiguration.defaultEndpoint
+        case .microsoftDecision: return ""
+        case .openAI: return "https://api.openai.com/v1/responses"
+        }
+    }
+
+    public var defaultsPrefix: String {
+        switch self {
+        case .jev: return "pasta.jev"
+        case .microsoftDecision: return "pasta.microsoftDecision"
+        case .openAI: return "pasta.openAI"
+        }
+    }
 }
 
 public enum JevClassificationMode: String, CaseIterable, Sendable {
@@ -196,6 +224,7 @@ public struct JevConfiguration: Sendable, Equatable {
     private func validationFingerprint(apiKey: String) throws -> String {
         var values = [endpoint.trimmingCharacters(in: .whitespacesAndNewlines), effectiveModel, apiKey.trimmingCharacters(in: .whitespacesAndNewlines)]
         if provider == .microsoftDecision { values.append("api-key") }
+        if provider == .openAI { values.append("openai-responses-json-schema-v1") }
         if rules != .default { values.append(try rules.fingerprint) }
         return ClipboardEntry.sha256Hex(values.map { "\($0.utf8.count):\($0)" }.joined())
     }
@@ -203,7 +232,11 @@ public struct JevConfiguration: Sendable, Equatable {
 
 public enum JevKeychain {
     private static func service(for provider: RemoteClassificationProvider) -> String {
-        provider == .jev ? "com.pasta.jev.api-key" : "com.pasta.microsoft-decision.api-key"
+        switch provider {
+        case .jev: return "com.pasta.jev.api-key"
+        case .microsoftDecision: return "com.pasta.microsoft-decision.api-key"
+        case .openAI: return "com.pasta.openai.api-key"
+        }
     }
 
     public static func read(provider: RemoteClassificationProvider = .jev) throws -> String? {
@@ -268,6 +301,7 @@ public enum JevKeychain {
 // MARK: - API errors and retries
 
 public enum JevAPIError: LocalizedError, Sendable, Equatable {
+    case badRequest(String?)
     case unauthorized(String?)
     case forbidden(String?)
     case endpointNotFound
@@ -310,7 +344,7 @@ public enum JevAPIError: LocalizedError, Sendable, Equatable {
     /// A fatal error will fail every subsequent request too, so batch runs stop immediately.
     public var isFatal: Bool {
         switch self {
-        case .unauthorized, .forbidden, .endpointNotFound, .validation:
+        case .badRequest, .unauthorized, .forbidden, .endpointNotFound, .validation:
             return true
         case .network(let code, _):
             return Self.fatalNetworkCodes.contains(code)
@@ -335,12 +369,14 @@ public enum JevAPIError: LocalizedError, Sendable, Equatable {
 
     public var errorDescription: String? {
         switch self {
+        case .badRequest(let detail):
+            return Self.join("The classification provider rejected the request (400). Check the model and API settings.", detail)
         case .unauthorized(let detail):
             return Self.join("The provider rejected the API key (401). Check the key in Settings → Detection.", detail)
         case .forbidden(let detail):
             return Self.join("The provider denied access to the model (403).", detail)
         case .endpointNotFound:
-            return "The classification endpoint returned 404. Check the full System One endpoint in Settings → Detection."
+            return "The classification endpoint returned 404. Check the provider's full endpoint and model in Settings → Detection."
         case .validation(let detail):
             return Self.join("The classification provider rejected the request (422).", detail)
         case .rateLimited:
@@ -371,6 +407,7 @@ public enum JevAPIError: LocalizedError, Sendable, Equatable {
         case 401: return .unauthorized(detail)
         case 403: return .forbidden(detail)
         case 404: return .endpointNotFound
+        case 400: return .badRequest(detail)
         case 422: return .validation(detail)
         case 429: return .rateLimited
         case 529: return .overloaded
@@ -592,10 +629,17 @@ public struct JevClassifier: Sendable {
         } else {
             request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         }
-        request.httpBody = try JevSystemOneRequest.body(content: content, model: configuration.effectiveModel, rules: configuration.rules)
+        if configuration.provider == .openAI {
+            request.httpBody = try OpenAIClassification.body(content: content, model: configuration.effectiveModel, rules: configuration.rules)
+        } else {
+            request.httpBody = try JevSystemOneRequest.body(content: content, model: configuration.effectiveModel, rules: configuration.rules)
+        }
 
         let started = Date()
         let (data, attempts) = try await send(request, authorizationCheck: authorizationCheck)
+        if configuration.provider == .openAI {
+            return try OpenAIClassification.decode(data, latency: Date().timeIntervalSince(started), attempts: attempts, rules: configuration.rules)
+        }
         let result = try Self.decode(data, latency: Date().timeIntervalSince(started), attempts: attempts, rules: configuration.rules)
         if configuration.provider == .microsoftDecision {
             guard let model = result.modelVersion?.lowercased(),
@@ -730,7 +774,7 @@ public enum JevSkipReason: String, Codable, Sendable, CaseIterable {
     public var displayTitle: String {
         switch self {
         case .extractedChild: return "Extracted item"
-        case .binaryContent: return "Image (Jev is text-only)"
+        case .binaryContent: return "Image (classification is text-only)"
         case .emptyContent: return "Empty content"
         case .sensitiveContent: return "Sensitive content not sent"
         case .notAttempted: return "Not attempted"

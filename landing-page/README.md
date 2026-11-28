@@ -52,7 +52,7 @@ Or just open `index.html` in your browser.
 ## Testing
 
 Everything here runs on Linux/macOS in well under a minute and — apart from
-the advisory live probe — needs **no network access**. Requires Node 20+.
+the advisory live probe — needs **no network access**. Requires Node 22.12+.
 
 ```bash
 cd landing-page
@@ -100,6 +100,9 @@ appcast whenever `landing-page/**` changes on `main`.
   Uploads `playwright-report/` as an artifact on failure.
 - **Landing page live probe (advisory)** — pushes to `main` and manual
   dispatch only; `continue-on-error`, so it can never block a merge.
+
+The native suites (`Build & Test`, iOS XCUITests) live in the same workflow; see
+`AGENTS.md` for which run on PRs and which run only after merge.
 
 ## Structure
 

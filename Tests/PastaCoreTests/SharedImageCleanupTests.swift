@@ -37,29 +37,14 @@ final class SharedImageCleanupTests: XCTestCase {
         XCTAssertEqual(try database.fetchRecent().count, 2)
     }
 
-    func testGraceProtectsSaveBeforeInsertAndEventuallyRemovesAbandonedFiles() throws {
-        let database = try DatabaseManager.inMemory()
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let storage = try ImageStorageManager(imagesDirectoryURL: directory, cleanupGracePeriod: 0.15)
-        let protected = try storage.saveImage(Data([1, 2]))
-        let abandoned = try storage.saveImage(Data([3, 4]))
-        try database.deleteUnreferencedImages(paths: [protected, abandoned], using: storage)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: protected))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: abandoned))
-        try database.insert(ClipboardEntry(content: "", contentType: .image, imagePath: protected))
-        let elapsed = expectation(description: "deferred cleanup ran")
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { elapsed.fulfill() }
-        wait(for: [elapsed], timeout: 2)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: protected))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: abandoned))
-    }
-
     private enum Deletion: CaseIterable {
         case single, bulk, recent, all, maxEntries, age
     }
 
-    func testEveryDeletePathProtectsSharedPinnedImageUntilLastReferenceIsDeleted() throws {
+    /// No delete path removes a content-addressed image still referenced (pinned
+    /// sharer, re-captured after deletion, or saved but not yet inserted), while
+    /// abandoned files are eventually removed.
+    func testImageFilesSurviveWhileReferencedOnEveryDeletePath() throws {
         for deletion in Deletion.allCases {
             let database = try DatabaseManager.inMemory()
             let directory = FileManager.default.temporaryDirectory
@@ -110,25 +95,45 @@ final class SharedImageCleanupTests: XCTestCase {
             XCTAssertTrue(try service.delete(id: survivor.id))
             XCTAssertFalse(FileManager.default.fileExists(atPath: path), "\(deletion)")
         }
-    }
 
-    func testCleanupRechecksReferencesAddedAfterDeletion() throws {
-        let database = try DatabaseManager.inMemory()
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("PastaSharedImages-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let storage = try ImageStorageManager(imagesDirectoryURL: directory, cleanupGracePeriod: 0)
-        let bytes = Data([0x04, 0x05])
-        let path = try storage.saveImage(bytes)
-        let victim = ClipboardEntry(content: "", contentType: .image, imagePath: path)
-        try database.insert(victim)
-        let result = try database.delete(ids: [victim.id])
+        // Cleanup rechecks references added after the rows were deleted.
+        do {
+            let database = try DatabaseManager.inMemory()
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("PastaSharedImages-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let storage = try ImageStorageManager(imagesDirectoryURL: directory, cleanupGracePeriod: 0)
+            let bytes = Data([0x04, 0x05])
+            let path = try storage.saveImage(bytes)
+            let victim = ClipboardEntry(content: "", contentType: .image, imagePath: path)
+            try database.insert(victim)
+            let result = try database.delete(ids: [victim.id])
 
-        let newlyCaptured = ClipboardEntry(content: "", contentType: .image, imagePath: path)
-        try database.insert(newlyCaptured)
-        try database.deleteUnreferencedImages(paths: result.imagePaths, using: storage)
+            let newlyCaptured = ClipboardEntry(content: "", contentType: .image, imagePath: path)
+            try database.insert(newlyCaptured)
+            try database.deleteUnreferencedImages(paths: result.imagePaths, using: storage)
 
-        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path)), bytes)
-        XCTAssertNotNil(try database.fetch(id: newlyCaptured.id))
+            XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path)), bytes)
+            XCTAssertNotNil(try database.fetch(id: newlyCaptured.id))
+        }
+
+        // The grace period protects a save that has not been inserted yet.
+        do {
+            let database = try DatabaseManager.inMemory()
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let storage = try ImageStorageManager(imagesDirectoryURL: directory, cleanupGracePeriod: 0.15)
+            let protected = try storage.saveImage(Data([1, 2]))
+            let abandoned = try storage.saveImage(Data([3, 4]))
+            try database.deleteUnreferencedImages(paths: [protected, abandoned], using: storage)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: protected))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: abandoned))
+            try database.insert(ClipboardEntry(content: "", contentType: .image, imagePath: protected))
+            let elapsed = expectation(description: "deferred cleanup ran")
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { elapsed.fulfill() }
+            wait(for: [elapsed], timeout: 2)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: protected))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: abandoned))
+        }
     }
 }

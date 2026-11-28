@@ -4,7 +4,7 @@ import PastaCore
 
 @MainActor
 final class PermissionGuidanceTests: XCTestCase {
-    func testIdentityPreservesAlphaDevRenamedAndLocalisedNames() {
+    func testGuidanceOpensMatchingSettingsAndOnlyReportsFreshGrants() {
         for name in ["Pasta Alpha", "Pasta Development", "My Clipboard", "Pâtes Alpha"] {
             let url = URL(fileURLWithPath: "/Temporary/\(name).app")
             let identity = PermissionAppIdentity(bundleURL: url, displayName: name + ".app")
@@ -13,9 +13,7 @@ final class PermissionGuidanceTests: XCTestCase {
             XCTAssertTrue(identity.isAppBundle)
         }
         XCTAssertFalse(PermissionAppIdentity(bundleURL: URL(fileURLWithPath: "/tmp/PastaApp")).isAppBundle)
-    }
 
-    func testRepeatedRequestsAlwaysOpenMatchingSettingsWithoutInventingGrant() {
         for permission in MacPermission.allCases {
             let store = MacPermissionStore(read: { .init(accessibility: false, inputMonitoring: false) })
             var opened: [URL] = []
@@ -32,9 +30,7 @@ final class PermissionGuidanceTests: XCTestCase {
             model.stopChecking()
             XCTAssertEqual(store.activeSessionCount, 0)
         }
-    }
 
-    func testFailedSettingsLinkShowsManualPathAndRecheckUsesFreshState() {
         var current = MacPermissionSnapshot(accessibility: false, inputMonitoring: false)
         let store = MacPermissionStore(read: { current })
         let model = PermissionGuidanceModel(permission: .accessibility, store: store,

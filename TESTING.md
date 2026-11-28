@@ -7,13 +7,45 @@ two-device clipboard journey. Use this map when describing release confidence.
 | User journey / surface | Current evidence | Coverage boundary |
 | --- | --- | --- |
 | macOS copy → detect → persist → search → paste | `Tests/PastaE2ETests` runs real monitor, detector, disk database, search and paste services. | The fixture **duplicates** `BackgroundService` enrichment/insertion glue. Most pasteboard and keyboard events are doubles (the image test reads/decode-checks a real named pasteboard); it does not open the panel or inspect content received by another app. |
-| macOS launch and quit | `ci-launch-smoke.sh` launches the bundle, waits for database/history/monitor readiness, and requires clean termination. Release repeats it against signed artifacts. | `PASTA_CI` suppresses CloudKit/analytics. Readiness does not prove capture, search selection, global hotkey, accessibility permission, or delivery to another app. |
+| macOS launch and quit | `ci-launch-smoke.sh` launches the bundle, waits for database/history/monitor readiness, and requires clean termination. It runs on every main push and on routed PRs. Release repeats it against signed artifacts. | `PASTA_CI` suppresses CloudKit/analytics. Readiness does not prove capture, search selection, global hotkey, accessibility permission, or delivery to another app. |
 | iOS install, capture, search, detail | XCUITest drives the real app/database with a controlled pasteboard. Empty history and unmatched search require exact outcomes. | Hooks seed the app-owned pasteboard. Cross-app paste permission, live iCloud, image clipboard capture and device provisioning are not exercised. |
 | iOS persistence after termination | Capture → terminate → relaunch with unrelated clipboard text → search → detail proves original content survives on disk and the count is exactly two. | This proves local persistence, not transport between devices. |
 | iCloud sync | Package tests exercise their stated model/persistence contracts. | Simulator UI tests disable sync. They cannot establish that two signed production clients exchange the same content, images/deletes, or recover from account/network changes. |
 | Landing page | Local Playwright checks rendering, links, assets and accessibility. Contracts parse appcast and Cloudflare config. | Third-party requests are stubbed; checking an href is not completing a download. CI live probes are advisory; standalone publication now runs a required post-deploy live probe and the six-hour production monitor fails on probe errors. |
 | Sparkle release | Live feed/DMG verification checks metadata, signatures, notarization and launch; failure drafts the GitHub release. | No installed older app is driven through Sparkle's update UI and relaunch. Drafting does not undo already-downloaded copies. |
 | TestFlight | Processing must report `VALID`; rejection or unverified timeout fails. | Upload has already occurred. `VALID` is processing acceptance, not an installed-device journey or external tester approval. Timeout does not cancel processing. |
+
+Native CI and direct-release workers use `scripts/ci-swift.sh` to keep dependency
+pins, the package cache and scratch storage consistent. Guarded runners build
+inside their assigned storage; ARM/Intel builds have separate scratch roots.
+Packaging uses SwiftPM's `--show-bin-path`, not an assumed `.build/release`
+layout, and resolves resources and pinned Sparkle tools from those same builds.
+`scripts/tests/test_swift_build_paths.py` checks this contract; native signed
+launch and outside-world release checks are still required.
+An owner can temporarily set the repository variable `PASTA_NATIVE_RUNNER` to
+`macos-15` for CI and release workers when local capacity is unavailable, then
+delete it to restore `pasta-local`. Hosted jobs select Xcode 26.3 and retain all
+the same gates; untrusted pull requests always use GitHub-hosted runners.
+
+## Quick Search history scope
+
+Quick Search category chips (including All and Pinned) show cached full-database
+totals, independent of the current query or how much history has loaded into the
+main window. Every nonempty category is available in the horizontally scrollable
+bar. Off-main SQLite aggregation refreshes the cache whenever history publishes
+and when Quick Search opens, including writes through other database connections.
+This covers inserts, deletes, pin changes and reclassification without loading
+clipboard payloads or counting on each keystroke.
+The panel shows at most 50 recent items or 20 ranked search matches; its footer
+states those limits. Empty-query category and pin filters also read the full
+database with a 50-row limit. FTS ranking and debounce behavior are unchanged.
+If the database is unavailable, the footer explicitly says "loaded history only".
+
+`swift test --filter QuickSearchManagerTests` covers histories beyond 1,000
+entries with only 200 loaded, every nonempty category, same-size publications,
+external-connection writes, older category/pinned results, result limits and
+superseded fetches. These are service tests, not a visual or
+global-hotkey UI journey.
 
 ## Remote classification and comparison
 
@@ -147,18 +179,47 @@ including before transport retries and after waiting for the sync gate.
 Live Microsoft connectivity still requires a
 real compatible deployment and key; mock transport tests do not establish it.
 
+### OpenAI
+
+Choose **OpenAI** in Settings → Detection or the optional macOS setup.
+The default connection is `https://api.openai.com/v1/responses` with
+`gpt-5.6-terra`; both endpoint and model are configurable. The model must support
+[Responses structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+OpenAI uses its own Keychain API key and validation/consent settings, separate
+from Jev and Microsoft. API billing is separate from ChatGPT subscriptions.
+Testing sends only the harmless connection-test sample and never enables uploads
+by itself. Primary, low-legacy-confidence fallback, confirmed comparison and
+confirmed history reclassification use the existing eligibility and stale-result
+guards. Images/file pastes and sensitive text without per-provider opt-in stay local.
+
+The adapter passes clipboard content as user data, sends shared type descriptions
+and custom labels as instructions, requires a strict single-choice JSON schema,
+and sets `store: false`. This disables response storage, not OpenAI's API abuse
+monitoring or other provider-side data policies. It requests no tools or browsing.
+Refusals, incomplete/malformed responses and unsupported choices fail explicitly,
+preserving the local classification; no confidence/probabilities are invented.
+HTTP 400 model/schema errors stop batches rather than repeatedly sending history.
+Comparison can display either additional provider via **Additional model**;
+JSON/CSV exports always retain all enabled provider results without clipboard text.
+
+Mock transport, persistence/E2E and offscreen UI tests cover OpenAI's schema,
+authentication, shared labels, isolation, opt-in, sensitive exclusions, retries,
+revoked in-flight authorization, malformed/refused output and multi-provider
+selection/exports. A live API connection still requires the user's own key and
+an explicit **Test Connection**; these tests do not establish live connectivity.
+
 ### Shared decision classifier types
 
-**Shared configuration → Shared classifier types** configures both models.
+**Shared configuration → Shared classifier types** configures all decision providers.
 Built-in type descriptions can be edited, and up to 32 named classifiers can be
 added with natural-language descriptions (no regex). Each custom label maps to
 an existing supported text type (not Unknown or File Path); its name appears in the item preview and
 comparison, while its mapped type controls existing filters, previews and sync.
 These are not new sidebar categories and are separate from legacy regex detectors.
 Definitions persist locally, use stable choice IDs, and are sent as System One
-criteria. The explicit Unknown/other choice remains last. Duplicate names/IDs,
+criteria or OpenAI structured-output choices. The explicit Unknown/other choice remains last. Duplicate names/IDs,
 empty or oversized descriptions and unsupported mappings are rejected.
-Changing shared rules disables both providers and invalidates their validation;
+Changing shared rules disables all providers and invalidates their validation;
 retest and explicitly enable each to resume. Old in-flight results cannot apply.
 History mutation preserves custom names in metadata across restart/sync and removes
 an old custom label when a later built-in decision replaces it.
@@ -206,7 +267,7 @@ to test membership as carefully as assertions. An incompatible Xcode result
 schema fails closed for investigation.
 
 Landing deployment waits for completed CI, checks out that exact SHA and
-independently requires macOS, iOS, appcast, path detection and Playwright
+independently requires macOS (with a successful `Launch smoke test` step), iOS, appcast, path detection and Playwright
 success before publishing. An automatic run with verified path detection and
 a skipped browser suite makes no deployment. Manual deployment requires full
 CI/browser evidence for the selected main SHA. It also rejects a SHA superseded on main, except for a verified descendant
@@ -216,9 +277,11 @@ read-only decision, exercised with failure-injection tests.
 ## Remaining enforcement and journey limits
 
 Workflow gates are not repository enforcement. Read the actual GitHub rules
-on main before claiming that every suite blocks merges. The owner script
-requests the aggregate, macOS, iOS and appcast checks but omits the path-filtered browser job itself.
-The active `Release gates` ruleset requires the always-running `CI gate` aggregate plus all three native/contract checks, scoped to GitHub Actions. The aggregate requires browser success or a verified irrelevant-path decision. Auto-release now requires
+on main before claiming that every suite blocks merges.
+
+PRs get a fast gate: `swift test` and its e2e suite, tooling, appcast and the routed Playwright run. The release-built bundle launch smoke and iOS XCUITests run on a PR only when it touches native or packaging paths or carries `ci:full`. They always run on main after merge, and every publisher accepts only exact-commit main CI evidence that includes them, so a deferred suite can delay a red signal until after merge but cannot let a red commit publish. `main-ci-responder.yml` turns a red main into an assigned incident naming the suspect PRs. `ci-merge-after-release.mjs` refuses further merges until main is green, except a `--fix-forward` fix.
+
+The owner script requests the aggregate, `Build & Test` and appcast checks. It omits the routed iOS and browser jobs because a job skipped by its `if:` reports success, and `CI gate` enforces them instead. The active `Release gates` ruleset (as of 2026-09-08) still lists the older iOS check until the owner reruns the script. The aggregate requires browser success or a verified irrelevant-path decision, and iOS success or a PR fast-lane decision. Auto-release now requires
 path detection itself to succeed before accepting a skipped browser suite.
 
 The macOS release independently validates exact tagged-commit CI evidence
@@ -254,7 +317,7 @@ smoke as full user e2e, or claim zero production regressions.
 - Local regression tests cover nonblocking/per-file image cleanup and the recent-save grace period, redacted error diagnostics, inline-image rendering and changed-byte cache invalidation.
 - Quick Search `!snippet <name or keyword>` reads the current saved template at activation. Date/time, UUID, current clipboard, history offsets and cursor position are resolved for that paste. Settings CRUD/JSON round trips remain supported. Optional keyword expansion is off by default, requires Accessibility and Input Monitoring, resets on focus/pointer/navigation/secure-input changes, and retains only a bounded current token. Test with a synthetic template in a disposable receiving document before enabling it for everyday use.
 - Both row renderers already share `ClipboardRowData`; detector and preview files have already been split by responsibility. The old simplification and inline-image follow-ups require verification, not a second rewrite.
-- `scripts/ci-merge-after-release.mjs` refuses merges while any publication lane or main-push CI is queued/running. This preserves the strict main-supersession policy. It is a maintainer merge entrypoint, not a transactional GitHub merge queue; humans must use the same discipline. Failed completed releases permit corrective merges after investigation.
+- `scripts/ci-merge-after-release.mjs` refuses merges while any publication lane or main-push CI is queued/running, or while the newest completed main CI run is red (`--fix-forward` lets only the fix through). This preserves the strict main-supersession policy. It is a maintainer merge entrypoint, not a transactional GitHub merge queue; humans must use the same discipline. Failed completed releases permit corrective merges after investigation.
 - Workflow actions are pinned to commit SHAs, Wrangler to 4.129.1, create-dmg to v1.3.0's commit, and iOS Xcode to the last green CI's 26.3. Update them with native CI evidence; do not float them during recovery.
 - macOS publication retains a dSYM archive and verifies each architecture's UUID before stripping. Upload it to Sentry before claiming production symbolication. Sentry event payloads strip free-form error details, breadcrumbs, requests, user data and incidental context; stack/binary/release evidence remains. Actual event symbolication and alert routing still need a controlled event and access to the Sentry project.
 

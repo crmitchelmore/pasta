@@ -22,7 +22,7 @@ jobs:
     # The github context belongs to the caller in reusable runs, so only a
     # direct dispatch of this workflow has to come from the owner on main.
     if: github.workflow != 'Release iOS (TestFlight)' || (github.actor == github.repository_owner && github.ref == 'refs/heads/main')
-    runs-on: pasta-local
+    runs-on: ${{ vars.PASTA_NATIVE_RUNNER || 'pasta-local' }}
     timeout-minutes: 45
     env:
       DERIVED_DATA: .build/ios-derived
@@ -75,7 +75,7 @@ jobs:
       run: scripts/ci-ios-e2e.sh diagnostics
     - name: Upload result bundle and diagnostics
       if: failure()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       with:
         name: release-ios-preflight-diagnostics
         path: '.build/ios-e2e/PastaIOSUITests.xcresult
@@ -91,7 +91,7 @@ jobs:
   testflight:
     name: Archive, Export & Upload to TestFlight
     needs: preflight
-    runs-on: pasta-local
+    runs-on: ${{ vars.PASTA_NATIVE_RUNNER || 'pasta-local' }}
     timeout-minutes: 90
     steps:
     - name: Checkout code
@@ -118,8 +118,7 @@ jobs:
         APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         IOS_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
         IOS_DISTRIBUTION_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_PASSWORD }}
-        IOS_APPSTORE_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_IOS_APPSTORE_PROFILE || secrets.IOS_APPSTORE_PROFILE
-          }}
+        IOS_APPSTORE_PROFILE: ${{ secrets.IOS_APPSTORE_PROFILE }}
       run: "set -euo pipefail\nmissing=()\nfor name in APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_API_KEY\
         \ \\\n            APPLE_TEAM_ID IOS_DISTRIBUTION_P12 IOS_DISTRIBUTION_PASSWORD IOS_APPSTORE_PROFILE; do\n  [ -n \"\
         ${!name}\" ] || missing+=(\"$name\")\ndone\nif [ ${#missing[@]} -gt 0 ]; then\n  echo \"::error::Missing required\
@@ -160,10 +159,9 @@ jobs:
         APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         IOS_DISTRIBUTION_P12: ${{ secrets.IOS_DISTRIBUTION_P12 }}
         IOS_DISTRIBUTION_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_PASSWORD }}
-        IOS_APPSTORE_PROFILE: ${{ env.RELEASE_TRAIN == 'alpha' && secrets.ALPHA_IOS_APPSTORE_PROFILE || secrets.IOS_APPSTORE_PROFILE
-          }}
+        IOS_APPSTORE_PROFILE: ${{ secrets.IOS_APPSTORE_PROFILE }}
       run: "set -euo pipefail\n\necho \"==> Creating temporary keychain\"\nKEYCHAIN_PATH=\"$RUNNER_TEMP/ios-signing.keychain-db\"\
-        \nKEYCHAIN_PASSWORD=\"$(openssl rand -base64 32)\"\necho \"KEYCHAIN_PATH=$KEYCHAIN_PATH\" >> \"$GITHUB_ENV\"\nsecurity\
+        \nKEYCHAIN_PASSWORD=\"$(openssl rand -base64 32)\"\necho \"::add-mask::$KEYCHAIN_PASSWORD\"\necho \"KEYCHAIN_PATH=$KEYCHAIN_PATH\" >> \"$GITHUB_ENV\"\nsecurity\
         \ create-keychain -p \"$KEYCHAIN_PASSWORD\" \"$KEYCHAIN_PATH\"\nsecurity set-keychain-settings -lut 21600 \"$KEYCHAIN_PATH\"\
         \nsecurity unlock-keychain -p \"$KEYCHAIN_PASSWORD\" \"$KEYCHAIN_PATH\"\npython3 scripts/ci-keychain-search.py add\
         \ \"$RUNNER_TEMP/keychain-search.json\" \"$KEYCHAIN_PATH\"\necho \"KEYCHAIN_PATH=$KEYCHAIN_PATH\" >> \"$GITHUB_ENV\"\
@@ -326,7 +324,7 @@ jobs:
         BUILD_NUMBER: ${{ steps.build_number.outputs.build }}
         APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
         APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
-        ASC_TIMEOUT_MINUTES: 20
+        ASC_TIMEOUT_MINUTES: 45
         ASC_POLL_SECONDS: 60
       run: scripts/ci-asc-wait-for-build.sh "$VERSION" "$BUILD_NUMBER"
     - name: Verify exported IPA (dry run)
@@ -362,7 +360,7 @@ jobs:
         \ | \\`${GITHUB_SHA::7}\\` |\"\n} >> \"$GITHUB_STEP_SUMMARY\"\n"
     - name: Upload IPA and dSYMs (dry run)
       if: steps.upload.outputs.enabled != 'true' && success()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       with:
         name: PastaIOS-${{ steps.version.outputs.version }}-${{ steps.build_number.outputs.build }}
         path: 'build/export/*.ipa
@@ -374,7 +372,7 @@ jobs:
         if-no-files-found: error
     - name: Upload logs (on failure)
       if: failure()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       with:
         name: release-ios-logs
         path: 'build/*.log

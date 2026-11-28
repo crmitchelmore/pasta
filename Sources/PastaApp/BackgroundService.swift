@@ -22,6 +22,8 @@ final class BackgroundService: ObservableObject {
     
     let database: DatabaseManager
     let syncManager: SyncManager
+    /// Opt-in meaning-based search; inert until configured in Settings → Search.
+    let semanticSearch: SemanticSearchService
     private(set) var tailnetSync: TailnetSyncController?
     
     private let imageStorage: ImageStorageManager
@@ -122,6 +124,7 @@ final class BackgroundService: ObservableObject {
             }
         }()
         self.database = db
+        self.semanticSearch = SemanticSearchService(database: db)
 
         // Initialize image storage with fallback to temporary directory.
         var storageError: PastaError? = nil
@@ -176,6 +179,8 @@ final class BackgroundService: ObservableObject {
     func start() {
         tailnetSync?.start()
         setupSync()
+        let semanticSearch = semanticSearch
+        Task { await semanticSearch.reloadConfiguration() }
         let isPaused = UserDefaults.standard.bool(forKey: Defaults.pauseMonitoring)
         if isPaused {
             PastaLogger.app.info("Clipboard monitoring is paused by user setting")
@@ -612,6 +617,24 @@ final class BackgroundService: ObservableObject {
         NotificationCenter.default.publisher(for: Notification.Name("pasta.entriesDidChange"))
             .sink { [weak self] _ in
                 self?.refresh()
+            }
+            .store(in: &cancellables)
+
+        // Every insert, sync pull, import and reparse republishes `entries`;
+        // the semantic indexer picks up whatever is new or changed.
+        $entries
+            .dropFirst()
+            .debounce(for: .seconds(2), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let semanticSearch = self?.semanticSearch else { return }
+                Task { await semanticSearch.scheduleIndexing() }
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .semanticSearchConfigurationDidChange)
+            .sink { [weak self] _ in
+                guard let semanticSearch = self?.semanticSearch else { return }
+                Task { await semanticSearch.reloadConfiguration() }
             }
             .store(in: &cancellables)
         

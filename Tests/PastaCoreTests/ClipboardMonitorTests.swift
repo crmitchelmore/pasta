@@ -70,366 +70,145 @@ final class ClipboardMonitorTests: XCTestCase {
         }
     }
 
-    private struct MockWorkspace: WorkspaceProviding {
+    private final class MockWorkspace: WorkspaceProviding {
         var identifier: String?
         func frontmostApplicationIdentifier() -> String? { identifier }
     }
 
-    /// Pumps the main runloop long enough for any in-flight async read/emit to
-    /// have completed, without asserting that anything was emitted.
-    private func settle(_ delay: TimeInterval = 0.2) {
-        let waited = XCTestExpectation(description: "settle")
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { waited.fulfill() }
-        wait(for: [waited], timeout: max(1.0, delay * 5))
-    }
-
-    func testEmitsEntryOnPasteboardChange() throws {
+    /// Drives a real `ClipboardMonitor` with manual ticks and records emissions.
+    private final class Harness {
         let pasteboard = MockPasteboard()
-        pasteboard.changeCount = 1
-        pasteboard.contents = .text("hello")
-
+        let workspace = MockWorkspace()
         let ticks = PassthroughSubject<Void, Never>()
-        let monitor = ClipboardMonitor(
-            pasteboard: pasteboard,
-            workspace: MockWorkspace(identifier: "com.example.App"),
-            exclusionManager: ExclusionManager(userDefaults: UserDefaults(suiteName: "ClipboardMonitorTests")!),
-            tickPublisher: ticks.eraseToAnyPublisher(),
-            now: { Date(timeIntervalSince1970: 123) }
-        )
+        let defaults: UserDefaults
+        var respectTransient = true
+        private(set) var received: [ClipboardEntry] = []
+        private var cancellable: AnyCancellable?
+        private(set) var monitor: ClipboardMonitor!
 
-        var received: [ClipboardEntry] = []
-        let expectation = XCTestExpectation(description: "receives entry")
-
-        let cancellable = monitor.publisher.sink { entry in
-            received.append(entry)
-            expectation.fulfill()
+        init(suite: String) {
+            defaults = UserDefaults(suiteName: suite)!
+            defaults.removePersistentDomain(forName: suite)
+            pasteboard.changeCount = 1
+            pasteboard.contents = .text("initial")
+            monitor = ClipboardMonitor(
+                pasteboard: pasteboard,
+                workspace: workspace,
+                exclusionManager: ExclusionManager(userDefaults: defaults),
+                tickPublisher: ticks.eraseToAnyPublisher(),
+                now: { Date(timeIntervalSince1970: 123) },
+                respectTransientPasteboard: { [unowned self] in self.respectTransient }
+            )
+            cancellable = monitor.publisher.sink { [unowned self] in self.received.append($0) }
+            monitor.start()
         }
 
-        monitor.start()
-
-        pasteboard.changeCount = 2
-        pasteboard.contents = .text("hello world")
-        ticks.send(())
-
-        wait(for: [expectation], timeout: 1.0)
-        cancellable.cancel()
-
-        XCTAssertEqual(received.count, 1)
-        XCTAssertEqual(received[0].contentType, .text)
-        XCTAssertEqual(received[0].content, "hello world")
-        XCTAssertEqual(received[0].sourceApp, "com.example.App")
-        XCTAssertEqual(received[0].timestamp, Date(timeIntervalSince1970: 123))
+        /// Simulates a new copy (or, with nil, a poll that sees a changed count)
+        /// and returns what the monitor emitted for it.
+        @discardableResult
+        func copy(_ contents: PasteboardContents?, expectEmission: Bool) -> ClipboardEntry? {
+            let before = received.count
+            if let contents { pasteboard.contents = contents }
+            pasteboard.changeCount += 1
+            ticks.send(())
+            // Emission hops read queue -> main queue; pump the main run loop.
+            let deadline = Date().addingTimeInterval(expectEmission ? 2 : 0.2)
+            while Date() < deadline, received.count == before {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            }
+            return received.count > before ? received.last : nil
+        }
     }
 
-    func testReadsContentsOffThePollingThread() throws {
-        let pasteboard = MockPasteboard()
-        pasteboard.changeCount = 1
-        pasteboard.contents = .text("a")
+    func testCaptureFlowReadsOffMainDedupsDiscardsStaleReadsAndStops() throws {
+        let h = Harness(suite: "ClipboardMonitorTests.capture")
+        h.workspace.identifier = "com.example.App"
 
-        let ticks = PassthroughSubject<Void, Never>()
-        let monitor = ClipboardMonitor(
-            pasteboard: pasteboard,
-            exclusionManager: ExclusionManager(userDefaults: UserDefaults(suiteName: "ClipboardMonitorTests.offMain")!),
-            tickPublisher: ticks.eraseToAnyPublisher()
-        )
-
-        let expectation = XCTestExpectation(description: "receives entry")
-        let cancellable = monitor.publisher.sink { _ in expectation.fulfill() }
-
-        monitor.start()
-
-        pasteboard.changeCount = 2
-        pasteboard.contents = .text("b")
-        XCTAssertTrue(Thread.isMainThread, "test setup expects ticks sent from the main thread")
-        ticks.send(())
-
-        wait(for: [expectation], timeout: 1.0)
-        cancellable.cancel()
-
+        let text = try XCTUnwrap(h.copy(.text("hello world"), expectEmission: true))
+        XCTAssertEqual(text.contentType, .text)
+        XCTAssertEqual(text.content, "hello world")
+        XCTAssertEqual(text.sourceApp, "com.example.App")
+        XCTAssertEqual(text.timestamp, Date(timeIntervalSince1970: 123))
         // The cheap transient check stays on the polling (main) thread; the
         // potentially expensive contents read must happen off it.
-        XCTAssertEqual(pasteboard.isTransientWasOnMainThread, true)
-        XCTAssertEqual(pasteboard.readContentsWasOnMainThread, false)
-    }
+        XCTAssertEqual(h.pasteboard.isTransientWasOnMainThread, true)
+        XCTAssertEqual(h.pasteboard.readContentsWasOnMainThread, false)
 
-    func testDuplicateImageDedupedByHashWithoutRetainingBytes() throws {
+        // Images are deduplicated by SHA-256 without retaining the bytes.
         let imageBytes = Data((0..<512_000).map { UInt8(truncatingIfNeeded: $0) })
+        let image = try XCTUnwrap(h.copy(.image(imageBytes), expectEmission: true))
+        XCTAssertEqual(image.contentType, .image)
+        XCTAssertEqual(image.rawData, imageBytes)
+        XCTAssertEqual(h.monitor.currentFingerprintForTesting, .imageHash(ClipboardEntry.sha256Hex(imageBytes)))
+        XCTAssertNil(h.copy(nil, expectEmission: false), "identical image bytes must be deduplicated by hash")
 
-        let pasteboard = MockPasteboard()
-        pasteboard.changeCount = 1
-        pasteboard.contents = .image(imageBytes)
+        h.workspace.identifier = "com.apple.screencaptureui"
+        XCTAssertEqual(h.copy(.image(Data([0x09])), expectEmission: true)?.contentType, .screenshot)
+        h.workspace.identifier = "com.example.App"
+        let files = try XCTUnwrap(h.copy(.filePaths(["/tmp/a", "/tmp/b"]), expectEmission: true))
+        XCTAssertEqual(files.contentType, .filePath)
+        XCTAssertEqual(files.content, "/tmp/a\n/tmp/b")
 
-        let ticks = PassthroughSubject<Void, Never>()
-        let monitor = ClipboardMonitor(
-            pasteboard: pasteboard,
-            exclusionManager: ExclusionManager(userDefaults: UserDefaults(suiteName: "ClipboardMonitorTests.imageDedup")!),
-            tickPublisher: ticks.eraseToAnyPublisher()
-        )
-
-        var received: [ClipboardEntry] = []
-        let expectation = XCTestExpectation(description: "receives image entry")
-        let cancellable = monitor.publisher.sink { entry in
-            received.append(entry)
-            expectation.fulfill()
-        }
-
-        monitor.start()
-
-        pasteboard.changeCount = 2
-        ticks.send(())
-        wait(for: [expectation], timeout: 1.0)
-
-        XCTAssertEqual(received.count, 1)
-        XCTAssertEqual(received[0].contentType, .image)
-        XCTAssertEqual(received[0].rawData, imageBytes)
-
-        // Dedup state holds a SHA-256, not the image bytes.
-        XCTAssertEqual(
-            monitor.currentFingerprintForTesting,
-            .imageHash(ClipboardEntry.sha256Hex(imageBytes))
-        )
-
-        // Re-copying identical bytes (new changeCount) must not re-emit.
-        pasteboard.changeCount = 3
-        ticks.send(())
-        settle()
-
-        cancellable.cancel()
-        XCTAssertEqual(received.count, 1, "identical image bytes must be deduplicated by hash")
-    }
-
-    func testStaleReadDiscardedWhenPasteboardChangesDuringRead() throws {
-        let pasteboard = MockPasteboard()
-        pasteboard.changeCount = 1
-        pasteboard.contents = .text("original")
-
-        let ticks = PassthroughSubject<Void, Never>()
-        let monitor = ClipboardMonitor(
-            pasteboard: pasteboard,
-            exclusionManager: ExclusionManager(userDefaults: UserDefaults(suiteName: "ClipboardMonitorTests.staleRead")!),
-            tickPublisher: ticks.eraseToAnyPublisher()
-        )
-
-        var received: [ClipboardEntry] = []
-        let cancellable = monitor.publisher.sink { entry in received.append(entry) }
-
-        monitor.start()
-
-        // Simulate the pasteboard changing mid-read: the read returns "stale"
-        // but by the time it finishes the changeCount has moved on.
-        pasteboard.changeCount = 2
-        pasteboard.contents = .text("stale")
-        pasteboard.onReadContents = { [weak pasteboard] in
-            pasteboard?.changeCount = 3
+        // A read that races a pasteboard change is discarded; the next poll
+        // captures the current contents.
+        h.pasteboard.onReadContents = { [weak pasteboard = h.pasteboard] in
+            pasteboard?.changeCount += 1
             pasteboard?.onReadContents = nil
         }
-        ticks.send(())
-        settle()
-        XCTAssertEqual(received.count, 0, "a read that raced a pasteboard change must be discarded")
+        XCTAssertNil(h.copy(.text("stale"), expectEmission: false))
+        h.pasteboard.contents = .text("fresh")
+        h.ticks.send(())
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline, h.received.last?.content != "fresh" {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertFalse(h.received.contains { $0.content == "stale" })
+        XCTAssertEqual(h.received.last?.content, "fresh")
 
-        // The next poll sees the new changeCount and captures the new contents.
-        pasteboard.contents = .text("fresh")
-        let expectation = XCTestExpectation(description: "receives fresh entry")
-        let freshCancellable = monitor.publisher.sink { _ in expectation.fulfill() }
-        ticks.send(())
-        wait(for: [expectation], timeout: 1.0)
+        h.pasteboard.metadata = PasteboardMetadata(isContinuitySync: true, originDeviceName: "iPhone")
+        let continuity = try XCTUnwrap(h.copy(.text("synced text"), expectEmission: true))
+        XCTAssertEqual(continuity.sourceApp, "Continuity")
+        XCTAssertTrue(continuity.metadata?.contains("continuitySync") == true)
+        h.pasteboard.metadata = PasteboardMetadata()
 
-        cancellable.cancel()
-        freshCancellable.cancel()
-        XCTAssertEqual(received.map(\.content), ["fresh"])
+        h.monitor.stop()
+        XCTAssertNil(h.copy(.text("after stop"), expectEmission: false))
     }
 
-    func testStopPreventsFurtherEmissions() throws {
-        let pasteboard = MockPasteboard()
-        pasteboard.changeCount = 1
-        pasteboard.contents = .text("a")
-
-        let ticks = PassthroughSubject<Void, Never>()
-        let monitor = ClipboardMonitor(
-            pasteboard: pasteboard,
-            exclusionManager: ExclusionManager(userDefaults: UserDefaults(suiteName: "ClipboardMonitorTests.stop")!),
-            tickPublisher: ticks.eraseToAnyPublisher()
-        )
-
-        var receivedCount = 0
-        let firstEmission = XCTestExpectation(description: "receives first entry")
-        let cancellable = monitor.publisher.sink { _ in
-            receivedCount += 1
-            firstEmission.fulfill()
+    func testPrivacySkipsTransientAndExcludedSources() throws {
+        let transientCases: [([String], Bool)] = [
+            (["org.nspasteboard.TransientType"], true),
+            (["org.nspasteboard.ConcealedType"], true),
+            (["org.nspasteboard.AutoGeneratedType"], true),
+            (["public.utf8-plain-text", "org.nspasteboard.ConcealedType"], true),
+            (["public.utf8-plain-text"], false),
+            ([], false)
+        ]
+        for (types, expected) in transientCases {
+            XCTAssertEqual(TransientPasteboardType.contains(types), expected, "types \(types)")
         }
 
-        monitor.start()
+        let h = Harness(suite: "ClipboardMonitorTests.privacy")
+        h.defaults.set("  com.apple.Terminal\n\ncom.example.Excluded  ", forKey: "pasta.excludedApps")
+        let exclusions = ExclusionManager(userDefaults: h.defaults)
+        XCTAssertEqual(exclusions.excludedBundleIdentifiers, ["com.apple.Terminal", "com.example.Excluded"])
+        XCTAssertFalse(exclusions.isExcluded(bundleIdentifier: nil))
+        XCTAssertFalse(exclusions.isExcluded(bundleIdentifier: ""))
 
-        pasteboard.changeCount = 2
-        pasteboard.contents = .text("b")
-        ticks.send(())
-        wait(for: [firstEmission], timeout: 1.0)
-        XCTAssertEqual(receivedCount, 1)
+        h.workspace.identifier = "com.example.PasswordManager"
+        h.pasteboard.transient = true
+        XCTAssertNil(h.copy(.text("super-secret-password"), expectEmission: false),
+                     "Transient/concealed pasteboard contents must not be recorded")
+        h.respectTransient = false
+        XCTAssertEqual(h.copy(.text("captured-anyway"), expectEmission: true)?.content, "captured-anyway",
+                       "Transient pasteboard must be captured when the user opts out of respecting it")
+        h.pasteboard.transient = false
 
-        monitor.stop()
-
-        pasteboard.changeCount = 3
-        pasteboard.contents = .text("c")
-        ticks.send(())
-        settle()
-        XCTAssertEqual(receivedCount, 1)
-
-        cancellable.cancel()
-    }
-
-    func testContinuitySyncDetection() throws {
-        let pasteboard = MockPasteboard()
-        pasteboard.changeCount = 1
-        pasteboard.contents = .text("synced text")
-        pasteboard.metadata = PasteboardMetadata(isContinuitySync: true, originDeviceName: "iPhone")
-
-        let ticks = PassthroughSubject<Void, Never>()
-        let monitor = ClipboardMonitor(
-            pasteboard: pasteboard,
-            workspace: MockWorkspace(identifier: nil),
-            exclusionManager: ExclusionManager(userDefaults: UserDefaults(suiteName: "ClipboardMonitorTests.continuity")!),
-            tickPublisher: ticks.eraseToAnyPublisher()
-        )
-
-        var received: [ClipboardEntry] = []
-        let expectation = XCTestExpectation(description: "receives continuity entry")
-
-        let cancellable = monitor.publisher.sink { entry in
-            received.append(entry)
-            expectation.fulfill()
-        }
-
-        monitor.start()
-
-        pasteboard.changeCount = 2
-        ticks.send(())
-
-        wait(for: [expectation], timeout: 1.0)
-        cancellable.cancel()
-
-        XCTAssertEqual(received.count, 1)
-        XCTAssertEqual(received[0].sourceApp, "Continuity")
-        XCTAssertNotNil(received[0].metadata)
-        XCTAssertTrue(received[0].metadata?.contains("continuitySync") == true)
-    }
-
-    func testTransientPasteboardIsIgnored() throws {
-        let pasteboard = MockPasteboard()
-        pasteboard.changeCount = 1
-        pasteboard.contents = .text("super-secret-password")
-        pasteboard.transient = true
-
-        let ticks = PassthroughSubject<Void, Never>()
-        let monitor = ClipboardMonitor(
-            pasteboard: pasteboard,
-            workspace: MockWorkspace(identifier: "com.example.PasswordManager"),
-            exclusionManager: ExclusionManager(userDefaults: UserDefaults(suiteName: "ClipboardMonitorTests.transient")!),
-            tickPublisher: ticks.eraseToAnyPublisher(),
-            respectTransientPasteboard: { true }
-        )
-
-        var received: [ClipboardEntry] = []
-        let cancellable = monitor.publisher.sink { entry in received.append(entry) }
-
-        monitor.start()
-
-        pasteboard.changeCount = 2
-        ticks.send(())
-
-        // Wait briefly to ensure no async emission slips through.
-        settle()
-
-        cancellable.cancel()
-        XCTAssertEqual(received.count, 0, "Transient/concealed pasteboard contents must not be recorded")
-    }
-
-    func testTransientPasteboardIsCapturedWhenRespectDisabled() throws {
-        let pasteboard = MockPasteboard()
-        pasteboard.changeCount = 1
-        pasteboard.contents = .text("captured-anyway")
-        pasteboard.transient = true
-
-        let ticks = PassthroughSubject<Void, Never>()
-        let monitor = ClipboardMonitor(
-            pasteboard: pasteboard,
-            workspace: MockWorkspace(identifier: nil),
-            exclusionManager: ExclusionManager(userDefaults: UserDefaults(suiteName: "ClipboardMonitorTests.transientOptOut")!),
-            tickPublisher: ticks.eraseToAnyPublisher(),
-            respectTransientPasteboard: { false }
-        )
-
-        var received: [ClipboardEntry] = []
-        let expectation = XCTestExpectation(description: "receives transient entry when respect disabled")
-        let cancellable = monitor.publisher.sink { entry in
-            received.append(entry)
-            expectation.fulfill()
-        }
-
-        monitor.start()
-
-        pasteboard.changeCount = 2
-        ticks.send(())
-
-        wait(for: [expectation], timeout: 1.0)
-        cancellable.cancel()
-
-        XCTAssertEqual(received.count, 1, "Transient pasteboard must be captured when user opts out of respect")
-        XCTAssertEqual(received.first?.content, "captured-anyway")
-    }
-
-    func testSkipsEmissionWhenSourceAppIsExcluded() {
-        let pasteboard = MockPasteboard()
-        pasteboard.changeCount = 1
-        pasteboard.contents = .text("initial")
-
-        let defaults = UserDefaults(suiteName: "ClipboardMonitorTests.exclusion")!
-        defaults.removePersistentDomain(forName: "ClipboardMonitorTests.exclusion")
-        defaults.set("com.example.Excluded", forKey: "pasta.excludedApps")
-
-        let ticks = PassthroughSubject<Void, Never>()
-        let monitor = ClipboardMonitor(
-            pasteboard: pasteboard,
-            workspace: MockWorkspace(identifier: "com.example.Excluded"),
-            exclusionManager: ExclusionManager(userDefaults: defaults),
-            tickPublisher: ticks.eraseToAnyPublisher(),
-            now: { Date(timeIntervalSince1970: 1) }
-        )
-
-        var received: [ClipboardEntry] = []
-        let cancellable = monitor.publisher.sink { received.append($0) }
-
-        monitor.start()
-        pasteboard.changeCount = 2
-        pasteboard.contents = .text("secret")
-        ticks.send(())
-
-        // The read/emit pipeline is asynchronous; give it time to complete
-        // before asserting nothing came through.
-        settle()
-        XCTAssertEqual(received.count, 0)
-
-        // Positive control: once the app is no longer excluded, the same
-        // pipeline emits — proving the earlier silence was the exclusion, not
-        // a stalled pipeline.
-        defaults.set("", forKey: "pasta.excludedApps")
-        pasteboard.changeCount = 3
-        pasteboard.contents = .text("not secret")
-        let emitted = XCTestExpectation(description: "receives entry once unexcluded")
-        let control = monitor.publisher.sink { _ in emitted.fulfill() }
-        ticks.send(())
-        wait(for: [emitted], timeout: 1.0)
-
-        cancellable.cancel()
-        control.cancel()
-        XCTAssertEqual(received.map(\.content), ["not secret"])
-    }
-
-    func testTransientTypeSetIncludesNSPasteboardOrgIdentifiers() {
-        XCTAssertTrue(TransientPasteboardType.contains(["org.nspasteboard.TransientType"]))
-        XCTAssertTrue(TransientPasteboardType.contains(["org.nspasteboard.ConcealedType"]))
-        XCTAssertTrue(TransientPasteboardType.contains(["org.nspasteboard.AutoGeneratedType"]))
-        XCTAssertTrue(TransientPasteboardType.contains(["public.utf8-plain-text", "org.nspasteboard.ConcealedType"]))
-        XCTAssertFalse(TransientPasteboardType.contains(["public.utf8-plain-text"]))
-        XCTAssertFalse(TransientPasteboardType.contains([]))
+        h.workspace.identifier = "com.example.Excluded"
+        XCTAssertNil(h.copy(.text("secret"), expectEmission: false))
+        // Positive control: once unexcluded the same pipeline emits.
+        h.defaults.set("", forKey: "pasta.excludedApps")
+        XCTAssertEqual(h.copy(.text("not secret"), expectEmission: true)?.content, "not secret")
+        XCTAssertEqual(h.received.map(\.content), ["captured-anyway", "not secret"])
     }
 }

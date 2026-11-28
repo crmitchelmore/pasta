@@ -13,6 +13,7 @@
 		A1000001 /* PastaIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* PastaIOSApp.swift */; };
 		A1000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000002 /* ContentView.swift */; };
 		A1000003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000003 /* Assets.xcassets */; };
+		A1000006 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A2000006 /* PrivacyInfo.xcprivacy */; };
 		A1000010 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010 /* MainTabView.swift */; };
 		A1000011 /* EntryListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* EntryListView.swift */; };
 		A1000012 /* EntryRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000012 /* EntryRowView.swift */; };
@@ -21,6 +22,7 @@
 		A1000015 /* FilterChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000015 /* FilterChip.swift */; };
 		A1000016 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000016 /* SettingsView.swift */; };
 		A1000017 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000017 /* OnboardingView.swift */; };
+		A1000040 /* PastaShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000040 /* PastaShortcuts.swift */; };
 		A1000020 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000020 /* AppState.swift */; };
 		A1000021 /* TimeGrouper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000021 /* TimeGrouper.swift */; };
 		A1000030 /* ContentType+iOS.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030 /* ContentType+iOS.swift */; };
@@ -46,6 +48,7 @@
 		A2000003 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000004 /* PastaIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PastaIOS.entitlements; sourceTree = "<group>"; };
 		A2000005 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A2000006 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A2000010 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		A2000011 /* EntryListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryListView.swift; sourceTree = "<group>"; };
 		A2000012 /* EntryRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EntryRowView.swift; sourceTree = "<group>"; };
@@ -54,6 +57,7 @@
 		A2000015 /* FilterChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilterChip.swift; sourceTree = "<group>"; };
 		A2000016 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000017 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		A2000040 /* PastaShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PastaShortcuts.swift; sourceTree = "<group>"; };
 		A2000020 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		A2000021 /* TimeGrouper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeGrouper.swift; sourceTree = "<group>"; };
 		A2000030 /* ContentType+iOS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ContentType+iOS.swift"; sourceTree = "<group>"; };
@@ -103,9 +107,11 @@
 				A2000030 /* ContentType+iOS.swift */,
 				A4000002 /* Views */,
 				A4000003 /* Services */,
+				A4000004 /* Intents */,
 				A2000003 /* Assets.xcassets */,
 				A2000004 /* PastaIOS.entitlements */,
 				A2000005 /* Info.plist */,
+				A2000006 /* PrivacyInfo.xcprivacy */,
 			);
 			path = PastaIOS;
 			sourceTree = "<group>";
@@ -123,6 +129,14 @@
 				A2000017 /* OnboardingView.swift */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		A4000004 /* Intents */ = {
+			isa = PBXGroup;
+			children = (
+				A2000040 /* PastaShortcuts.swift */,
+			);
+			path = Intents;
 			sourceTree = "<group>";
 		};
 		A4000003 /* Services */ = {
@@ -251,6 +265,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000003 /* Assets.xcassets in Resources */,
+				A1000006 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -280,6 +295,7 @@
 				A1000016 /* SettingsView.swift in Sources */,
 				A1000017 /* OnboardingView.swift in Sources */,
 				A1000020 /* AppState.swift in Sources */,
+				A1000040 /* PastaShortcuts.swift in Sources */,
 				A1000021 /* TimeGrouper.swift in Sources */,
 				A1000022 /* UITestConfiguration.swift in Sources */,
 			);

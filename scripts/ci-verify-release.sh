@@ -142,7 +142,7 @@ APP_IN_DMG=$(find "$MOUNTPOINT" -maxdepth 1 -name '*.app' -print -quit)
 echo "    app: $APP_IN_DMG"
 
 echo "    stapler validate (notarization ticket on the DMG):"
-xcrun stapler validate "$DMG" || fail "DMG has no valid notarization ticket stapled"
+"$SCRIPT_DIR/ci-stapler.sh" validate "$DMG" || fail "DMG has no valid notarization ticket stapled"
 
 echo "    spctl --assess --type execute:"
 SPCTL_OUT=$(spctl --assess --type execute --verbose=4 "$APP_IN_DMG" 2>&1) || { echo "$SPCTL_OUT"; fail "Gatekeeper rejects the app (spctl): $SPCTL_OUT"; }

@@ -13,7 +13,7 @@ swift test --filter BrandAssetTests
 
 `create-icns.sh` builds `Resources/DMG/AppIcon.icns` and `AppIconAlpha.icns` from the appiconsets, then runs `scripts/optimize-artwork.py` (needs `python3 -m pip install pillow imagequant pyoxipng`; set `PYTHON` to use another interpreter). The optimiser recompresses every PNG slot losslessly and palette-quantises slots at least 256 px wide only when they stay at or above 45 dB PSNR over black and white and save at least 25%. That makes each ICNS about 1.6 MB → 0.5 MB with no visible change; re-running it is a no-op. Releases ship the committed ICNS and DMG background as-is, so commit the regenerated files. The DMG volume icon is the app ICNS without its 1024 px slot (`scripts/ci-slim-icns.py`, applied by `ci-create-macos-dmg.sh`).
 
-`Resources/DMG/create-background.sh` renders the 1320 × 800 px DMG backdrop (660 × 400 pt window at 2×) in sRGB, independent of the display profile, then optimises it to about 16 KB.
+`Resources/DMG/create-background.sh` renders the 1320 × 800 px DMG backdrop (660 × 400 pt window at 2×) in sRGB, independent of the display profile, then optimises it to about 16 KB. After changing it, regenerate the Finder layout templates with `bash scripts/generate-dmg-layout.sh` (see `Docs/release-trains.md`).
 
 The iOS onboarding mark (`PastaMark.png`) is exported at 288 px, exactly 96 pt at 3x, and optimised with `--min-quantise-width 0` to about 30 KB. That cut the compiled iOS `Assets.car` from 2.34 MB to 1.62 MB.
 

@@ -2,7 +2,9 @@ import XCTest
 @testable import PastaCore
 
 final class SnippetKeywordMatcherTests: XCTestCase {
-    func testOnlyExactUniqueKeywordsExpandAtBoundary() {
+    /// Only exact, unique keywords expand at a word boundary; reset, backspace,
+    /// escape and the input bound never expand stale words.
+    func testKeywordExpansionBoundaries() {
         let snippet = Snippet(name: "Greeting", content: "Hello", keyword: ";hi")
         var matcher = SnippetKeywordMatcher()
         for ch in ";hi" { XCTAssertNil(matcher.consume(String(ch), snippets: [snippet])) }
@@ -12,11 +14,8 @@ final class SnippetKeywordMatcherTests: XCTestCase {
         XCTAssertEqual(matcher.token, "")
         _ = matcher.consume(";hi", snippets: [snippet])
         XCTAssertNil(matcher.consume(" ", snippets: [snippet, Snippet(name: "Duplicate", content: "x", keyword: ";hi")]))
-    }
 
-    func testResetBackspaceAndBoundedInputDoNotExpandStaleWords() {
-        let snippet = Snippet(name: "Greeting", content: "Hello", keyword: ";hi")
-        var matcher = SnippetKeywordMatcher()
+        matcher.reset()
         _ = matcher.consume(";hix", snippets: [snippet])
         _ = matcher.consume("\u{7f}", snippets: [snippet])
         XCTAssertEqual(matcher.token, ";hi")

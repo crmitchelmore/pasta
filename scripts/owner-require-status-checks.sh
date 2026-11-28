@@ -1,18 +1,22 @@
 #!/bin/bash
 # Owner-only: make GitHub enforce the release gates on `main`.
 #
-# As of 2026-09-04 the only ruleset on main ("Copilot review for default
+# History: as of 2026-09-04 the only ruleset on main ("Copilot review for default
 # branch") blocks deletion and force-pushes; nothing requires a pull request or
 # green checks, so a red PR can be merged and anyone with push can commit
 # straight to main. This script creates (or updates) a repository ruleset
 # named "Release gates" that requires:
 #   - a pull request (no review count; reviews are not part of the gate)
-#   - the status checks ci.yml runs on every PR: "CI gate" (the always-running
-#     aggregate that is green only when every suite is green and accepts a
-#     skipped Playwright run only when path detection proved the landing page
-#     untouched), plus "Build & Test", "iOS E2E (XCUITest)" and "Appcast &
-#     Cloudflare config contract" individually. The path-filtered Playwright
-#     job itself is deliberately NOT required: a skipped check never reports.
+#   - the status checks ci.yml reports on every PR: "CI gate" (the always-running
+#     aggregate that is green only when every suite that ran is green, and
+#     accepts a skipped Playwright run only when path detection proved the
+#     landing page untouched and a skipped iOS run only when the PR was routed
+#     to the fast lane), plus "Build & Test" and "Appcast & Cloudflare config
+#     contract" individually. "iOS E2E (XCUITest)" and the Playwright job are
+#     deliberately NOT required: they are path-routed, and a job skipped by its
+#     `if:` reports success, so requiring it directly proves nothing. CI gate
+#     enforces them, and they always run on main after merge, where Alpha and
+#     Stable publication require them for the exact commit.
 # with a bypass for repository admins so release.yml's appcast commit-back
 # (scripts/ci-commit-appcast.sh, pushed with the owner's AUTO_RELEASE_TOKEN)
 # can still land on main directly. Tag pushes are unaffected (branch ruleset).
@@ -52,7 +56,6 @@ PAYLOAD=$(cat <<'JSON'
         "required_status_checks": [
           { "context": "CI gate", "integration_id": 15368 },
           { "context": "Build & Test", "integration_id": 15368 },
-          { "context": "iOS E2E (XCUITest)", "integration_id": 15368 },
           { "context": "Appcast & Cloudflare config contract", "integration_id": 15368 }
         ]
       }

@@ -2,6 +2,7 @@ import CloudKit
 import Foundation
 import os.log
 import PastaCore
+import PastaDetectors
 import PastaSync
 #if canImport(UIKit)
 import UIKit
@@ -13,7 +14,11 @@ final class AppState: ObservableObject {
     private enum Defaults {
         static let iCloudSyncConsent = "pasta.ios.iCloudSyncConsent.v1"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
+        static let syncDetectedSecrets = "pasta.ios.syncDetectedSecrets.v1"
     }
+
+    /// Read by the Shortcuts actions, which run without an `AppState`.
+    nonisolated static let syncDetectedSecretsKey = Defaults.syncDetectedSecrets
 
     @Published var entries: [ClipboardEntry] = []
     @Published var isLoading = true
@@ -21,6 +26,8 @@ final class AppState: ObservableObject {
     @Published var isShowingOnboarding = false
     @Published var isShowingWhatsNew = false
     @Published private(set) var isICloudSyncEnabled: Bool
+    /// Off by default: detected secrets copied here stay on this device.
+    @Published private(set) var syncsDetectedSecrets: Bool
     @Published var iCloudStatus: SyncAccountRecovery.Availability = .disabled
     @Published private(set) var isCheckingSync = false
     @Published private(set) var syncErrorMessage: String?
@@ -41,6 +48,7 @@ final class AppState: ObservableObject {
     private var entriesGeneration = 0
     private let activationRequests = SyncRequestQueue()
     private let syncRequests = SyncRequestQueue()
+    private var shortcutsObserver: NSObjectProtocol?
 
     init() {
         // No-op unless launched by the XCUITest suite with `-uiTesting`.
@@ -52,6 +60,19 @@ final class AppState: ObservableObject {
         self.hasCompletedOnboarding = UserDefaults.standard.bool(forKey: Defaults.hasCompletedOnboarding)
         // Existing onboarding and old sync timestamps are not consent.
         self.isICloudSyncEnabled = UserDefaults.standard.bool(forKey: Defaults.iCloudSyncConsent)
+        self.syncsDetectedSecrets = UserDefaults.standard.bool(forKey: Defaults.syncDetectedSecrets)
+        shortcutsObserver = NotificationCenter.default.addObserver(
+            forName: ShortcutsHistoryStore.historyChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.database != nil else { return }
+                try? await self.loadEntries()
+            }
+        }
+    }
+
+    deinit {
+        if let shortcutsObserver { NotificationCenter.default.removeObserver(shortcutsObserver) }
     }
 
     func initialise(syncManager: SyncManager) async {
@@ -101,6 +122,12 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Applies to items copied after the change; existing entries keep their policy.
+    func setSyncsDetectedSecrets(_ enabled: Bool) {
+        syncsDetectedSecrets = enabled
+        UserDefaults.standard.set(enabled, forKey: Defaults.syncDetectedSecrets)
+    }
+
     func captureCurrentClipboardIfNeeded(syncManager: SyncManager) async {
         #if canImport(UIKit)
         guard !isClipboardCaptureInProgress else { return }
@@ -121,19 +148,23 @@ final class AppState: ObservableObject {
             return
         }
 
-        let entry = ClipboardEntry(
-            content: clipboardString,
-            contentType: .text,
-            sourceApp: "iOS Pasteboard"
-        )
-
         do {
-            let alreadyExists = try database.existsWithHash(entry.contentHash)
+            // The text hash ignores the type, so dedupe before classifying.
+            let alreadyExists = try database.existsWithHash(
+                ClipboardEntry(content: clipboardString, contentType: .text).contentHash
+            )
             if alreadyExists {
                 lastObservedPasteboardChangeCount = changeCount
                 return
             }
 
+            let syncSecrets = syncsDetectedSecrets
+            let entry = await Task.detached(priority: .userInitiated) {
+                CloudSyncPolicy.applying(
+                    to: CapturedTextClassifier.entry(content: clipboardString, sourceApp: "iOS Pasteboard"),
+                    syncSensitiveContent: syncSecrets
+                )
+            }.value
             try database.insert(entry, deduplicate: false)
             lastObservedPasteboardChangeCount = changeCount
 
@@ -143,7 +174,7 @@ final class AppState: ObservableObject {
             entries.insert(entry, at: 0)
             refreshPendingUploadFeedback()
 
-            if isICloudSyncEnabled && iCloudAvailable {
+            if isICloudSyncEnabled && iCloudAvailable && entry.allowsCloudUpload {
                 do {
                     try await syncManager.pushEntry(entry)
                     try database.markSynced(ids: [entry.id])
@@ -165,7 +196,7 @@ final class AppState: ObservableObject {
 
     private func refreshPendingUploadFeedback() {
         if let message = SyncAccountRecovery.captureFeedback(
-            count: entries.filter { !$0.isSynced }.count,
+            count: entries.filter(\.isAwaitingUpload).count,
             syncEnabled: isICloudSyncEnabled,
             availability: iCloudStatus,
             isBusy: isCheckingSync || isResettingSync,
@@ -252,7 +283,7 @@ final class AppState: ObservableObject {
                 try Task.checkCancellation()
                 try await syncManager.pullChanges(into: database)
                 let loaded = try await self.loadEntries()
-                pendingUploadCount = loaded.filter { !$0.isSynced }.count
+                pendingUploadCount = loaded.filter(\.isAwaitingUpload).count
                 try Task.checkCancellation()
                 completedSync = true
             }
@@ -294,6 +325,22 @@ final class AppState: ObservableObject {
             entries = loaded
         }
         return loaded
+    }
+
+    /// Removes entries from this device's history, like delete on Mac; iCloud copies are left alone.
+    func deleteEntries(ids: [UUID]) async {
+        guard let database, !ids.isEmpty else { return }
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                _ = try database.delete(ids: ids)
+            }.value
+            entriesGeneration += 1
+            let removed = Set(ids)
+            entries.removeAll { removed.contains($0.id) }
+        } catch {
+            logger.error("Delete failed: \(error.localizedDescription)")
+            errorMessage = "Couldn't delete: \(error.localizedDescription)"
+        }
     }
 
     func searchEntries(query: String, contentType: ContentType? = nil, mixedOnly: Bool = false) async -> [ClipboardEntry] {
@@ -338,7 +385,7 @@ final class AppState: ObservableObject {
         isShowingWhatsNew = false
     }
 
-    static func databaseURL() -> URL {
+    nonisolated static func databaseURL() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return appSupport
             .appendingPathComponent(PastaStorageLocation.directoryName, isDirectory: true)
@@ -370,4 +417,9 @@ final class AppState: ObservableObject {
         if let build = UITestConfiguration.releaseBuild { return build }
         return Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
     }
+}
+
+private extension ClipboardEntry {
+    /// Local-only entries never upload, so they are not "waiting".
+    var isAwaitingUpload: Bool { !isSynced && allowsCloudUpload }
 }

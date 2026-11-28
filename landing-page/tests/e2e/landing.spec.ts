@@ -175,6 +175,7 @@ test.describe('calls to action', () => {
     await expect(footer.getByRole('link', { name: 'GitHub' })).toHaveAttribute('href', REPO_URL);
     await expect(footer.getByRole('link', { name: 'Releases' })).toHaveAttribute('href', `${REPO_URL}/releases`);
     await expect(footer.getByRole('link', { name: 'Issues' })).toHaveAttribute('href', `${REPO_URL}/issues`);
+    await expect(footer.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', '/privacy');
   });
 
   test('all hrefs are well-formed and in-page anchors resolve', async ({ page }) => {

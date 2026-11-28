@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — Pasta</title>
+  <meta name="description" content="How Pasta for Mac, iPhone and iPad handles your clipboard history and other data.">
+  <meta name="theme-color" content="#eef2f6">
+  <link rel="icon" type="image/png" sizes="32x32" href="images/favicon-32x32-v2.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="images/favicon-16x16-v2.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="images/apple-touch-icon-v2.png">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    .policy { max-width: 46rem; margin: 0 auto; padding: 3rem 1.5rem 4rem; line-height: 1.6; }
+    .policy h1 { margin-bottom: .25rem; }
+    .policy h2 { margin-top: 2rem; font-size: 1.35rem; }
+    .policy ul { padding-left: 1.25rem; }
+    .policy li { margin: .35rem 0; }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <nav class="nav" aria-label="Main navigation">
+    <a href="/" class="nav__logo"><img src="images/app-icon-v3-144.png" width="40" height="40" alt="Pasta icon">Pasta</a>
+  </nav>
+  <main id="main" class="policy">
+    <h1>Privacy Policy</h1>
+    <p><small>Last updated 17 November 2026. Applies to Pasta for Mac and Pasta for iPhone and iPad.</small></p>
+
+    <p>Pasta is a clipboard history app made by Chris Mitchelmore. It has no Pasta account, no advertising and no tracking. The developer runs no server that receives your clipboard history.</p>
+
+    <h2>Clipboard history stays on your device</h2>
+    <ul>
+      <li>Pasta stores the text, links, images and files you copy in a database on your device.</li>
+      <li>On iPhone and iPad, Pasta reads the clipboard only while the app is open, and the system asks your permission. Shortcuts actions save, copy or search history only when you run them.</li>
+      <li>You can delete items from history at any time (on iPhone and iPad, swipe left on an item). Deleting the app deletes its on-device history. To remove history already synced to iCloud, delete Pasta's data in your device's iCloud storage settings.</li>
+    </ul>
+
+    <h2>Optional features that send data off the device</h2>
+    <p>Each of these is off until you turn it on, and you can turn it off again in Settings.</p>
+    <ul>
+      <li><strong>iCloud sync (Mac, iPhone and iPad).</strong> History is stored in your private iCloud database through Apple's CloudKit, under Apple's privacy policy. The developer cannot read it. Detected secrets (API keys, tokens, card numbers, IBANs and similar) are kept off iCloud by default.</li>
+      <li><strong>Tailnet Sync (Mac only).</strong> Sends history and files directly between Macs you pair and approve on your own Tailscale network. There is no Pasta relay server.</li>
+      <li><strong>Semantic search (Mac only).</strong> Sends entry text and search queries to the embeddings provider you choose (OpenAI, Azure OpenAI or a server you run), using your own API key. Secrets, financial data, file paths, images and items kept off iCloud are never sent. A server on your own Mac keeps everything local.</li>
+      <li><strong>Crash reports and usage analytics (Mac only).</strong> Crash reports go to Sentry; anonymous usage counts go to PostHog (EU). Neither includes clipboard contents, search text, app names, file paths or your identity. Details are in <a href="https://github.com/crmitchelmore/pasta/blob/main/SECURITY.md#security-considerations">SECURITY.md</a>.</li>
+    </ul>
+
+    <h2>What the iPhone and iPad app collects</h2>
+    <p>Nothing. The iOS app contains no analytics, crash-reporting or advertising code, and the developer receives no data from it. Data you sync through iCloud stays in your own iCloud account.</p>
+
+    <h2>Updates</h2>
+    <p>The direct-download Mac app checks a signed update feed at pasta-app.com. Like any web request, this reveals your IP address to the host. You can turn automatic checks off in Settings.</p>
+
+    <h2>Children</h2>
+    <p>Pasta is a general-purpose utility and is not directed at children.</p>
+
+    <h2>Changes and contact</h2>
+    <p>Changes to this policy are published on this page and in the <a href="https://github.com/crmitchelmore/pasta">source repository</a>. Questions: <a href="mailto:chrismitchelmore@gmail.com">chrismitchelmore@gmail.com</a>.</p>
+  </main>
+  <footer class="footer"><div><a class="footer__brand" href="/">Pasta</a><p>Made by Chris Mitchelmore.<br>© 2024–2026. MIT License.</p></div><ul class="footer__links"><li><a href="https://github.com/crmitchelmore/pasta">GitHub</a></li><li><a href="/privacy">Privacy</a></li></ul></footer>
+</body>
+</html>

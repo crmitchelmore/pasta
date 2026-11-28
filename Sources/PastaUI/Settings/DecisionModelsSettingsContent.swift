@@ -16,7 +16,7 @@ struct DecisionModelsSettingsContent: View {
     var body: some View {
         Section {
             if !isOnboarding {
-                Text("Decision models are recommended for better classification: Jev and Microsoft Decision-1 use the context of a whole clip rather than just legacy pattern matching. Compare them on your history to judge your results.")
+                Text("Decision models use the context of a whole clip rather than just legacy pattern matching. Choose Jev, Microsoft Decision-1 or OpenAI, and compare them on your history to judge your results.")
                     .font(.callout)
             }
             Picker("Preferred decision model", selection: $provider) {
@@ -72,9 +72,9 @@ struct DecisionClassifierSettingsSection: View {
     var body: some View {
         Section {
             DisclosureGroup("Shared classifier types", isExpanded: $expanded) {
-                Text("Both decision models use these descriptions and custom labels. Describe when a label should win; no regex is needed. Custom labels map to existing types for compatible previews, filters and sync.")
+                Text("All decision providers use these descriptions and custom labels. Describe when a label should win; no regex is needed. Custom labels map to existing types for compatible previews, filters and sync.")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("Saving a change disables both providers. Test and enable each again before sending clips with the new rules.")
+                Text("Saving a change disables all providers. Test and enable each again before sending clips with the new rules.")
                     .font(.caption).foregroundStyle(.secondary)
 
                 ForEach(rules.customClassifiers) { classifier in

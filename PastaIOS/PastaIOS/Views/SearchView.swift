@@ -103,7 +103,7 @@ struct SearchView: View {
         Section {
             VStack(spacing: 12) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 40))
+                    .font(.largeTitle)
                     .foregroundStyle(.tertiary)
                 Text("Search your clipboard history")
                     .font(.subheadline)
@@ -124,7 +124,7 @@ struct SearchView: View {
         Section {
             VStack(spacing: 12) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 40))
+                    .font(.largeTitle)
                     .foregroundStyle(.tertiary)
                 Text("No results for \"\(searchText)\"")
                     .font(.subheadline)

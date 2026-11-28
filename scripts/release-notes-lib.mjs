@@ -64,8 +64,11 @@ const inlineMarkdownToHTML = (text) => text
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/(https:\/\/[^\s<]+)/g, '<a href="$1">$1</a>');
+    // Links end at whitespace, markup or any (escaped) quote so they cannot leave the href attribute.
+    .replace(/https:\/\/(?:(?!&(?:quot|#39|lt|gt);)[^\s<>"'])+/g, (url) => `<a href="${url}">${url}</a>`);
 
 export const markdownToHTML = (markdown) => {
     const html = [];

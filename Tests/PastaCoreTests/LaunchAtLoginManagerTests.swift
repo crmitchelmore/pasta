@@ -4,10 +4,9 @@ import XCTest
 final class LaunchAtLoginManagerTests: XCTestCase {
     private final class StubService: LoginItemServicing {
         var isEnabled: Bool
-        private(set) var registerCallCount: Int = 0
-        private(set) var unregisterCallCount: Int = 0
-        var registerError: Error? = nil
-        var unregisterError: Error? = nil
+        private(set) var registerCallCount = 0
+        private(set) var unregisterCallCount = 0
+        var registerError: Error?
 
         init(isEnabled: Bool) {
             self.isEnabled = isEnabled
@@ -21,44 +20,25 @@ final class LaunchAtLoginManagerTests: XCTestCase {
 
         func unregister() throws {
             unregisterCallCount += 1
-            if let unregisterError { throw unregisterError }
             isEnabled = false
         }
     }
 
     private struct TestError: Error {}
 
-    func testSetEnabledTrueRegisters() throws {
+    func testSetEnabledRegistersUnregistersAndPropagatesFailure() throws {
         let service = StubService(isEnabled: false)
         let manager = LaunchAtLoginManager(service: service)
 
-        let enabled = try manager.setEnabled(true)
-
-        XCTAssertEqual(service.registerCallCount, 1)
-        XCTAssertEqual(service.unregisterCallCount, 0)
-        XCTAssertTrue(enabled)
+        XCTAssertTrue(try manager.setEnabled(true))
         XCTAssertTrue(manager.isEnabled)
-    }
-
-    func testSetEnabledFalseUnregisters() throws {
-        let service = StubService(isEnabled: true)
-        let manager = LaunchAtLoginManager(service: service)
-
-        let enabled = try manager.setEnabled(false)
-
-        XCTAssertEqual(service.registerCallCount, 0)
-        XCTAssertEqual(service.unregisterCallCount, 1)
-        XCTAssertFalse(enabled)
+        XCTAssertFalse(try manager.setEnabled(false))
         XCTAssertFalse(manager.isEnabled)
-    }
-
-    func testSetEnabledPropagatesError() {
-        let service = StubService(isEnabled: false)
-        service.registerError = TestError()
-        let manager = LaunchAtLoginManager(service: service)
-
-        XCTAssertThrowsError(try manager.setEnabled(true))
         XCTAssertEqual(service.registerCallCount, 1)
+        XCTAssertEqual(service.unregisterCallCount, 1)
+
+        service.registerError = TestError()
+        XCTAssertThrowsError(try manager.setEnabled(true))
         XCTAssertFalse(service.isEnabled)
     }
 }

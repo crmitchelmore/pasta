@@ -10,7 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 
 class ReleaseStampingTests(unittest.TestCase):
-    def test_alpha_stamps_own_bundle_profile_and_cloud_without_changing_stable_source(self):
+    def test_alpha_isolates_mac_cloud_but_ships_ios_as_the_main_app_without_changing_stable_source(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             files = ['Sources/PastaCore/Resources/ReleaseTrains.json', 'Resources/release.entitlements',
@@ -23,14 +23,20 @@ class ReleaseStampingTests(unittest.TestCase):
                 target.write_bytes(original[name])
             env = dict(os.environ, RELEASE_TRAIN='alpha', RELEASE_VERSION='1.9.0', BUILD_NUMBER='1001', RELEASE_SOURCE='a'*40)
             subprocess.run(['python3', str(ROOT/'scripts/configure-release-train.py')], cwd=root, env=env, check=True)
-            for name in files[1:3]:
-                entitlements = plistlib.loads((root/name).read_bytes())
-                self.assertEqual(entitlements['com.apple.developer.icloud-container-identifiers'], ['iCloud.com.pasta.ios.alpha'])
+            containers = {name: plistlib.loads((root/name).read_bytes())['com.apple.developer.icloud-container-identifiers']
+                          for name in files[1:3]}
+            self.assertEqual(containers, {'Resources/release.entitlements': ['iCloud.com.pasta.ios.alpha'],
+                                          'PastaIOS/PastaIOS/PastaIOS.entitlements': ['iCloud.com.pasta.ios']})
+            info = plistlib.loads((root/'PastaIOS/PastaIOS/Info.plist').read_bytes())
+            self.assertEqual(info['PastaReleaseTrain'], 'alpha')
             project = (root/files[-1]).read_text()
-            self.assertIn('PRODUCT_BUNDLE_IDENTIFIER = com.pasta.ios.alpha;', project)
-            self.assertIn('Pasta Alpha iOS AppStore CI', project)
+            # One App Store Connect record (Guideline 4.3(a)): main bundle and profile.
+            self.assertIn('PRODUCT_BUNDLE_IDENTIFIER = com.pasta.ios;', project)
+            self.assertNotIn('com.pasta.ios.alpha', project)
+            self.assertIn('PROVISIONING_PROFILE_SPECIFIER = "PastaIOS AppStore CI";', project)
+            self.assertNotIn('Pasta Alpha iOS AppStore CI', project)
             self.assertIn('ASSETCATALOG_COMPILER_APPICON_NAME = AppIconAlpha;', project)
-            self.assertNotIn('PRODUCT_BUNDLE_IDENTIFIER = com.pasta.ios;', project)
+            self.assertIn('INFOPLIST_KEY_CFBundleDisplayName = "Pasta Alpha";', project)
             for name in files:
                 self.assertEqual((ROOT/name).read_bytes(), original[name])
 

@@ -3,7 +3,7 @@ import XCTest
 @testable import PastaCore
 
 /// Coarse latency budgets for the paths users feel: first history page,
-/// full history walk, search and save. They run on an on-disk 10k-entry
+/// full history walk, search, entry save and image save. They run on an on-disk 10k-entry
 /// history with some long entries.
 ///
 /// Debug-build medians on an Apple Silicon laptop: first page 1.5 ms, full
@@ -49,16 +49,14 @@ final class PerformanceBudgetTests: XCTestCase {
         super.tearDown()
     }
 
-    func testFirstHistoryPageWithinBudget() throws {
-        let ms = try medianMilliseconds {
+    func testHistoryPagingWithinBudget() throws {
+        let firstPage = try medianMilliseconds {
             let page = try Self.db.fetchHistoryPage(after: nil, limit: 200)
             XCTAssertEqual(page.entries.count, 200)
         }
-        XCTAssertLessThan(ms, 25, "First 200-entry history page took \(ms) ms")
-    }
+        XCTAssertLessThan(firstPage, 25, "First 200-entry history page took \(firstPage) ms")
 
-    func testFullHistoryWalkWithinBudget() throws {
-        let ms = try medianMilliseconds(runs: 3) {
+        let fullWalk = try medianMilliseconds(runs: 3) {
             var loaded = 0
             var cursor: DatabaseManager.HistoryCursor?
             repeat {
@@ -68,25 +66,44 @@ final class PerformanceBudgetTests: XCTestCase {
             } while cursor != nil
             XCTAssertEqual(loaded, Self.rowCount)
         }
-        XCTAssertLessThan(ms, 1_000, "Full 10k-entry history walk took \(ms) ms")
+        XCTAssertLessThan(fullWalk, 1_000, "Full 10k-entry history walk took \(fullWalk) ms")
     }
 
-    func testSearchWithinBudget() throws {
+    func testSearchAndSaveWithinBudget() throws {
         for query in ["alpha", "al", "example com"] {
             let ms = try medianMilliseconds {
                 XCTAssertFalse(try Self.db.searchFTS(query: query, contentType: nil, limit: 50).isEmpty)
             }
             XCTAssertLessThan(ms, 100, "Search for '\(query)' took \(ms) ms")
         }
-    }
+        let service = SearchService(database: Self.db)
+        for (query, type) in [("alpha entry", nil), ("example.com", nil), ("alpha", ContentType.url)] as [(String, ContentType?)] {
+            let ms = try medianMilliseconds(runs: 3) {
+                let results = try service.search(query: query, contentType: type, limit: 50)
+                XCTAssertFalse(results.isEmpty)
+                if let type { XCTAssertTrue(results.allSatisfy { $0.entry.contentType == type }) }
+            }
+            XCTAssertLessThan(ms, 250, "SearchService query '\(query)' took \(ms) ms")
+        }
 
-    func testSaveWithinBudget() throws {
         var index = 0
-        let ms = try medianMilliseconds {
+        let save = try medianMilliseconds {
             index += 1
             try Self.db.insert(ClipboardEntry(content: "budget save \(index) \(UUID())", contentType: .text))
         }
-        XCTAssertLessThan(ms, 25, "Saving one entry took \(ms) ms")
+        XCTAssertLessThan(save, 25, "Saving one entry took \(save) ms")
+
+        let images = try ImageStorageManager(imagesDirectoryURL: Self.directory.appendingPathComponent("images", isDirectory: true))
+        var blob = Data((0..<1_048_576).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ 7) })
+        let imageSave = try medianMilliseconds {
+            index += 1
+            blob[0] = UInt8(truncatingIfNeeded: index)
+            let path = try images.saveImage(blob)
+            XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: path)), blob)
+            try images.deleteImage(path: path)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: path))
+        }
+        XCTAssertLessThan(imageSave, 250, "Saving and deleting a 1 MB image took \(imageSave) ms")
     }
 
     private func medianMilliseconds(runs: Int = 7, _ body: () throws -> Void) throws -> Double {

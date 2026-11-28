@@ -12,17 +12,15 @@ final class DatabaseRecoveryTests: XCTestCase {
         return directory
     }
 
-    func testCorruptionRecoveryPreservesOriginalBytesAndCreatesUsableDatabase() throws {
+    func testCorruptionIsQuarantinedWithSidecarsAndReplaced() throws {
         let directory = try temporaryDirectory()
         let databaseURL = directory.appendingPathComponent("pasta.sqlite")
         let original = Data("This is a damaged SQLite database; preserve it for recovery.".utf8)
         try original.write(to: databaseURL)
 
         let database = try DatabaseManager(databaseURL: databaseURL)
-
-        let quarantines = try FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: nil
-        ).filter { $0.lastPathComponent.hasPrefix("pasta.sqlite.corrupt-") }
+        let quarantines = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("pasta.sqlite.corrupt-") }
         XCTAssertEqual(quarantines.count, 1)
         let quarantine = try XCTUnwrap(quarantines.first)
         XCTAssertEqual(try Data(contentsOf: quarantine.appendingPathComponent("pasta.sqlite")), original)
@@ -30,28 +28,24 @@ final class DatabaseRecoveryTests: XCTestCase {
         let entry = ClipboardEntry(content: "captured after recovery", contentType: .text)
         try database.insert(entry)
         XCTAssertEqual(try database.fetch(id: entry.id)?.content, entry.content)
-    }
 
-    func testQuarantinePreservesActualSQLiteSidecars() throws {
-        let directory = try temporaryDirectory()
-        let databaseURL = directory.appendingPathComponent("pasta.sqlite")
+        let sidecarDirectory = try temporaryDirectory()
+        let sidecarURL = sidecarDirectory.appendingPathComponent("pasta.sqlite")
         let suffixes = ["", "-wal", "-shm", "-journal"]
         for suffix in suffixes {
-            try Data("recoverable bytes: \(suffix)".utf8).write(
-                to: URL(fileURLWithPath: databaseURL.path + suffix)
-            )
+            try Data("recoverable bytes: \(suffix)".utf8).write(to: URL(fileURLWithPath: sidecarURL.path + suffix))
         }
-
-        let quarantine = try DatabaseManager.quarantineCorruptedDatabase(databaseURL: databaseURL)
-
+        let sidecarQuarantine = try DatabaseManager.quarantineCorruptedDatabase(databaseURL: sidecarURL)
         for suffix in suffixes {
-            XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path + suffix))
-            let preserved = quarantine.appendingPathComponent("pasta.sqlite" + suffix)
-            XCTAssertEqual(try Data(contentsOf: preserved), Data("recoverable bytes: \(suffix)".utf8))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: sidecarURL.path + suffix))
+            XCTAssertEqual(
+                try Data(contentsOf: sidecarQuarantine.appendingPathComponent("pasta.sqlite" + suffix)),
+                Data("recoverable bytes: \(suffix)".utf8)
+            )
         }
     }
 
-    func testOnlySQLiteIntegrityErrorsPermitRecovery() {
+    func testOnlyIntegrityErrorsPermitRecovery() throws {
         for code in [ResultCode.SQLITE_CORRUPT, .SQLITE_NOTADB] {
             XCTAssertTrue(DatabaseManager.isCorruptionError(DatabaseError(resultCode: code)))
         }
@@ -65,20 +59,16 @@ final class DatabaseRecoveryTests: XCTestCase {
             code: NSFileWriteOutOfSpaceError,
             userInfo: [NSLocalizedDescriptionKey: "Not a database: corrupt/malformed storage"]
         )))
-    }
 
-    func testUnavailableDatabasePathIsPreservedWithoutQuarantine() throws {
+        // An unopenable path is an availability failure: init throws and nothing is moved.
         let directory = try temporaryDirectory()
         let databaseURL = directory.appendingPathComponent("pasta.sqlite", isDirectory: true)
         try FileManager.default.createDirectory(at: databaseURL, withIntermediateDirectories: false)
         let sentinel = databaseURL.appendingPathComponent("preserve-me")
         let original = Data("existing storage contents".utf8)
         try original.write(to: sentinel)
-
         XCTAssertThrowsError(try DatabaseManager(databaseURL: databaseURL))
-
         XCTAssertEqual(try Data(contentsOf: sentinel), original)
-        let contents = try FileManager.default.contentsOfDirectory(atPath: directory.path)
-        XCTAssertEqual(contents, ["pasta.sqlite"])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), ["pasta.sqlite"])
     }
 }

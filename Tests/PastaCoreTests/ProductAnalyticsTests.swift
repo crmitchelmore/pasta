@@ -3,24 +3,16 @@ import XCTest
 @testable import PastaCore
 
 final class ProductAnalyticsTests: XCTestCase {
-    // MARK: - Transport
-
-    func testNothingIsSentBeforeConsentReopensTheSink() async throws {
+    /// The sink is silent until consent reopens it, sends only bounded fields to
+    /// the configured endpoint, retries queued events and purges what never left.
+    func testTransportIsConsentGatedCarriesNoUserDataAndRetriesOrPurgesQueue() async throws {
         let recorder = RequestRecorder()
         let sink = makeSink(recorder: recorder)
-
         try await sink.capture(makePayload())
-
         XCTAssertEqual(recorder.requests.count, 0, "The sink must stay silent until reopen()")
-    }
 
-    func testCaptureUsesOnlyTheConfiguredEndpointAndCarriesNoUserData() async throws {
-        let recorder = RequestRecorder()
-        let sink = makeSink(recorder: recorder)
         try await sink.reopen()
-
         try await sink.capture(makePayload(event: .pastePerformed(contentType: .apiKey)))
-
         let request = try XCTUnwrap(recorder.requests.first)
         XCTAssertEqual(request.url?.absoluteString, "https://eu.i.posthog.com/capture")
         XCTAssertEqual(request.httpMethod, "POST")
@@ -34,112 +26,47 @@ final class ProductAnalyticsTests: XCTestCase {
         XCTAssertEqual(properties["platform"] as? String, "macOS")
         XCTAssertEqual(properties["locale_language_code"] as? String, "en")
         // The content type is a bounded enum; the content itself has no key at all.
-        XCTAssertNil(properties["content"])
-        XCTAssertNil(properties["query"])
-        XCTAssertNil(properties["source_app"])
-        XCTAssertNil(properties["$ip"])
-    }
+        for key in ["content", "query", "source_app", "$ip"] {
+            XCTAssertNil(properties[key], key)
+        }
 
-    func testPurgeDeletesQueuedEventsThatNeverReachedTheServer() async throws {
+        // A failed send is queued and retried by the next sink on reopen.
         let queueURL = temporaryQueueURL()
-        let sink = makeSink(queueURL: queueURL, recorder: RequestRecorder(statusCode: 500))
-        try? await sink.reopen()
-        try? await sink.capture(makePayload())
-        XCTAssertTrue(FileManager.default.fileExists(atPath: queueURL.path))
-
-        try await sink.purge()
-
-        XCTAssertFalse(FileManager.default.fileExists(atPath: queueURL.path))
-    }
-
-    func testQueuedEventsAreRetriedOnTheNextReopen() async throws {
-        let queueURL = temporaryQueueURL()
-        let failing = RequestRecorder(statusCode: 500)
-        let firstSink = makeSink(queueURL: queueURL, recorder: failing)
+        let firstSink = makeSink(queueURL: queueURL, recorder: RequestRecorder(statusCode: 500))
         try? await firstSink.reopen()
         try? await firstSink.capture(makePayload())
-
+        XCTAssertTrue(FileManager.default.fileExists(atPath: queueURL.path))
         let succeeding = RequestRecorder()
-        let secondSink = makeSink(queueURL: queueURL, recorder: succeeding)
-        try await secondSink.reopen()
-
+        try await makeSink(queueURL: queueURL, recorder: succeeding).reopen()
         XCTAssertEqual(succeeding.requests.count, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: queueURL.path))
+
+        // Purge deletes queued events that never reached the server.
+        let purgeURL = temporaryQueueURL()
+        let failingSink = makeSink(queueURL: purgeURL, recorder: RequestRecorder(statusCode: 500))
+        try? await failingSink.reopen()
+        try? await failingSink.capture(makePayload())
+        XCTAssertTrue(FileManager.default.fileExists(atPath: purgeURL.path))
+        try await failingSink.purge()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: purgeURL.path))
     }
 
-    // MARK: - Consent
-
-    func testControllerSendsNothingUntilTheUserOptsIn() async throws {
-        let recorder = RequestRecorder()
-        let (controller, _) = try makeController(recorder: recorder)
-
-        try await controller.capture(.settingsOpened)
-
-        let consent = await controller.consentState()
-        XCTAssertEqual(consent, .unknown)
-        XCTAssertEqual(recorder.requests.count, 0)
-    }
-
-    func testOptInMintsARandomInstallIDAndOptOutDeletesIt() async throws {
+    func testConsentLifecycleGatesEveryEventAndDeletesIdentityOnOptOut() async throws {
         let recorder = RequestRecorder()
         let (controller, store) = try makeController(recorder: recorder)
 
+        try await controller.capture(.settingsOpened)
+        let consent = await controller.consentState()
+        XCTAssertEqual(consent, .unknown)
+        XCTAssertEqual(recorder.requests.count, 0, "Nothing is sent until the user opts in")
+
         try await controller.setConsent(.optedIn)
         try await controller.capture(.settingsOpened)
-        let installID = try store.loadInstallationID()
-        XCTAssertNotNil(installID)
+        XCTAssertNotNil(try store.loadInstallationID())
 
-        try await controller.setConsent(.optedOut)
-
-        XCTAssertNil(try store.loadInstallationID(), "Opting out must delete the install identity")
-        XCTAssertEqual(try store.loadConsent(), .optedOut)
-    }
-
-    func testOptOutEventIsSentBeforeTheQueueIsPurged() async throws {
-        let recorder = RequestRecorder()
-        let (controller, _) = try makeController(recorder: recorder)
-        try await controller.setConsent(.optedIn)
-
-        try await controller.setConsent(.optedOut)
-
-        let events = recorder.requests.compactMap(eventName(of:))
-        XCTAssertEqual(events, ["analytics_opt_out"])
-    }
-
-    func testCaptureAfterOptOutSendsNothing() async throws {
-        let recorder = RequestRecorder()
-        let (controller, _) = try makeController(recorder: recorder)
-        try await controller.setConsent(.optedIn)
-        try await controller.setConsent(.optedOut)
-        let countAfterOptOut = recorder.requests.count
-
-        try await controller.capture(.pastePerformed(contentType: .text))
-        try await controller.capture(.searchPerformed(hasFilter: true))
-
-        XCTAssertEqual(recorder.requests.count, countAfterOptOut)
-    }
-
-    /// Proves the `PASTA_CI` kill switch: with `forceDisabled` true, an opted-in
-    /// controller still performs zero requests.
-    func testForceDisabledSuppressesEverythingEvenWhenOptedIn() async throws {
-        let recorder = RequestRecorder()
-        let (controller, _) = try makeController(recorder: recorder, forceDisabled: true)
-
-        try await controller.setConsent(.optedIn)
-        try await controller.capture(.appActiveDaily)
-        try await controller.captureDailyActiveIfNeeded()
-
-        XCTAssertEqual(recorder.requests.count, 0)
-    }
-
-    func testAppActiveDailyIsSentOncePerCalendarDay() async throws {
-        let recorder = RequestRecorder()
-        let (controller, _) = try makeController(recorder: recorder)
-        try await controller.setConsent(.optedIn)
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!
         let day = Date(timeIntervalSince1970: 1_800_000_000)
-
         let first = try await controller.captureDailyActiveIfNeeded(now: day, calendar: calendar)
         let sameDay = try await controller.captureDailyActiveIfNeeded(
             now: day.addingTimeInterval(6 * 60 * 60), calendar: calendar
@@ -147,87 +74,71 @@ final class ProductAnalyticsTests: XCTestCase {
         let nextDay = try await controller.captureDailyActiveIfNeeded(
             now: day.addingTimeInterval(30 * 60 * 60), calendar: calendar
         )
-
         XCTAssertTrue(first)
         XCTAssertFalse(sameDay)
         XCTAssertTrue(nextDay)
-        XCTAssertEqual(recorder.requests.compactMap(eventName(of:)), ["app_active_daily", "app_active_daily"])
+
+        XCTAssertEqual(recorder.requests.compactMap(eventName(of:)).filter { $0 == "app_active_daily" }.count, 2)
+
+        let countBeforeOptOut = recorder.requests.count
+        try await controller.setConsent(.optedOut)
+        XCTAssertNil(try store.loadInstallationID(), "Opting out must delete the install identity")
+        XCTAssertEqual(try store.loadConsent(), .optedOut)
+        // The opt-out event is sent before the queue is purged.
+        XCTAssertEqual(recorder.requests.dropFirst(countBeforeOptOut).compactMap(eventName(of:)), ["analytics_opt_out"])
+
+        let countAfterOptOut = recorder.requests.count
+        try await controller.capture(.pastePerformed(contentType: .text))
+        try await controller.capture(.searchPerformed(hasFilter: true))
+        XCTAssertEqual(recorder.requests.count, countAfterOptOut)
+
+        // The `PASTA_CI` kill switch: an opted-in controller still sends nothing.
+        let ciRecorder = RequestRecorder()
+        let (ciController, _) = try makeController(recorder: ciRecorder, forceDisabled: true)
+        try await ciController.setConsent(.optedIn)
+        try await ciController.capture(.appActiveDaily)
+        try await ciController.captureDailyActiveIfNeeded()
+        XCTAssertEqual(ciRecorder.requests.count, 0)
     }
 
-    // MARK: - Configuration
-
-    /// The "silent no-op" guarantee: an unconfigured build resolves no destination,
-    /// so `AnalyticsManager.start()` returns before it allocates a sink or a state file.
-    func testNoConfigurationWithoutAProjectKey() {
+    /// The "silent no-op" guarantee for unconfigured builds, plus the payload
+    /// boundary: every context and event value is normalised to a bounded set.
+    func testConfigurationAndPayloadBoundary() throws {
         let resolve = QueuedCaptureAnalyticsSink.Configuration.resolve
-
         XCTAssertNil(resolve([:], { _ in nil }), "No key anywhere")
         XCTAssertNil(resolve([:], { $0 == "PostHogProjectKey" ? "" : nil }), "Empty Info.plist key")
-        XCTAssertNil(
-            resolve([:], { $0 == "PostHogProjectKey" ? "   " : nil }),
-            "Whitespace-only key (an unsubstituted CI secret)"
-        )
+        XCTAssertNil(resolve([:], { $0 == "PostHogProjectKey" ? "   " : nil }),
+                     "Whitespace-only key (an unsubstituted CI secret)")
         XCTAssertNil(resolve(["POSTHOG_PROJECT_KEY": ""], { _ in nil }), "Empty environment key")
-    }
-
-    func testConfigurationDefaultsToTheEUCaptureEndpoint() throws {
-        let configuration = try XCTUnwrap(
-            QueuedCaptureAnalyticsSink.Configuration.resolve(
-                environment: [:],
-                infoValue: { $0 == "PostHogProjectKey" ? "phc_live" : nil }
-            )
-        )
+        let configuration = try XCTUnwrap(resolve([:], { $0 == "PostHogProjectKey" ? "phc_live" : nil }))
         XCTAssertEqual(configuration.projectKey, "phc_live")
         XCTAssertEqual(configuration.endpoint.absoluteString, "https://eu.i.posthog.com/capture")
-    }
 
-    // MARK: - Payload boundary
-
-    func testContextNormalisesUnexpectedValuesToOther() {
-        let context = ProductAnalyticsContext(
-            appVersion: "1.2.3-beta+deadbeef",
-            build: "unstable",
-            osMajorMinor: "26.0.1",
-            distributionChannel: .direct,
-            localeLanguageCode: "zz-ZZ-somewhere",
-            architecture: "ppc"
+        let junk = ProductAnalyticsContext(
+            appVersion: "1.2.3-beta+deadbeef", build: "unstable", osMajorMinor: "26.0.1",
+            distributionChannel: .direct, localeLanguageCode: "zz-ZZ-somewhere", architecture: "ppc"
         )
-
-        XCTAssertEqual(context.appVersion, "other")
-        XCTAssertEqual(context.build, "other")
-        XCTAssertEqual(context.osMajorMinor, "other")
-        XCTAssertEqual(context.architecture, "other")
-        // A two-letter subtag is kept even when the rest is junk; anything longer collapses.
-        XCTAssertEqual(context.localeLanguageCode, "zz")
-        XCTAssertEqual(makeContext(language: "klingon").localeLanguageCode, "other")
-
-        // Region is dropped on purpose: en-GB and en-US are indistinguishable.
-        XCTAssertEqual(makeContext(language: "en_GB").localeLanguageCode, "en")
-        XCTAssertEqual(makeContext(language: "en-US").localeLanguageCode, "en")
-
+        XCTAssertEqual([junk.appVersion, junk.build, junk.osMajorMinor, junk.architecture],
+                       ["other", "other", "other", "other"])
+        // A two-letter subtag is kept even when the rest is junk; region is dropped on purpose.
+        for (language, expected) in [("zz-ZZ-somewhere", "zz"), ("klingon", "other"), ("en_GB", "en"), ("en-US", "en")] {
+            XCTAssertEqual(makeContext(language: language).localeLanguageCode, expected, "case \(language)")
+        }
         let valid = ProductAnalyticsContext(
             appVersion: "1.2.3", build: "42", osMajorMinor: "26.0",
             distributionChannel: .direct, localeLanguageCode: "fr", architecture: "ARM64"
         )
-        XCTAssertEqual(valid.appVersion, "1.2.3")
-        XCTAssertEqual(valid.build, "42")
-        XCTAssertEqual(valid.osMajorMinor, "26.0")
-        XCTAssertEqual(valid.architecture, "arm64")
-    }
+        XCTAssertEqual([valid.appVersion, valid.build, valid.osMajorMinor, valid.architecture],
+                       ["1.2.3", "42", "26.0", "arm64"])
 
-    func testEveryEventPropertyIsABoundedEnumOrBoolean() {
         let allowed = Set(["true", "false"] + ContentType.allCases.map(\.rawValue))
         let events: [ProductAnalyticsEvent] = [
             .appActiveDaily, .analyticsOptIn, .analyticsOptOut, .settingsOpened,
             .searchPerformed(hasFilter: true), .searchPerformed(hasFilter: false)
         ] + ContentType.allCases.map { .pastePerformed(contentType: $0) }
-
         for event in events {
             for (key, value) in event.properties {
-                XCTAssertTrue(
-                    allowed.contains(value),
-                    "Event \(event.name) property \(key) has unbounded value \(value)"
-                )
+                XCTAssertTrue(allowed.contains(value), "Event \(event.name) property \(key) has unbounded value \(value)")
             }
         }
     }

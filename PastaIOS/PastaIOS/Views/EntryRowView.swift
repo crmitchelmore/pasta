@@ -7,7 +7,8 @@ struct EntryRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: entry.contentType.iconName)
-                .font(.system(size: 14, weight: .medium))
+                .font(.subheadline.weight(.medium))
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 .foregroundStyle(entry.contentType.tintColor)
                 .frame(width: 28, height: 28)
                 .background(entry.contentType.tintColor.opacity(0.12))
@@ -28,6 +29,14 @@ struct EntryRowView: View {
                         .background(entry.contentType.tintColor.opacity(0.12))
                         .foregroundStyle(entry.contentType.tintColor)
                         .clipShape(Capsule())
+
+                    if !entry.allowsCloudUpload {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("Kept on this device")
+                            .accessibilityIdentifier("history.row.localOnly")
+                    }
 
                     if let sourceApp = entry.sourceApp {
                         Text(sourceApp.components(separatedBy: ".").last ?? sourceApp)

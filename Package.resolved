@@ -5,8 +5,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/groue/GRDB.swift.git",
       "state": {
-        "revision": "b83108d10f42680d78f23fe4d4d80fc88dab3212",
-        "version": "7.11.1"
+        "revision": "92a554cd0d5e8d67cb18993c6054e73fe42c066c",
+        "version": "7.12.0"
       }
     },
     {
@@ -14,8 +14,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/getsentry/sentry-cocoa.git",
       "state": {
-        "revision": "8689e780a295dfdc6501ac0dbb502461e16d6551",
-        "version": "9.29.2"
+        "revision": "aa91bcf6bd6f383dbc49f38bf785d1d775c4f751",
+        "version": "9.34.0"
       }
     },
     {
@@ -23,8 +23,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/sparkle-project/Sparkle.git",
       "state": {
-        "revision": "eef1a539a373c1f1a320624b1130fc5de7b2e100",
-        "version": "2.10.0"
+        "revision": "ab7d71291238df6e0492143b120c9b696a35f603",
+        "version": "2.10.1"
       }
     }
   ],

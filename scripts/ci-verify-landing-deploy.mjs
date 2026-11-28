@@ -32,6 +32,13 @@ async function verifySurfaceCI({ github, owner, repo, sha, runId,
       throw new Error(`Deployment blocked: ${name} did not succeed for ${sha}`);
     }
   }
+  // Pull requests may defer the bundle launch smoke to main, where it always
+  // runs inside Build & Test; a successful job alone could hide a skipped step.
+  const buildAndTest = jobs.find((job) => job.name === 'Build & Test');
+  const smoke = (buildAndTest.steps || []).filter((step) => step.name === 'Launch smoke test');
+  if (smoke.length !== 1 || smoke[0].status !== 'completed' || smoke[0].conclusion !== 'success') {
+    throw new Error(`Deployment blocked: the macOS bundle launch smoke test did not succeed for ${sha}`);
+  }
   const browser = jobs.filter((job) => job.name === 'Landing page e2e (Playwright)');
   if (browser.length !== 1 || browser[0].status !== 'completed') {
     throw new Error(`Deployment blocked: missing or incomplete Playwright evidence for ${sha}`);

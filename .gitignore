@@ -29,6 +29,3 @@ release_notes.md
 .dolt/
 *.db
 .beads-credential-key
-
-# Quality Software conformance derived evidence
-.conformance/
