@@ -6,8 +6,6 @@
     <string>8X4ZN58TYH.com.pasta.clipboard</string>
     <key>com.apple.security.automation.apple-events</key>
     <true/>
-    <key>com.apple.security.cs.disable-library-validation</key>
-    <true/>
     <key>com.apple.developer.icloud-services</key>
     <array>
         <string>CloudKit</string>

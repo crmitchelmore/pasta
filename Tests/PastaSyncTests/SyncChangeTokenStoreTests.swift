@@ -84,6 +84,45 @@ final class SyncChangeTokenStoreTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testUpgradeReplaysRecordsSkippedBeforeEncryptedFields() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SyncEncryptedReplayTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("pasta.sqlite")
+
+        // An old client skipped an encrypted-only record but saved the checkpoint past it.
+        let pending = ClipboardEntry(content: "not yet uploaded", contentType: .text)
+        try createPreEncryptionDatabase(at: url, checkpoint: Data([7]))
+        var database: DatabaseManager? = try DatabaseManager(databaseURL: url)
+        XCTAssertNil(try database!.loadSyncChangeToken(), "Upgrade drops the stale checkpoint")
+        _ = try database!.insert(pending)
+        XCTAssertFalse(try database!.fetch(id: pending.id)!.isSynced)
+
+        let skipped = ClipboardEntry(content: "encrypted-only entry", contentType: .text)
+        let remote = CheckpointTestRemote(entry: skipped)
+        let service = SyncPullService(fetch: { try await remote.fetch(after: $0) })
+        try await service.pull(into: database!)
+        XCTAssertEqual(try database!.fetch(id: skipped.id)?.content, skipped.content)
+        XCTAssertFalse(try database!.fetch(id: pending.id)!.isSynced, "Replay keeps upload state")
+        database = nil
+
+        // The migration runs once; later launches keep the new checkpoint.
+        let reopened = try DatabaseManager(databaseURL: url)
+        XCTAssertEqual(try reopened.loadSyncChangeToken(), Data([1]))
+        let inputs = await remote.fetchTokens
+        XCTAssertEqual(inputs, [nil])
+    }
+
+    private func createPreEncryptionDatabase(at url: URL, checkpoint: Data) throws {
+        let writer = try DatabaseQueue(path: url.path)
+        try DatabaseManager.migrator.migrate(writer, upTo: "addSemanticEmbeddings")
+        try writer.write { db in
+            try db.execute(sql: "INSERT INTO sync_checkpoints (name, token) VALUES ('cloudkit', ?)", arguments: [checkpoint])
+        }
+    }
+
     private func createLegacyDatabase(at url: URL, entry: ClipboardEntry) throws {
         let writer = try DatabaseQueue(path: url.path)
         try DatabaseManager.migrator.migrate(writer, upTo: "addContentTypeMask")
