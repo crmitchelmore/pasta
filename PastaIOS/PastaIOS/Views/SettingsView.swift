@@ -162,7 +162,7 @@ struct SettingsView: View {
         } header: {
             Text("Help")
         } footer: {
-            Text("Use Replay Walkthrough to re-open onboarding and share what Pasta on iPhone is for.")
+            Text("Use Replay Walkthrough to re-open onboarding and share what Pasta on iPhone and iPad is for.")
         }
     }
 
@@ -177,6 +177,10 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("settings.version")
             }
+            Link(destination: URL(string: "https://pasta-app.com/privacy")!) {
+                Label("Privacy Policy", systemImage: "hand.raised")
+            }
+            .accessibilityIdentifier("settings.privacyPolicy")
         }
     }
 

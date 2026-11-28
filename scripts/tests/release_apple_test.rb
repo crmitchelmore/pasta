@@ -245,6 +245,30 @@ class ReleaseAppleTest < Minitest::Test
       refute d.submitted, state
     end
   end
+  def test_stable_ios_never_resends_a_rejected_build_returned_to_prepare
+    [%w[UNRESOLVED_ISSUES apple-build], %w[COMPLETE apple-build], %w[UNRESOLVED_ISSUES older-build]].each do |review_state, attached|
+      client=FakeClient.new
+      client.define_singleton_method(:list) do |path|
+        next [{'id'=>'v','attributes'=>{'platform'=>'IOS','versionString'=>'3.2.0','appStoreState'=>'PREPARE_FOR_SUBMISSION'}}] if path.include?('/appStoreVersions')
+        next [{'id'=>'r','attributes'=>{'platform'=>'IOS','state'=>review_state}}] if path.include?('/reviewSubmissions?')
+        next [{'relationships'=>{'appStoreVersion'=>{'data'=>{'id'=>'v'}}}}] if path.end_with?('/r/items')
+        super(path)
+      end
+      client.define_singleton_method(:get) do |path|
+        next {'data'=>{'id'=>attached}} if path == '/v1/appStoreVersions/v/build'
+        super(path)
+      end
+      d=gated(client)
+      if attached == 'apple-build'
+        out, _ = capture_io { refute d.submit_if_ready, review_state }
+        assert_match(/already reviewed by Apple/, out)
+        refute d.submitted
+      else
+        assert d.submit_if_ready, 'a new candidate build may replace the rejected one'
+        assert d.submitted
+      end
+    end
+  end
   def test_new_stable_version_waits_for_prior_apple_review_or_release
     %w[WAITING_FOR_REVIEW IN_REVIEW PENDING_DEVELOPER_RELEASE PENDING_APPLE_RELEASE PROCESSING_FOR_APP_STORE METADATA_REJECTED INVALID_BINARY UNKNOWN].each do |state|
       client=FakeClient.new

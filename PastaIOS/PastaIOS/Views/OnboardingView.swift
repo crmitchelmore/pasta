@@ -29,7 +29,7 @@ struct OnboardingView: View {
                 .padding(.bottom, 8)
                 .accessibilityIdentifier("onboarding.title")
 
-            Text("Your iPhone clipboard companion for Pasta on Mac")
+            Text("Your clipboard history on iPhone and iPad, synced with Pasta on Mac")
                 .font(.title3)
                 .foregroundStyle(.secondary)
                 .padding(.bottom, 40)
@@ -38,8 +38,8 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 20) {
                 FeatureRow(
                     icon: "arrow.triangle.2.circlepath.icloud",
-                    title: "Built for Mac + iPhone",
-                    description: "Choose iCloud sync to access clipboard history from your Mac on your iPhone."
+                    title: "Built for Mac, iPhone and iPad",
+                    description: "Choose iCloud sync to access clipboard history from your Mac on this device."
                 )
                 FeatureRow(
                     icon: "magnifyingglass",
@@ -54,7 +54,7 @@ struct OnboardingView: View {
                 FeatureRow(
                     icon: "lock.shield",
                     title: "Private by default",
-                    description: "Clipboard history stays on this iPhone until you choose to enable iCloud sync."
+                    description: "Clipboard history stays on this device until you choose to enable iCloud sync."
                 )
             }
             .padding(.horizontal, 24)
@@ -88,7 +88,7 @@ struct OnboardingView: View {
                         appState.completeOnboarding()
                     }
                 } label: {
-                    Text(isReplay ? "Done" : "Continue on This iPhone")
+                    Text(isReplay ? "Done" : "Continue on This Device")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)

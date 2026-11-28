@@ -17,6 +17,10 @@ All notable changes to Pasta will be documented in this file.
   secrets policy), Copy Latest Clip (optionally of one type, such as a link or
   code) and Search Pasta. They run without opening the app and are offered as
   App Shortcuts with spoken phrases.
+- **iOS delete and privacy policy** — Swipe left on a History item to delete it
+  from this device. Settings → About links to the new privacy policy at
+  pasta-app.com/privacy, and the app now ships a privacy manifest declaring no
+  tracking and no collected data.
 - **Opt-in product analytics** — A new "Share anonymous usage analytics" toggle
   under Settings → General → Diagnostics, **off by default** and applied
   immediately (no restart). When on, Pasta posts a single JSON body to PostHog's

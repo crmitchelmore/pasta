@@ -327,6 +327,22 @@ final class AppState: ObservableObject {
         return loaded
     }
 
+    /// Removes entries from this device's history, like delete on Mac; iCloud copies are left alone.
+    func deleteEntries(ids: [UUID]) async {
+        guard let database, !ids.isEmpty else { return }
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                _ = try database.delete(ids: ids)
+            }.value
+            entriesGeneration += 1
+            let removed = Set(ids)
+            entries.removeAll { removed.contains($0.id) }
+        } catch {
+            logger.error("Delete failed: \(error.localizedDescription)")
+            errorMessage = "Couldn't delete: \(error.localizedDescription)"
+        }
+    }
+
     func searchEntries(query: String, contentType: ContentType? = nil, mixedOnly: Bool = false) async -> [ClipboardEntry] {
         guard let database else { return [] }
         // Capture the thread-safe database on MainActor, then do the read off
