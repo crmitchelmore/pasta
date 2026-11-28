@@ -117,6 +117,30 @@ for provenance and the update procedure.
 - Privacy is opt-in only: clipboard content leaves the device only through explicitly enabled iCloud sync, approved Tailnet Sync pairings, or validated semantic search (embeddings never include secrets, Tailnet-received or iCloud-excluded entries unless the endpoint is loopback; see `Docs/semantic-search.md`). Tailnet forwarding, onward iCloud publication and clipboard replacement are separate per-peer controls, off by default. File payloads remain tailnet-only.
 - `AGENTS.md` is the single source of agent instructions. `CLAUDE.md` imports it with `@AGENTS.md`, and `.github/copilot-instructions.md` holds code patterns and signing notes that defer to this file for build, test, release and merge rules; edit here rather than copying sections.
 
+## PostHog maintenance
+
+VS Code Copilot and Claude Code have a project-scoped HTTP server named
+`posthog`. Connect with OAuth and select the Pasta project. PostHog routes
+the account to its US or EU region automatically. For a client that requires
+a personal API key, supply a least-privilege read-only key as a Bearer token
+from its secret store. Keep credentials out of repository files and logs.
+See [PostHog MCP setup](https://posthog.com/docs/model-context-protocol).
+
+After a release, use read-only, non-AI MCP tools for these checks:
+
+- Review the top error groups and newly seen exceptions since the previous
+  release. Check affected versions and counts. Search existing issues before
+  opening a fix issue with a sanitized summary and a link to the error group.
+- Review stale and fully rolled-out feature flags. Check code references and
+  active client versions before proposing removal in an issue.
+- Compare existing key event counts and saved insight trends with an equal
+  pre-release window. Record the time windows, release version, and any
+  collection gaps before attributing a change to the release.
+
+Some MCP tools invoke LLMs and may incur PostHog AI spend. Skip any tool
+whose billing is unclear. Use existing telemetry and leave AI processing,
+billing settings, event collection, and live flags unchanged.
+
 ## Apple documentation (Sosumi)
 
 Apple Developer documentation needs JavaScript, so agents can't read
