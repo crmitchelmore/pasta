@@ -53,9 +53,9 @@ final class RemoteImageRenderingTests: XCTestCase {
         XCTAssertTrue(remoteRow.prefersImageThumbnail)
         let remoteSource = try XCTUnwrap(remoteRow.imageSource)
         XCTAssertEqual(remoteSource, .data(remoteBytes))
-        let remoteRep = try XCTUnwrap(ImageDownsampler.cachedLoad(source: remoteSource, maxPixelSize: 20)?.representations.first)
-        XCTAssertEqual(remoteRep.pixelsWide, 20)
-        XCTAssertEqual(remoteRep.pixelsHigh, 10)
+        // The downsampler sets the logical size from the decoded CGImage dimensions.
+        let remoteImage = try XCTUnwrap(ImageDownsampler.cachedLoad(source: remoteSource, maxPixelSize: 20))
+        XCTAssertEqual(remoteImage.size, NSSize(width: 20, height: 10))
 
         // Replacing a synced record's image invalidates both the row and the decoded image.
         let screenshot = ClipboardEntry(content: "image", contentType: .screenshot, rawData: try png(width: 80, height: 40))
@@ -75,8 +75,7 @@ final class RemoteImageRenderingTests: XCTestCase {
         XCTAssertFalse(firstImage === secondImage)
         XCTAssertTrue(secondImage === ImageDownsampler.cachedLoad(source: secondSource, maxPixelSize: 24))
         XCTAssertEqual(cache.rowBuildCountForTesting, 2)
-        XCTAssertEqual(secondImage.representations.first?.pixelsWide, 12)
-        XCTAssertEqual(secondImage.representations.first?.pixelsHigh, 24)
+        XCTAssertEqual(secondImage.size, NSSize(width: 12, height: 24))
     }
 
     private func png(width: Int, height: Int) throws -> Data {
