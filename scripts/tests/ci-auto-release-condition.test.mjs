@@ -5,8 +5,8 @@
 // the path-filtered Playwright job; dropping always() silently stopped every
 // release tag on 2026-09-05 while the whole run looked green.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,14 +64,53 @@ function stepScript(name) {
   return body.join('\n');
 }
 
-function runStep(name, env) {
+function runStep(name, env, cwd) {
   const dir = mkdtempSync(join(tmpdir(), 'ci-gate-'));
-  const files = { GITHUB_OUTPUT: join(dir, 'out'), GITHUB_STEP_SUMMARY: join(dir, 'summary') };
-  const result = spawnSync('bash', ['-c', stepScript(name)], { env: { PATH: process.env.PATH, ...files, ...env }, encoding: 'utf8' });
+  const files = { RUNNER_TEMP: dir, GITHUB_OUTPUT: join(dir, 'out'), GITHUB_STEP_SUMMARY: join(dir, 'summary') };
+  const result = spawnSync('bash', ['-c', stepScript(name)], { cwd, env: { PATH: process.env.PATH, ...files, ...env }, encoding: 'utf8' });
   const output = existsSync(files.GITHUB_OUTPUT) ? readFileSync(files.GITHUB_OUTPUT, 'utf8') : '';
   rmSync(dir, { recursive: true, force: true });
   return { status: result.status, output };
 }
+
+test('native routing checks the complete PR diff and rejects unusable evidence', (t) => {
+  const repo = mkdtempSync(join(tmpdir(), 'native-route-'));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
+  git('init', '-q');
+  function commit() {
+    git('add', '-u');
+    git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-qm', 'fixture', '--allow-empty');
+    return git('rev-parse', 'HEAD');
+  }
+  const base = commit();
+  const add = (path) => {
+    writeFileSync(join(repo, path), path);
+    git('add', '--', path);
+  };
+  add('AGENTS.md');
+  add('.mcp.json');
+  const docs = commit();
+  renameSync(join(repo, 'AGENTS.md'), join(repo, 'Package.swift'));
+  git('add', '--', 'Package.swift');
+  const mixed = commit();
+  git('revert', '--no-commit', mixed);
+  const restored = commit();
+  const detect = (BASE, HEAD, FILE_COUNT, EVENT = 'pull_request') =>
+    runStep('Identify documentation-only pull requests', { BASE, HEAD, FILE_COUNT, EVENT }, repo);
+  assert.deepEqual(detect(base, docs, '2'), { status: 0, output: 'only=true\n' });
+  for (const [from, to, count] of [[base, mixed, '2'], [docs, mixed, '1'], [mixed, restored, '1']]) {
+    assert.deepEqual(detect(from, to, count), { status: 0, output: 'only=false\n' });
+  }
+  for (const event of ['push', 'workflow_dispatch']) {
+    assert.deepEqual(detect('', '', '', event), { status: 0, output: 'only=false\n' });
+  }
+  for (const [head, count] of [[docs, ''], [docs, 'invalid'], [docs, '0'], [docs, '3'], [docs, '3001'], ['missing', '2']]) {
+    const result = detect(base, head, count);
+    assert.notEqual(result.status, 0);
+    assert.equal(result.output, '');
+  }
+});
 
 test('heavy native suites always run outside pull requests and when routed on a pull request', () => {
   const full = (env) => runStep('Decide whether the heavy native suites run', env).output.trim();
