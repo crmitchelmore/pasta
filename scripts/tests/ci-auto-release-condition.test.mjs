@@ -88,10 +88,15 @@ test('heavy native suites always run outside pull requests and when routed on a 
 });
 
 test('ci-gate defers the iOS suite only on a pull request routed as fast', () => {
-  const green = { TEST: 'success', IOS: 'success', APPCAST: 'success', LANDING_CHANGES: 'success',
+  const green = { DOCS: 'false', TEST: 'success', IOS: 'success', APPCAST: 'success', LANDING_CHANGES: 'success',
     LANDING_TOUCHED: 'false', FULL: 'true', LANDING_E2E: 'skipped', EVENT: 'push' };
   const gate = (change) => runStep('Evaluate every gate', { ...green, ...change }).status;
   assert.equal(gate({}), 0);
+  const docs = { EVENT: 'pull_request', DOCS: 'true', FULL: 'false', TEST: 'skipped', IOS: 'skipped' };
+  assert.equal(gate(docs), 0);
+  for (const invalid of [{ DOCS: '' }, { FULL: 'true' }, { LANDING_CHANGES: 'failure' }, { EVENT: 'push' }]) {
+    assert.equal(gate({ ...docs, ...invalid }), 1);
+  }
   assert.equal(gate({ EVENT: 'pull_request', FULL: 'false', IOS: 'skipped' }), 0);
   for (const change of [
     { IOS: 'skipped' },
@@ -119,6 +124,10 @@ test('required PR checks are exactly the ci.yml jobs that always report on PRs',
     const job = ci.split(/\n(?= {2}[a-z][\w-]*:\n)/).find((block) => block.includes(`\n    name: ${context}\n`));
     assert.ok(job, `${context} must be a ci.yml job name`);
     const condition = job.match(/\n {4}if: (.+)/)?.[1];
+    if (context === 'Build & Test') {
+      assert.equal(condition, "needs.landing-changes.outputs.docs != 'true' || needs.landing-changes.outputs.full == 'true'");
+      continue;
+    }
     // A job skipped by its `if:` reports success, so a routed job here would be a false assurance.
     assert.ok(!condition || /always\(\)/.test(condition), `${context} must not be skipped on PRs`);
   }
