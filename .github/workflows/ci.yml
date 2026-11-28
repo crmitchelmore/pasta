@@ -118,11 +118,42 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
+      docs: ${{ steps.docs.outputs.only }}
       landing: ${{ steps.filter.outputs.landing }}
       full: ${{ steps.depth.outputs.full }}
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+        with:
+          fetch-depth: 0
+
+      - name: Identify documentation-only pull requests
+        id: docs
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          FILE_COUNT: ${{ github.event.pull_request.changed_files }}
+        run: |
+          set -eu
+          docs=false
+          if [[ "$EVENT" == pull_request ]]; then
+            # The paths-filter PR files API can only enumerate 3000 files.
+            [[ "$FILE_COUNT" =~ ^[1-9][0-9]*$ && "$FILE_COUNT" -le 3000 ]]
+            git diff --no-renames --name-only -z "$BASE...$HEAD" > "$RUNNER_TEMP/native-paths"
+            count=0
+            docs=true
+            while IFS= read -r -d '' path; do
+              count=$((count + 1))
+              case "$path" in
+                README.md|AGENTS.md|CLAUDE.md|SECURITY.md|TESTING.md|Docs/*.md|.mcp.json|.vscode/mcp.json) ;;
+                *) docs=false ;;
+              esac
+            done < "$RUNNER_TEMP/native-paths"
+            [[ "$count" -ge "$FILE_COUNT" ]]
+          fi
+          echo "only=$docs" >> "$GITHUB_OUTPUT"
 
       - name: Filter paths
         id: filter
@@ -155,6 +186,7 @@ jobs:
           FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
         run: |
           set -u
+          [[ "$HEAVY" == true || "$HEAVY" == false ]] || exit 1
           if [ "$EVENT" != "pull_request" ] || [ "$HEAVY" = "true" ] || [ "$FULL_LABEL" = "true" ]; then
             full=true
           else
@@ -254,6 +286,7 @@ jobs:
   test:
     name: Build & Test
     needs: landing-changes
+    if: needs.landing-changes.outputs.docs != 'true' || needs.landing-changes.outputs.full == 'true'
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && (vars.PASTA_NATIVE_RUNNER || 'pasta-local') || 'macos-15' }}
     env:
       FULL: ${{ needs.landing-changes.outputs.full }}
@@ -574,6 +607,7 @@ jobs:
     steps:
       - name: Evaluate every gate
         env:
+          DOCS: ${{ needs.landing-changes.outputs.docs }}
           TEST: ${{ needs.test.result }}
           IOS: ${{ needs.ios-e2e.result }}
           APPCAST: ${{ needs.appcast-contract.result }}
@@ -587,7 +621,17 @@ jobs:
           ok=true
           row() { printf '| %s | %s | %s |\n' "$1" "$2" "$3" >> "$GITHUB_STEP_SUMMARY"; }
           { echo "## CI gate"; echo; echo "| Gate | Result | Verdict |"; echo "|---|---|---|"; } >> "$GITHUB_STEP_SUMMARY"
-          for pair in "Build & Test:$TEST" "Appcast & Cloudflare config contract:$APPCAST" "Detect landing page changes:$LANDING_CHANGES"; do
+          for flag in "$DOCS" "$FULL" "$LANDING_TOUCHED"; do
+            [[ "$flag" == true || "$flag" == false ]] || ok=false
+          done
+          if [[ "$TEST" == skipped && "$EVENT" == pull_request && "$DOCS" == true && "$FULL" == false ]]; then
+            row "Build & Test" "skipped (documentation only)" "✅"
+          elif [[ "$TEST" != success ]]; then
+            row "Build & Test" "$TEST" "❌"; ok=false
+          else
+            row "Build & Test" "$TEST" "✅"
+          fi
+          for pair in "Appcast & Cloudflare config contract:$APPCAST" "Detect landing page changes:$LANDING_CHANGES"; do
             name="${pair%%:*}"; result="${pair##*:}"
             if [ "$result" = "success" ]; then row "$name" "$result" "✅"; else row "$name" "$result" "❌"; ok=false; fi
           done

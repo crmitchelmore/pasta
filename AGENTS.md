@@ -151,6 +151,8 @@ The rule is simple: **nothing reaches users unless every e2e suite on every surf
 
    On a PR these run only when it touches `PastaIOS/**`, `Package.swift`/`Package.resolved`, `Resources/**` or the native CI scripts, or when it carries the `ci:full` label. Add that label for workflow, signing or release-tooling changes. Every push to `main`, and every manual dispatch, always runs everything; that run is the full verification.
 
+   Build & Test may also skip on a PR when the complete diff contains only explicitly allowlisted documentation or MCP client configuration and the full lane is inactive. CI gate validates that skip.
+
    The always-running `ci-gate` job (`CI gate`) is green only when every suite that ran succeeded. It accepts a skipped Playwright run only when path detection proved the landing page untouched, and a skipped iOS run only on a PR routed to the fast lane.
 
    GitHub enforces this through a repository **ruleset** on `main`. It requires a pull request plus the checks `CI gate`, `Build & Test` and `Appcast & Cloudflare config contract`, with an admin bypass so release.yml's appcast commit-back can land. The routed jobs are not required directly: a job skipped by its `if:` reports success, so `CI gate` enforces them instead.
